@@ -82,14 +82,20 @@ public actor ItemEnumerator {
             // real button still reports the item.
             for (pid, groupsOfApp) in standIns {
                 guard let extras = extrasByPID[pid] else { continue }
-                let titles = Self.standInTitles(
+                let bundle = groupsOfApp[0].group.host.id
+                // A section helper hosts only `Pelmet.`-titled own items. Its
+                // lone unread group as `Item-0` keyed the helper itself as an
+                // app (`bundle:…items.alwaysHidden`): no section, so Visible,
+                // a "Dimble Items" tile out of place and an Apply (1) that
+                // came back after every Apply (Gab, 2026-10-29).
+                let helperGuess = extras.naming == .unread && PelmetBundle.helperIDs.contains(bundle)
+                let titles = helperGuess ? groupsOfApp.map { _ in nil } : Self.standInTitles(
                     forGroups: groupsOfApp.map(\.group.frame), naming: extras.naming, items: extras.items
                 )
                 for (entry, title) in zip(groupsOfApp, titles) {
                     guard let title else { continue }
                     described[entry.slot] = entry.group.item(titled: title)
                 }
-                let bundle = groupsOfApp[0].group.host.id
                 let unnamed = titles.filter { $0 == nil }.count
                 let unread = extras.naming == .unread
                 logOnce(unnamed == 0

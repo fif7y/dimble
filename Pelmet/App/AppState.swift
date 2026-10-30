@@ -2844,14 +2844,14 @@ final class AppState {
     /// One own item through the Apply door (`ApplyPass.Scope.
     /// ownItem`). Never overlaps a running pass; a whole-bar pass covers it.
     private func placeOwnItemNow(_ id: ItemID) async {
-        guard !applying else { return }
+        guard !applying else { return placeOwnItemAfterPassInFlight(id) }
         // Boot: measure only once the bar has finished attaching
         // (`barAttachesAt`); before the adoption, a full lead from now.
         let due = barAttachesAt ?? ContinuousClock.now + AppTiming.bootOwnItemLead
         if ContinuousClock.now < due {
             PelmetLog.log("apply: own \(id.rawValue) waits for the boot lead")
             try? await Task.sleep(until: due, clock: .continuous)
-            guard !applying else { return }
+            guard !applying else { return placeOwnItemAfterPassInFlight(id) }
         }
         // Checked before the layout test: a concealed section ghosts its
         // extra at once, which is not the flap below (Siri toggle, 2026-09-21).
@@ -2906,6 +2906,15 @@ final class AppState {
             ownItemsRetried.remove(id)
             ownItemMisses.removeValue(forKey: id)
         }
+    }
+
+    /// Another pass holds the door (two own items' retries due together, a
+    /// user's Apply). Dropped, the Live Activities item kept the agent's
+    /// slot behind Media's retry and Apply (1) stayed (Gab, 2026-10-29):
+    /// it goes again once that pass is done.
+    private func placeOwnItemAfterPassInFlight(_ id: ItemID) {
+        PelmetLog.log("apply: own \(id.rawValue) waits for the pass in flight")
+        placeOwnItemSoon(id, after: AppTiming.ownItemRetryDelay)
     }
 
     /// Pelmet's chevron item in a snapshot — the visible/hidden boundary marker

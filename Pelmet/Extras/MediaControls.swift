@@ -445,15 +445,21 @@ final class ExtrasManager {
             case .liveActivity:
                 // An indicator like Camera & mic: in the bar only while an
                 // activity runs, its section deciding where, not whether.
-                // A start comes from the phone or another app, not from a
-                // hand at the bar: placed at the next reveal settle, never
-                // dragged now.
+                // On screen (Visible, or its section revealed) it is placed
+                // now, like the Timer: left to the next reveal, it sat at the
+                // agent's slot with Apply (1) up for 20 minutes (Gab,
+                // 2026-10-29). Concealed, the next reveal settle places it.
                 let active = !(liveActivityStatus?.active.isEmpty ?? true)
+                let sectionVisible = visible
                 visible = active
                 updateLiveActivityGlyph(item, spec: spec)
                 let itemID = Self.itemID(for: spec)
                 if active, !lastLiveActivityActive {
-                    appState?.placeOwnItemAtNextReveal(itemID)
+                    if sectionVisible {
+                        appState?.placeOwnItemSoon(itemID)
+                    } else {
+                        appState?.placeOwnItemAtNextReveal(itemID)
+                    }
                 } else if !active, lastLiveActivityActive {
                     appState?.cancelOwnItemPlacement(itemID)
                 }
