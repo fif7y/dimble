@@ -1650,6 +1650,14 @@ final class TransitionCoordinator {
             PelmetLog.log("held: \(what) waits for the conceal's fade (\(Int(ends.timeIntervalSinceNow * 1000))ms) — \(why)")
             return
         }
+        // Under Mission Control the bar's band is its Spaces bar: a picture
+        // taken now films "Desktop 1, Desktop 2" and stays over the bar once
+        // it closes, until a click (#108, a Space switched in Mission
+        // Control). Look again once it is gone.
+        if LiveMirror.missionControlIsUp() {
+            waitOutMissionControl(what, why)
+            return
+        }
         PelmetLog.log("held: \(what) — \(why)")
         // One at a time: a burst of item moves is one hold, then one more
         // with what the burst left.
@@ -1665,6 +1673,18 @@ final class TransitionCoordinator {
     }
     private var refreshInFlight: Task<Void, Never>?
     private var refreshAgain = false
+    private var missionControlWait: Task<Void, Never>?
+
+    private func waitOutMissionControl(_ what: String, _ why: String) {
+        guard missionControlWait == nil else { return }
+        PelmetLog.log("held: \(what) waits for Mission Control — \(why)")
+        missionControlWait = Task { @MainActor [weak self] in
+            while LiveMirror.missionControlIsUp() { try? await Task.sleep(for: .milliseconds(100)) }
+            guard let self else { return }
+            missionControlWait = nil
+            refreshHeld("Mission Control closed")
+        }
+    }
 
     /// Anchored, a press clicks an item out under the press display's
     /// held picture: the picture lifts for the click (the item highlights,

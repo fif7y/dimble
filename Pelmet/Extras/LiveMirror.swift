@@ -2672,7 +2672,7 @@ final class LiveMirror {
     /// windows are gone), and a cover that had stepped aside let every hidden
     /// icon show for that long (measured, build 23).
     private var missionControlUp = false
-    private static func missionControlIsUp() -> Bool {
+    static func missionControlIsUp() -> Bool {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) else { return false }
         let ownerKey = Unmanaged.passUnretained(kCGWindowOwnerName).toOpaque(), nameKey = Unmanaged.passUnretained(kCGWindowName).toOpaque()
         for i in 0..<CFArrayGetCount(list) {
