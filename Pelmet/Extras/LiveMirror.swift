@@ -1439,6 +1439,9 @@ final class LiveMirror {
                 PelmetLog.log("livemirror: display \(side.id) picture kept from \(Int(Date().timeIntervalSince(keep.at)))s ago — no capture")
                 continue
             }
+            // The start read the bar a moment ago: a converge since (a show
+            // rule's icon coming out at an unlock) may still be reflowing.
+            await appState.waitUntilQuiesced(interval: 0.2, deadline: 2, poll: .milliseconds(30))
             let rect = CGRect(x: left - shift, y: 0, width: right - left, height: 40)
             // Under the anchor the hidden icons are out on the bar: the bare
             // bar (the system's bar window left out) is the concealed bar.
@@ -2626,6 +2629,19 @@ final class LiveMirror {
         guard isActive, !handingOver, !entering, !exiting else { return }
         PelmetLog.log("livemirror: cover retake — \(reason)")
         await retake(reason)
+    }
+
+    /// A show rule put an icon on the bar or took it back (Wi-Fi dropped,
+    /// Battery low). The covers hold the bar as it was, so the icon would
+    /// stay under them until the activity ends. The converge has the new
+    /// bar by now: the pictures are taken again, and a kept one is stale.
+    func showRuleChangedBar() async {
+        keptPictures = [:]
+        let by = Date().addingTimeInterval(5)
+        while entering, Date() < by { try? await Task.sleep(for: .milliseconds(50)) }
+        guard isActive, !handingOver, !entering, !exiting else { return }
+        PelmetLog.log("livemirror: cover retake — a show rule changed the bar")
+        await retake("a show rule changed the bar")
     }
 
     private func retake(_ reason: String) async {

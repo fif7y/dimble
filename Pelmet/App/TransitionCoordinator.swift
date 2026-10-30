@@ -216,6 +216,7 @@ final class TransitionCoordinator {
         Task {
             await engine.setRuleShown(items)
             if appState?.currentRevealedSections.isEmpty == true { scheduleRevealCoverPrecapture() }
+            await appState?.liveMirror.showRuleChangedBar()
         }
     }
 
