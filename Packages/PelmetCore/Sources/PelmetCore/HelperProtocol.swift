@@ -48,6 +48,20 @@ public enum HelperCommand: Codable, Sendable {
     /// The complete list; the helper diffs against what it hosts.
     case sync([HostedItem])
     case quit
+
+    public var isValid: Bool {
+        switch self {
+        case .quit: return true
+        case .sync(let items):
+            return items.count <= 256 && Set(items.map(\.title)).count == items.count
+                && items.allSatisfy {
+                    !$0.title.isEmpty && $0.title.utf8.count <= 256 && $0.text.utf8.count <= 1024
+                        && $0.alpha.isFinite && (0...1).contains($0.alpha)
+                        && ($0.length.map { $0.isFinite && (0...1024).contains($0) } ?? true)
+                        && ($0.imagePNG?.count ?? 0) <= 256 * 1024
+                }
+        }
+    }
 }
 
 /// Helper → main.
@@ -59,14 +73,30 @@ public enum HelperEvent: Codable, Sendable {
     case clicked(bundle: String, title: String, rightButton: Bool, x: Double, y: Double)
     /// The user ⌘-dragged the item off the bar; the helper already unhosted it.
     case draggedOff(bundle: String, title: String)
+
+    public var isValid: Bool {
+        func validName(_ value: String) -> Bool { !value.isEmpty && value.utf8.count <= 256 }
+        switch self {
+        case .ready(let bundle):
+            return validName(bundle)
+        case .hosted(let bundle, let title), .draggedOff(let bundle, let title):
+            return validName(bundle) && validName(title)
+        case .clicked(let bundle, let title, _, let x, let y):
+            return validName(bundle) && validName(title) && x.isFinite && y.isFinite
+        }
+    }
 }
 
 public enum HelperWire {
+    public static let maximumMessageBytes = 4 * 1024 * 1024
+
     public static func encode<T: Encodable>(_ value: T) -> Data? {
-        try? JSONEncoder().encode(value)
+        guard let data = try? JSONEncoder().encode(value), data.count <= maximumMessageBytes else { return nil }
+        return data
     }
 
     public static func decode<T: Decodable>(_ type: T.Type, from data: Data) -> T? {
-        try? JSONDecoder().decode(type, from: data)
+        guard data.count <= maximumMessageBytes else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
     }
 }

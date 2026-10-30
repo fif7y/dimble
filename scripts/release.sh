@@ -121,8 +121,10 @@ if [[ -n "$GENERATE_APPCAST" ]]; then
     ' "$RELEASES_DIR/appcast.xml"
     echo "==> Appcast written to $RELEASES_DIR/appcast.xml (prior-version URLs re-pointed)"
 else
-    echo "warning: generate_appcast not found in DerivedData — build the app once so SPM fetches Sparkle, or download the Sparkle release tools" >&2
+    echo "error: generate_appcast not found — cannot produce a verified update" >&2
+    exit 1
 fi
+xcrun swift scripts/verify-update.swift "$APP/Contents/Info.plist" "$RELEASES_DIR/appcast.xml" "$DMG"
 
 echo ""
 echo "Done. Artifacts:"

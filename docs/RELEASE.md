@@ -53,6 +53,12 @@ Everything below the one-time setup is: bump version → run script → publish.
    `CFBundleVersion`, so it must strictly increase) in `project.yml`.
 2. `scripts/release.sh` — archives, exports with Developer ID, notarizes +
    staples app and DMG, writes `build/releases/Dimble-<v>.dmg` + `appcast.xml`.
+   Before reporting success, it verifies the DMG's Ed25519 signature and
+   enclosure length against the public key in the exported app. Missing
+   appcast tooling or a failed update-signature check stops the release.
+   The existing nonfatal `spctl` assessment is unchanged: the stapled DMG is
+   not code-signed and may report "no usable signature" (exit 3).
+   Offline release tests: `python3 -m unittest discover -s scripts/tests`.
 3. Tag and publish: create GitHub release `v<version>` with the DMG and the
    `*.delta` files attached (release.sh points each delta at its build's
    release tag, never at gh-pages).

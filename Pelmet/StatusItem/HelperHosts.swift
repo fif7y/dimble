@@ -51,7 +51,7 @@ final class HelperHosts {
     init(appState: AppState) {
         self.appState = appState
         listener = MessagePortListener(name: PelmetBundle.mainLinkPort) { data in
-            guard let event = HelperWire.decode(HelperEvent.self, from: data) else { return }
+            guard let event = HelperWire.decode(HelperEvent.self, from: data), event.isValid else { return }
             Task { @MainActor in appState.helperHosts?.handle(event) }
         }
         if listener == nil {

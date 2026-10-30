@@ -36,7 +36,7 @@ final class ItemsHost: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         listener = MessagePortListener(name: bundleID) { data in
-            guard let command = HelperWire.decode(HelperCommand.self, from: data) else { return }
+            guard let command = HelperWire.decode(HelperCommand.self, from: data), command.isValid else { return }
             Task { @MainActor in host.handle(command) }
         }
         if listener == nil {

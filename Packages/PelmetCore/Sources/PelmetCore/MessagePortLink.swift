@@ -21,7 +21,7 @@ public final class MessagePortListener: @unchecked Sendable {
         guard let port = CFMessagePortCreateLocal(
             nil, name as CFString,
             { _, _, data, info in
-                guard let info, let data else { return nil }
+                guard let info, let data, CFDataGetLength(data) <= HelperWire.maximumMessageBytes else { return nil }
                 let listener = Unmanaged<MessagePortListener>.fromOpaque(info).takeUnretainedValue()
                 listener.handler(data as Data)
                 return nil
@@ -47,6 +47,7 @@ public enum MessagePortLink {
     /// caller's main thread, so it is short (was 1s; perf audit 2026-09-15).
     @discardableResult
     public static func send(_ data: Data, to name: String) -> Bool {
+        guard data.count <= HelperWire.maximumMessageBytes else { return false }
         guard let remote = CFMessagePortCreateRemote(nil, name as CFString) else { return false }
         defer { CFMessagePortInvalidate(remote) }
         return CFMessagePortSendRequest(remote, 0, data as CFData, 0.25, 0, nil, nil) == kCFMessagePortSuccess

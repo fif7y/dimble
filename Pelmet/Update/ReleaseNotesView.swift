@@ -7,6 +7,30 @@ import AppKit
 import SwiftUI
 import WebKit
 
+enum ReleaseNotesNavigation {
+    enum Decision: Equatable {
+        case allow
+        case open(URL)
+        case cancel
+    }
+
+    static func decide(url: URL?, type: WKNavigationType, mainFrame: Bool) -> Decision {
+        guard let url else { return .cancel }
+        if type == .linkActivated, url.scheme?.lowercased() == "https",
+           let host = url.host, !host.isEmpty, url.user == nil, url.password == nil {
+            return .open(url)
+        }
+        return type == .other && mainFrame && url.absoluteString == "about:blank" ? .allow : .cancel
+    }
+
+    static func document(_ html: String) -> String {
+        """
+        <!DOCTYPE html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"></head>
+        \(html)
+        """
+    }
+}
+
 struct ReleaseNotesView: View {
     let title: String
     let html: String
@@ -45,6 +69,7 @@ private struct NotesWebView: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         // The notes are static; only our own height probe runs.
         config.defaultWebpagePreferences.allowsContentJavaScript = false
+        config.websiteDataStore = .nonPersistent()
         let view = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: 120), configuration: config)
         // Transparent, so the snippet sits on the popover's own material.
         view.setValue(false, forKey: "drawsBackground")
@@ -52,7 +77,7 @@ private struct NotesWebView: NSViewRepresentable {
         // The snippet has no DOCTYPE (Sparkle embeds it in its own page). In
         // quirks mode the root stretches to the viewport, so short notes
         // measured 120 and kept a blank popover.
-        view.loadHTMLString("<!DOCTYPE html>" + html, baseURL: nil)
+        view.loadHTMLString(ReleaseNotesNavigation.document(html), baseURL: nil)
         return view
     }
 
@@ -66,10 +91,16 @@ private struct NotesWebView: NSViewRepresentable {
         func webView(
             _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction
         ) async -> WKNavigationActionPolicy {
-            guard navigationAction.navigationType == .linkActivated,
-                  let url = navigationAction.request.url else { return .allow }
-            NSWorkspace.shared.open(url)
-            return .cancel
+            switch ReleaseNotesNavigation.decide(
+                url: navigationAction.request.url, type: navigationAction.navigationType,
+                mainFrame: navigationAction.targetFrame?.isMainFrame == true
+            ) {
+            case .allow: return .allow
+            case .open(let url):
+                NSWorkspace.shared.open(url)
+                return .cancel
+            case .cancel: return .cancel
+            }
         }
 
         /// The body's own box, which (unlike the root's scroll height) can
