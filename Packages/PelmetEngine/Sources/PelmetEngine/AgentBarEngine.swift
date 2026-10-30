@@ -319,6 +319,10 @@ public actor AgentBarEngine: MenuBarEngine {
     /// pass's follow-up round.
     public func itemsRevealedOnTheirOwn() -> Set<ItemID> { revealedItems }
 
+    /// The items out on their own right now, their section concealed (a
+    /// show rule's, a press's): what the next snapshot stamps as `shownAlone`.
+    public func itemsShownAlone() -> Set<ItemID> { shownAlone }
+
     /// The items show rules want on the bar right now. Sections stay as
     /// they are, like an item-only reveal.
     public func setRuleShown(_ items: Set<ItemID>) async {

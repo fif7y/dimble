@@ -560,6 +560,15 @@ final class LiveMirror {
         /// While seeded mirrors wait for their pills: where the « will stand
         /// once the extras are back (the mirrors are laid out to it).
         var predictedRight: CGFloat?
+        /// The icons the concealed bar shows out on their own beside the «
+        /// (a show rule's Battery): where they ran when the picture was
+        /// taken, and that run cut from it into a layer of the cover, laid
+        /// out against the « like the mirrors. They keep beside it when it
+        /// moves (an extra coming or going), and the mirrors stand left of
+        /// them, where macOS puts the pills.
+        var aloneRun: ClosedRange<CGFloat>?
+        var alone: CALayer?
+        var aloneAttached = false
         /// When the picture was taken, and under which backdrop.
         var pictureAt = Date()
         var pictureGeneration = 0
@@ -1242,6 +1251,42 @@ final class LiveMirror {
         side.alwaysRun = always
     }
 
+    /// The concealed bar's icons out on their own on `side` (a show rule's
+    /// Battery, a press's item) sit beside the «, where the mirrors are
+    /// laid out: their run to `right`, from a fresh walk, or nil when there
+    /// are none. Under the anchor the bare picture holds no icon at all.
+    private func measureAlone(_ side: Side, left: CGFloat, right: CGFloat) async {
+        side.aloneRun = nil
+        guard let appState, !underAnchor, !side.showsAll else { return }
+        let alone = await appState.engine.itemsShownAlone()
+        guard !alone.isEmpty else { return }
+        _ = await appState.engine.freshSnapshot()
+        let copies = await appState.engine.barCopies()
+        let bounds = side.bounds
+        let edge = alone.compactMap { id in
+            copies[id]?.first { bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) }?.minX
+        }.filter { $0 > left + 40 && $0 < right }.min()
+        guard let edge else { return }
+        side.aloneRun = edge...right
+        PelmetLog.log("livemirror: display \(side.id) icons out on their own \(Int(edge))..\(Int(right)) — they keep beside the «, the mirrors left of them")
+    }
+
+    /// `run` of `picture`, cut column for column into a layer.
+    private static func cut(_ picture: ConcealGhostOverlay.BarSnapshot, run: ClosedRange<CGFloat>, contentsScale: CGFloat) -> CALayer? {
+        let frame = picture.windowFrame
+        let scale = CGFloat(picture.image.width) / frame.width
+        let x0 = Int(((run.lowerBound - frame.minX) * scale).rounded())
+        let x1 = Int(((run.upperBound - frame.minX) * scale).rounded())
+        guard x0 > 0, x1 <= picture.image.width, x1 - x0 > 8,
+              let image = picture.image.cropping(to: CGRect(x: x0, y: 0, width: x1 - x0, height: picture.image.height))
+        else { return nil }
+        let layer = CALayer()
+        layer.contents = image
+        layer.contentsScale = contentsScale
+        layer.bounds = CGRect(x: 0, y: 0, width: CGFloat(x1 - x0) / scale, height: frame.height)
+        return layer
+    }
+
     /// Where a cover may start: far enough left for the hidden icons the
     /// last conceal measured (the estimate by count when none was) and the
     /// pill beside them, right of the notch and right of the frontmost
@@ -1430,8 +1475,10 @@ final class LiveMirror {
             guard let span = coverSpan(left: left, right: right, shift: shift) else {
                 await abort("no room for a cover on display \(side.id) (\(Int(left))..\(Int(right)))", holdOff: true); return
             }
+            // A kept picture holds no icon out on their own (they are cut
+            // out of it): one is taken again while some are out.
             if !retake, let keep = keptPictures[side.id], keep.generation == backdropGeneration,
-               Date().timeIntervalSince(keep.at) < Self.pictureMaxAge,
+               Date().timeIntervalSince(keep.at) < Self.pictureMaxAge, await appState.engine.itemsShownAlone().isEmpty,
                !ConcealGhostOverlay.cropped([keep.picture], toPrimaryX: span).isEmpty {
                 side.picture = keep.picture
                 side.pictureAt = keep.at
@@ -1442,10 +1489,17 @@ final class LiveMirror {
             // The start read the bar a moment ago: a converge since (a show
             // rule's icon coming out at an unlock) may still be reflowing.
             await appState.waitUntilQuiesced(interval: 0.2, deadline: 2, poll: .milliseconds(30))
+            await measureAlone(side, left: left, right: right)
             let rect = CGRect(x: left - shift, y: 0, width: right - left, height: 40)
             // Under the anchor the hidden icons are out on the bar: the bare
             // bar (the system's bar window left out) is the concealed bar.
-            side.picture = await ConcealGhostOverlay.snapshotSet(of: rect, displays: [side.id], bare: underAnchor, liveMirror: true).first
+            // Dimble's own windows are left out: a retake keeps the old cover
+            // and its mirrors up over the bar, and filmed, the old picture
+            // (a Battery a rule just took back) and the old mirror (a slice of
+            // pill once the « moved) came back in the new one.
+            side.picture = await ConcealGhostOverlay.snapshotSet(
+                of: rect, excludingOwnWindows: true, displays: [side.id], bare: underAnchor, liveMirror: true
+            ).first
             guard let picture = side.picture else { await abort("no picture of display \(side.id)", holdOff: true); return }
             side.pictureAt = Date()
             side.pictureGeneration = backdropGeneration
@@ -1472,8 +1526,13 @@ final class LiveMirror {
             // taken): from where the cover ends it is bar background only, so
             // a cover that later reaches further right (a return, the
             // indicator gone) never shows a boot-state item there.
+            // The icons out on their own beside the « are cut out of it the
+            // same way, into the layer laid out against the « (`layoutMirrors`).
             if fresh.contains(side.id), let picture = side.picture {
-                side.picture = ConcealGhostOverlay.smeared(picture, from: right)
+                side.alone = side.aloneRun.flatMap { Self.cut(picture, run: $0, contentsScale: side.scale) }
+                side.aloneAttached = false
+                let smearFrom = side.alone == nil ? right : min(right, side.aloneRun?.lowerBound ?? right)
+                side.picture = ConcealGhostOverlay.smeared(picture, from: smearFrom)
             }
             guard buildCover(side, left: coverLeft(for: side, right: right), right: right, why: "enter") else {
                 await abort("cover won't crop on display \(side.id)", holdOff: true); return
@@ -1660,7 +1719,17 @@ final class LiveMirror {
         }
         if !keepMirrors {
             for mirror in side.mirrors { mirror.attached = false }
+            side.aloneAttached = false
             layoutMirrors(side)
+        } else if let alone = side.alone, let run = side.aloneRun {
+            // The icons out on their own leave with the mirrors: this cover
+            // holds a copy where the picture had them, where the « is back
+            // once the extras are gone.
+            let copy = CALayer()
+            copy.contents = alone.contents
+            copy.contentsScale = alone.contentsScale
+            copy.frame = CGRect(x: run.lowerBound - overlay.windowFrame.minX, y: 0, width: alone.bounds.width, height: overlay.windowFrame.height)
+            overlay.addLayer(copy)
         }
         if why != "enter" { PelmetLog.log("livemirror: cover #\(overlay.id) on display \(side.id) \(Int(side.coverMinX))..\(Int(side.coverMaxX)) (\(why))") }
         if coverLifted { overlay.setShown(false) } else { logOrder(overlay, why: "cover \(why)") }
@@ -2148,10 +2217,11 @@ final class LiveMirror {
         return value.split(separator: " ").last.map(String.init) ?? value
     }
 
-    /// The mirrors in the cover, right to left from the « in the order
-    /// macOS shows the pills (the rightmost nearest the «), with macOS's own
-    /// gap between pills (measured from their AX frames). When they do not
-    /// all fit, the most recently started ones stay.
+    /// The mirrors in the cover, right to left from the « (from the icons
+    /// out on their own beside it) in the order macOS shows the pills (the
+    /// rightmost nearest the «), with macOS's own gap between pills
+    /// (measured from their AX frames). When they do not all fit, the most
+    /// recently started ones stay.
     private func layoutMirrors(_ side: Side) {
         guard let overlay = side.cover?.members.first else { return }
         let window = overlay.windowFrame
@@ -2162,7 +2232,23 @@ final class LiveMirror {
             if g > 0, g < 60 { gaps.append(g) }
         }
         let gap = gaps.isEmpty ? Self.pillGap : gaps.sorted()[gaps.count / 2]
-        let right = min(side.coverMaxX, side.predictedRight ?? .greatestFiniteMagnitude) - Self.gap
+        var right = min(side.coverMaxX, side.predictedRight ?? .greatestFiniteMagnitude)
+        if let alone = side.alone {
+            // Beside the « only: a cover ended at the Hidden icons (a hover
+            // under live mode) no longer reaches it.
+            let beside = hiddenOut == nil
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            if !side.aloneAttached {
+                alone.removeFromSuperlayer()
+                overlay.addLayer(alone)
+                side.aloneAttached = true
+            }
+            alone.isHidden = !beside
+            alone.frame = CGRect(x: right - alone.bounds.width - window.minX, y: 0, width: alone.bounds.width, height: window.height)
+            CATransaction.commit()
+            if beside { right -= alone.bounds.width }
+        }
+        right -= Self.gap
         let left = side.coverMinX + 4
         func need(_ list: [PillMirror]) -> CGFloat { list.reduce(0) { $0 + $1.visual!.width } + gap * CGFloat(max(0, list.count - 1)) }
         var fit = placed
@@ -2748,11 +2834,19 @@ final class LiveMirror {
            abs(chevron.minX - last.minX) > 0.5 || abs(chevron.minY - last.minY) > 0.5 {
             PelmetLog.log("livemirror: re-measure — chevron \(Int(last.minX)) → \(Int(chevron.minX))")
             lastChevron = chevron
+            var short = false
             for side in sides {
                 if side.showsAll || hiddenOut != nil { await measureRunEdge(side) }
-                buildCover(side, left: side.coverMinX, right: coverEnd(chevron, on: side) - 1, why: "chevron moved")
+                // A picture that ends short of the « (an extra right of it,
+                // Dimble's ▶, went away since it was taken) can't reach it:
+                // the hidden icons showed in between until the activity
+                // ended. The pictures are taken again.
+                if !buildCover(side, left: side.coverMinX, right: coverEnd(chevron, on: side) - 1, why: "chevron moved"), !side.showsAll {
+                    short = true
+                }
                 if side.showsAll { noteRun(side) }
             }
+            if short { Task { @MainActor [weak self] in await self?.backdropMayHaveChanged("the « moved past the picture") } }
         }
         for side in sides {
             // The pills are looked for every 2 s (an activity starting or ending),
