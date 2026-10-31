@@ -1650,6 +1650,7 @@ final class AppState {
 
     /// Revealed OR heading there — what the chevron should show.
     private var isRevealedOrRevealing: Bool {
+        if liveMirror.hiddenIsOut { return true }
         // Icons out on their own leave the chevron collapsed: no section is.
         switch rehide.state {
         case .revealed(let sections, _): return !sections.isEmpty
@@ -1658,6 +1659,9 @@ final class AppState {
         default: return false
         }
     }
+
+    /// Live mode put Hidden out or back under its covers, with no reveal.
+    func chevronFaceChanged() { statusItem?.updateSymbol(revealed: isRevealedOrRevealing) }
 
     /// Bounded poll until the engine reports swap-quiet for `interval` — the
     /// agent animates each swap, so quiet means the bar has stopped moving.

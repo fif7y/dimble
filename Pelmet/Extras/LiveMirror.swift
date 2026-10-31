@@ -602,7 +602,12 @@ final class LiveMirror {
     /// the Always Hidden icons, the assertion stays down, nothing on the bar
     /// moves. `outSince`: when the pointer left the bar.
     private struct HiddenOut { let reason: RevealReason; var outSince: Date? }
-    private var hiddenOut: HiddenOut?
+    private var hiddenOut: HiddenOut? {
+        // No reveal runs, so the « takes its revealed face from here (#107).
+        didSet { if (oldValue == nil) != (hiddenOut == nil) { appState?.chevronFaceChanged() } }
+    }
+    /// The covers end at the Always Hidden icons: Hidden is out, live.
+    var hiddenIsOut: Bool { hiddenOut != nil }
     private var liftedReturn: Task<Void, Never>?
     private var lastBlockedWhy = ""
     private var lastSummaryAt = Date()
