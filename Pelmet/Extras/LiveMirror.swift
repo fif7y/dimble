@@ -667,6 +667,11 @@ final class LiveMirror {
     private var clockLoop: Task<Void, Never>?
     /// A retake is under way (the pictures again, the mirrors staying).
     private var retaking = false
+    /// Bumped as live mode starts changing the bar under its cover (enter,
+    /// retake, hand-over, exit, abort): a picture pass filmed through the
+    /// cover drops what it took across one.
+    private(set) var changes = 0
+    var isChanging: Bool { entering || exiting || handingOver || retaking }
 
     /// What a hand-over to a reveal takes along, so the return can draw the
     /// mirrors at once: each pill's size, texts and clock, where the « stood,
@@ -901,6 +906,7 @@ final class LiveMirror {
     private func beginHandOver(_ reason: RevealReason?) {
         let named = reason.map { "reveal(\($0))" } ?? "a reveal"
         handingOver = true
+        changes &+= 1
         released = false
         liftedReturn?.cancel()
         if coverLifted {
@@ -1214,6 +1220,9 @@ final class LiveMirror {
         if appState.panelShowsReveal { return "the panel is up" }
         if appState.liftHoldReason != nil { return "a lift has the bar" }
         if appState.transitions.coversInFlight { return "a cover is still up" }
+        // Its covers would go up over the pass's reveal, and the pass would
+        // film nothing and conceal under them.
+        if appState.transitions.passInFlight { return "a picture pass has the bar" }
         if appState.chevronWindowFrame == nil { return "no chevron window" }
         if !(await appState.engine.holdsAssertion) { return "no assertion held — the pill shows on its own" }
         return nil
@@ -1557,6 +1566,7 @@ final class LiveMirror {
     /// took the bar meanwhile) the next quiet bar tries again.
     private func abort(_ why: String, dropAssertion: Bool = false, holdOff: Bool = false) async {
         PelmetLog.log("livemirror: enter aborted — \(why)")
+        changes &+= 1
         if holdOff {
             abortStrikes += 1
             let hold = min(120, 5 * pow(2, Double(abortStrikes - 1)))
@@ -1613,6 +1623,7 @@ final class LiveMirror {
         guard let appState, !isActive, !entering else { return }
         displaysChangedWhileEntering = false
         entering = true
+        changes &+= 1
         defer { entering = false }
         // After a re-hide the bar may still be at its reflow.
         let quietFrom = Date()
@@ -2968,6 +2979,7 @@ final class LiveMirror {
         hiddenOut = nil
         entering = true
         retaking = true
+        changes &+= 1
         defer { entering = false; retaking = false }
         let started = Date()
         func ms() -> Int { Int(-started.timeIntervalSinceNow * 1000) }
@@ -3147,6 +3159,7 @@ final class LiveMirror {
     func exit(_ reason: String) async {
         guard let appState, isActive, !exiting else { return }
         exiting = true
+        changes &+= 1
         defer { exiting = false }
         hiddenOut = nil
         let started = Date()

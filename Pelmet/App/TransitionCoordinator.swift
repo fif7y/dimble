@@ -2114,6 +2114,11 @@ final class TransitionCoordinator {
             let epoch = pressEpoch
             let taken = await ConcealGhostOverlay.snapshotSet(of: rect)
             guard !Task.isCancelled else { return }
+            // Live mode blocks it: nothing was taken, and it is still wanted.
+            guard !taken.isEmpty || !ConcealGhostOverlay.liveModeBlocksCaptures else {
+                revealCoverWanted = true
+                return
+            }
             guard epoch == pressEpoch, !pressHoldsBar else {
                 PelmetLog.log("cover: idle picture dropped, an item press had the bar while it was taken")
                 revealCoverSnapshot = []
@@ -2265,9 +2270,14 @@ extension TransitionCoordinator {
         let dump = dump || UserDefaults.standard.bool(forKey: "pelmet.debug.dumpPass")
         let start = Date()
         func ms() -> Int { Int(Date().timeIntervalSince(start) * 1000) }
+        // Live mode (#106): the assertion is down and every icon is out
+        // under the mirror's cover, so the pass films them where they are,
+        // through the cover, with nothing revealed or put back. Its block on
+        // captures meant a pass that revealed and filmed 0 of 20 (2026-10-31).
+        let livePass = ConcealGhostOverlay.liveModeBlocksCaptures
         // Anchored (#88), Hidden is out for good and the bar rests that way:
         // the pass films it as it is and ends back at the anchor.
-        let anchoredPass = anchored
+        let anchoredPass = anchored && !livePass
         guard barRestsForPass else {
             PelmetLog.log("pass: bar is revealed, skipped")
             return nil
@@ -2293,13 +2303,15 @@ extension TransitionCoordinator {
             PelmetLog.log("pass: no Screen Recording, skipped")
             return nil
         }
-        // Live mode's cover is over the bar and every capture but the
-        // mirror's comes back empty: the reveal filmed nothing, 0 of 20
-        // pictures, on every open while a Live Activity ran (2026-10-31).
-        // The first open after it takes them.
-        guard !ConcealGhostOverlay.liveModeBlocksCaptures else {
-            PelmetLog.log("pass: live mode has the bar, skipped")
+        // Live mode taking its pictures again, handing the bar to a reveal
+        // or leaving: the icons are on the move under its cover.
+        guard !appState.liveMirror.isChanging else {
+            PelmetLog.log("pass: live mode is changing the bar, skipped")
             return nil
+        }
+        let liveChanges = appState.liveMirror.changes
+        func liveChanged() -> Bool {
+            appState.liveMirror.changes != liveChanges || ConcealGhostOverlay.liveModeBlocksCaptures != livePass
         }
         beginBarHold(.picturePass)
         // By section, not the walk's `concealed`: that misses system items
@@ -2322,9 +2334,10 @@ extension TransitionCoordinator {
         }
         // Anchored, the idle picture isn't kept and the icons are out: the
         // bare bar (WindowServer's bar window left out) is the empty one.
-        var empty = anchoredPass ? [] : freshEmptyBarSnapshots(cropped: false)
-        let emptySource = anchoredPass ? "captured bare" : empty.isEmpty ? "captured" : "precaptured"
-        if empty.isEmpty {
+        // Live, each film takes its own bare bar over its strip instead.
+        var empty = anchoredPass || livePass ? [] : freshEmptyBarSnapshots(cropped: false)
+        let emptySource = livePass ? "bare, with each film" : anchoredPass ? "captured bare" : empty.isEmpty ? "captured" : "precaptured"
+        if empty.isEmpty, !livePass {
             empty = await ConcealGhostOverlay.snapshotSet(
                 of: precaptureRect, excludingOwnWindows: true, primaryOnly: true, bare: anchoredPass)
         }
@@ -2379,8 +2392,8 @@ extension TransitionCoordinator {
         // Anchored, only a section the anchor doesn't have out (Always
         // Hidden) changes the bar, under a cover of the bar as it looks:
         // held pictures included, so every display stays as it was.
-        var adds = anchoredPass ? sections.subtracting(anchoredSections) : sections
-        var cover = !anchoredPass || !adds.isEmpty ? await beginBarCover(label: "pass") : nil
+        var adds = anchoredPass ? sections.subtracting(anchoredSections) : livePass ? [] : sections
+        var cover = !livePass && (!anchoredPass || !adds.isEmpty) ? await beginBarCover(label: "pass") : nil
         if anchoredPass, cover == nil, !adds.isEmpty {
             // Out bare, Always Hidden would show on the displays that show
             // all icons, and past a held picture's run.
@@ -2388,14 +2401,21 @@ extension TransitionCoordinator {
             adds = []
             passSections = anchoredSections
         }
-        let movesBar = !anchoredPass || !adds.isEmpty
-        PelmetLog.log("pass: cover \(cover == nil ? "none" : "up")\(anchoredPass ? " (anchored, adds \(adds.count) section(s))" : "") at \(ms())ms")
-        appState.picturePassSections = anchoredPass ? passSections.union(anchoredSections) : sections
+        let movesBar = !livePass && (!anchoredPass || !adds.isEmpty)
+        PelmetLog.log("pass: cover \(cover == nil ? "none" : "up")\(anchoredPass ? " (anchored, adds \(adds.count) section(s))" : livePass ? " (live mode's is over the bar)" : "") at \(ms())ms")
+        // Live, Pelmet's own hidden items stay put away: showing them would
+        // reflow the bar under the mirror's cover.
+        if !livePass { appState.picturePassSections = anchoredPass ? passSections.union(anchoredSections) : sections }
         if movesBar { await engine.reveal(anchoredPass ? passSections.union(anchoredSections) : sections) }
         // An app that quit since the panel drew never comes: waiting on it
         // held every walk to the deadline.
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-        let awaiting = Set(wanting.filter { wanted($0) && $0.bundleID.map(running.contains) != false })
+        // Live, Pelmet's own put-away items are not on the bar, and that says
+        // nothing about them.
+        let awaiting = Set(wanting.filter {
+            wanted($0) && $0.bundleID.map(running.contains) != false
+                && !(livePass && $0.bundleID.map(PelmetBundle.ownIDs.contains) == true)
+        })
         let snap = await settledWalk(watching: { wanted($0) }, awaiting: awaiting)
         appState.updateSnapshot(snap)
         // The panel orders its tiles the way the bar just drew them.
@@ -2409,7 +2429,8 @@ extension TransitionCoordinator {
         let listedKeys = Set(snap.items.map(\.id.sectionKey))
         let absent = drawn.isEmpty ? [] : Set(awaiting.filter { !listedKeys.contains($0.sectionKey) })
         if !absent.isEmpty { PelmetLog.log("pass: no icon on the bar for \(absent.map(\.rawValue).sorted())") }
-        if !drawn.isEmpty { seen?(absent) }
+        // A walk read across a live mode change says nothing about absence.
+        if !drawn.isEmpty, !liveChanged() { seen?(absent) }
 
         var pictures: [ItemID: ItemPictures.Picture]? = drawn.isEmpty ? nil : [:]
         // Only what the bar draws clear: an icon the native « holds reports
@@ -2429,12 +2450,14 @@ extension TransitionCoordinator {
             PelmetLog.log("pass: \(solid.count - shown.count) where a show rule's icon sits on the empty bar, not cropped")
         }
         var movedWhileFilmed = Set<ItemID>()
+        var liveCutAgainstEmpty = false
         if !shown.isEmpty {
-            let film = await filmAndCut(shown, empty: empty, dump: dump, ms: ms)
+            let film = await filmAndCut(shown, empty: empty, dump: dump, live: livePass, ms: ms)
             for (key, picture) in film.pictures {
                 pictures?[key] = picture
             }
             movedWhileFilmed = film.moved
+            liveCutAgainstEmpty = film.hadEmpty
             PelmetLog.log("pass: \(pictures?.count ?? 0) of \(onPrimary.count) pictures at \(ms())ms")
         }
 
@@ -2454,6 +2477,13 @@ extension TransitionCoordinator {
             // kicked in mid-film on a full reveal, all 15 moved and none was
             // cut (2026-10-12 23:09). Out on their own, the bar is quiet.
             leftovers.formUnion(movedWhileFilmed.intersection(asking))
+        }
+        if livePass, !leftovers.isEmpty {
+            // A round reveals and reflows the bar under the mirror's cover:
+            // these wait for the first pass after live mode.
+            PelmetLog.log("pass: \(leftovers.count) left for after live mode")
+            deferred = leftovers
+            leftovers = []
         }
         if !leftovers.isEmpty {
             // Another press's ids stay out of the rounds: putting them back
@@ -2528,7 +2558,7 @@ extension TransitionCoordinator {
         }
 
         appState.picturePassSections = nil
-        if !anchoredPass {
+        if !anchoredPass, !livePass {
             await engine.conceal()
         } else if roundsRan {
             // Back to the anchor, not concealed: the displays that show all
@@ -2539,7 +2569,7 @@ extension TransitionCoordinator {
             await engine.narrowReveal(to: anchoredSections)
         }
         appState.updateSnapshot(await engine.snapshot())
-        PelmetLog.log("pass: \(anchoredPass ? "back to the anchor" : "concealed") at \(ms())ms")
+        PelmetLog.log("pass: \(livePass ? "done under live mode's cover" : anchoredPass ? "back to the anchor" : "concealed") at \(ms())ms")
         if anchoredPass, let cover {
             // The held pictures fit the bar as it settles, before the pass
             // cover lifts off it: frames read right after the reveal sit
@@ -2558,10 +2588,22 @@ extension TransitionCoordinator {
         } else {
             endBarHold()
         }
+        // Live mode that started, retook, handed over or ended mid-pass moved
+        // the icons under the film (or a normal pass's reveal under its cover).
+        if liveChanged() {
+            PelmetLog.log("pass: live mode changed the bar mid-pass, its pictures dropped")
+            return nil
+        }
         guard let pictures else { return nil }
+        // Live, Pelmet's own put-away items were never on the bar: they wait
+        // for the first pass after live mode rather than counting as failed.
+        if livePass {
+            deferred.formUnion(wanting.filter { $0.bundleID.map(PelmetBundle.ownIDs.contains) == true }.subtracting(pictures.keys))
+        }
         // Against no empty bar nothing could be cut: says nothing either
         // (review WRAP-1, every tile stood in for 15 minutes).
-        let failed: Set<ItemID> = empty.isEmpty ? [] : wanting.subtracting(pictures.keys).subtracting(deferred)
+        let canCut = livePass ? liveCutAgainstEmpty : !empty.isEmpty
+        let failed: Set<ItemID> = !canCut ? [] : wanting.subtracting(pictures.keys).subtracting(deferred)
             .filter { passSections.contains(model.section(of: $0.sectionKey)) }
         return (pictures, failed, absent)
     }
@@ -2637,24 +2679,30 @@ extension TransitionCoordinator {
     /// of it against `empty`. Nothing for an empty list.
     private func filmAndCut(
         _ items: [(key: ItemID, frame: CGRect)],
-        empty: [ConcealGhostOverlay.BarSnapshot], dump: Bool, ms: () -> Int
-    ) async -> (pictures: [ItemID: ItemPictures.Picture], moved: Set<ItemID>) {
+        empty: [ConcealGhostOverlay.BarSnapshot], dump: Bool, live: Bool = false, ms: () -> Int
+    ) async -> (pictures: [ItemID: ItemPictures.Picture], moved: Set<ItemID>, hadEmpty: Bool) {
         let frames = items.map(\.frame)
-        guard let minX = frames.map(\.minX).min(), let maxX = frames.map(\.maxX).max(), let band = frames.first else { return ([:], []) }
+        guard let minX = frames.map(\.minX).min(), let maxX = frames.map(\.maxX).max(), let band = frames.first else { return ([:], [], !empty.isEmpty) }
         let rect = CGRect(x: minX - 8, y: band.minY, width: maxX - minX + 16, height: band.height)
         // AX reports where the icons land before the bar has drawn them
         // there: crops of a strip filmed mid-slide took halves of their
         // neighbours (Always Hidden, 2026-10-09). Film until two frames
         // agree. Pelmet's windows are looked up once for the film, each
         // frame decoded once.
-        let own = await ConcealGhostOverlay.ownWindows()
-        var strip = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: true)
+        // `live`: filmed through live mode's cover (Pelmet's own windows are
+        // left out, looked up each frame: a retake raises a new cover),
+        // against the bare bar over the same strip.
+        let own = live ? nil : await ConcealGhostOverlay.ownWindows()
+        let under = live
+            ? await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: true, bare: true, liveMirror: true)
+            : empty
+        var strip = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: true, liveMirror: live)
         var decoded = strip.map(Self.decoded)
         var filmed = 1
         var lastApart: Double = 1
         for _ in 0..<4 {
             try? await Task.sleep(for: .milliseconds(80))
-            let next = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: true)
+            let next = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: true, liveMirror: live)
             let nextDecoded = next.map(Self.decoded)
             filmed += 1
             if dump { Self.dumpPass(next, name: "_strip\(filmed)") }
@@ -2678,7 +2726,7 @@ extension TransitionCoordinator {
         if !moved.isEmpty {
             PelmetLog.log("pass: \(moved.count) moved while filmed, not cut \(moved.map(\.key.rawValue))")
         }
-        return (Self.pictures(of: still, strip: strip, empty: empty, dump: dump), Set(moved.map(\.key)))
+        return (Self.pictures(of: still, strip: strip, empty: under, dump: dump), Set(moved.map(\.key)), !under.isEmpty)
     }
 
     /// A fresh picture of one item drawn on the bar right now: a relay's,
