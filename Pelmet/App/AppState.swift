@@ -239,10 +239,14 @@ final class AppState {
         ConcealGhostOverlay.onHeldBarClick = { [weak self] display, clicks in
             self?.heldBarClicked(display: display, clickCount: clicks)
         }
-        ConcealGhostOverlay.iconLayout = { [weak self] in
+        ConcealGhostOverlay.iconFrames = { [weak self] in
             guard let self else { return [] }
-            let frames = (chevronWindowFrame.map { [$0] } ?? []) + (snapshot?.items.compactMap(\.frame) ?? [])
-            return frames.map { Int(($0.minX * 2).rounded()) * 10_000 + Int(($0.width * 2).rounded()) }.sorted()
+            return (chevronWindowFrame.map { [$0] } ?? []) + (snapshot?.items.compactMap(\.frame) ?? [])
+        }
+        ConcealGhostOverlay.refreshIconFrames = { [weak self] in
+            // Never a walk mid-swap: the swap's own walks bring the snapshot.
+            guard let self, !isTransitioning else { return }
+            updateSnapshot(await engine.freshSnapshot())
         }
         transitions.onRevealSettled = { [weak self] in
             guard let self else { return }

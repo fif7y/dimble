@@ -9,6 +9,7 @@
 // a usable capture a style falls back to the agent's animation.
 
 import AppKit
+import PelmetCore
 import PelmetEngine
 import QuartzCore
 import ScreenCaptureKit
@@ -325,8 +326,12 @@ final class ConcealGhostOverlay {
     private var twin: NSWindow?
     /// The twin's picture before `shapeTwin` cuts it down to the icons.
     private var twinPicture: CGImage?
-    /// `iconLayout` when the twin was cut; nil while it is whole.
+    /// `iconLayout` when the twin was cut, or when its cut last followed
+    /// the icons; nil while it is whole.
     private var twinLayout: [Int]?
+    /// What `shapeTwin` cut it from: the icons filmed alone, and the
+    /// `iconFrames` they stood at then (`fillIcons`).
+    private var twinCut: (glyphs: CGImage, frames: [CGRect])?
     /// Cut to the icons, the twin sits opaque beneath its held bar
     /// (`syncTwin`).
     private var twinCovers = false
@@ -1166,6 +1171,20 @@ final class ConcealGhostOverlay {
     private static let twinShapeDelay: TimeInterval = 1.0
     /// Pixels kept around each glyph's ink.
     private static let twinSpread = 2
+    /// MenuBarAgent tells AX when an item comes or goes (`AXLayoutChanged`,
+    /// `AXUIElementDestroyed` on its app element; not when one changes
+    /// width; measured on 27.2, 2026-10-31). A new item lands at the bar's
+    /// left end, under a held bar, and one that leaves moves every icon
+    /// left of it: either way a twin's cut stops matching, and in live mode
+    /// nothing else reads the bar to say so. Watched while held bars are up.
+    private static var agentWatch: (observer: AXObserver, pid: pid_t)?
+    private static var agentReadPending = false
+    private static var agentReadAt = Date.distantPast
+    /// For the bar to settle before it is read.
+    private static let agentSettle: TimeInterval = 0.5
+    /// Between two reads (a walk, plus a converge when the items changed):
+    /// a pill that kept the agent busy costs one every 2 s at most.
+    private static let agentReadGap: TimeInterval = 2
 
     private static func makeTwin(of shot: CGImage, frame: NSRect) -> NSWindow {
         let twin = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -1193,9 +1212,19 @@ final class ConcealGhostOverlay {
     }
 
     /// Where the bar's icons stand now (AppState: the «'s window and every
-    /// item's AX frame). A twin cut to the icons only serves while this
-    /// reads the same as when it was cut.
-    static var iconLayout: (() -> [Int])?
+    /// item's AX frame). A twin cut to the icons only serves while they
+    /// stand where they stood at the cut.
+    static var iconFrames: (() -> [CGRect])?
+    /// Reads the bar afresh, and `iconFrames` with it (AppState: a walk).
+    static var refreshIconFrames: (() async -> Void)?
+
+    /// A frame's left edge and width, in half points.
+    static func layoutKey(_ frame: CGRect) -> Int {
+        Int((frame.minX * 2).rounded()) * 10_000 + Int((frame.width * 2).rounded())
+    }
+    private static func iconLayout() -> [Int]? {
+        iconFrames.map { $0().map(layoutKey).sorted() }
+    }
 
     /// The latest call wins: a cut waits out the icons settling.
     private func scheduleTwinShape() {
@@ -1204,6 +1233,9 @@ final class ConcealGhostOverlay {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.twinShapeDelay))
             guard let self, generation == twinShapeGeneration else { return }
+            // The cut's stamp from the bar as it stands, not the snapshot
+            // from before live mode let the hidden icons back.
+            await Self.refreshIconFrames?()
             await shapeTwin()
         }
     }
@@ -1224,36 +1256,41 @@ final class ConcealGhostOverlay {
     /// Mission Control is up, so this runs once the held bar has settled.
     /// Only while the capture indicator is already lit: a capture that
     /// lights it shifts the bar 3pt, which re-holds, which would capture
-    /// again. Any miss keeps the whole twin.
+    /// again. A miss keeps the twin whole, or keeps its cut, following the
+    /// icons (`fillIcons`).
     private func shapeTwin() async {
         guard twin != nil, !finished, let picture = twinPicture, listedOnScreen else { return }
-        let layout = Self.iconLayout?()
-        if twinLayout != nil, twinLayout != layout { wholeTwin() }
-        guard twinLayout == nil else {
-            // Still cut right (a clip that moved no icon).
+        let layout = Self.iconLayout()
+        // The icons moved since the cut: with no new picture to be had the
+        // cut follows them, with one it stays until the new one lands.
+        if twinLayout != nil, twinLayout != layout, !Self.captureIndicatorLit { fillIcons() }
+        if twinLayout != nil, twinLayout == layout {
+            // Cut right (a clip that moved no icon, or a cut that followed).
             twinCovers = true
             syncTwin()
             return
         }
-        guard Self.captureIndicatorLit else {
-            PelmetLog.log("ghost: held bar #\(id) twin stays whole — the capture indicator is out")
-            return
+        func miss(_ why: String) {
+            PelmetLog.log("ghost: held bar #\(id) twin \(twinLayout != nil ? "keeps its cut" : "stays whole") — \(why)")
+            guard twinLayout != nil else { return }
+            fillIcons()
+            twinCovers = twinLayout != nil
+            syncTwin()
         }
+        guard Self.captureIndicatorLit else { return miss("the capture indicator is out") }
         guard let glyphs = await Self.barGlyphs(in: window.frame, scale: window.backingScaleFactor) else {
-            PelmetLog.log("ghost: held bar #\(id) twin stays whole — no picture of the bar's icons")
-            return
+            return miss("no picture of the bar's icons")
         }
         guard twin != nil, !finished, twinPicture === picture else { return }
-        guard let layout, Self.iconLayout?() == layout else {
-            PelmetLog.log("ghost: held bar #\(id) twin stays whole — the icons moved while they were filmed")
-            return
+        guard let layout, let frames = Self.iconFrames?(), Self.iconLayout() == layout else {
+            return miss("the icons moved while they were filmed")
         }
         guard let shaped = Self.iconShaped(picture, glyphs: glyphs, spread: Self.twinSpread) else {
-            PelmetLog.log("ghost: held bar #\(id) twin stays whole — no icons under it")
-            return
+            return miss("no icons under it")
         }
         setTwinPicture(shaped.image)
         twinLayout = layout
+        twinCut = (glyphs, frames)
         twinCovers = true
         syncTwin()
         PelmetLog.log("ghost: held bar #\(id) twin cut to its icons (\(Int(shaped.share * 100))% of the picture), under it from now on")
@@ -1263,8 +1300,78 @@ final class ConcealGhostOverlay {
         guard let picture = twinPicture else { return }
         setTwinPicture(picture)
         twinLayout = nil
+        twinCut = nil
         twinCovers = false
         syncTwin()
+    }
+
+    /// Keeps a cut twin over the icons when an item came, went or moved
+    /// since the cut: cut afresh while the capture indicator is still lit,
+    /// the cut following them otherwise (`shapeTwin`).
+    private func followIcons() async {
+        guard twinLayout != nil, !finished, Self.iconLayout() != twinLayout else { return }
+        await shapeTwin()
+    }
+
+    /// The cut kept over icons that came or moved, with no new picture (one
+    /// would light the capture indicator), from the glyphs filmed at the
+    /// cut: an icon that moved with the rest of the run (the shift most of
+    /// them share, same width) gets its ink copied to where it stands now,
+    /// any other new frame is filled across the rows the glyphs' ink spans.
+    /// Old ink stays: a frame missing from a walk is no proof its icon left
+    /// (Dimble's own « drops out of some walks and was cleared while still
+    /// drawn), and what stays is bar, unseen under the held bar. Whole when
+    /// that cannot serve.
+    private func fillIcons() {
+        guard twinLayout != nil, !finished, let cut = twinCut, let picture = twinPicture,
+              let frames = Self.iconFrames?(), let layout = Self.iconLayout(), layout != twinLayout else { return }
+        // The walk's frames are the main display's: another display's bar
+        // has the same icons from its right edge.
+        let primary = NSScreen.screens.first?.frame.maxX ?? 0
+        let shift = (window.screen?.frame.maxX ?? primary) - primary
+        let scale = window.backingScaleFactor, left = window.frame.minX
+        let plan = Self.followPlan(cut: cut.frames, now: frames, scale: scale) { frame in
+            let lo = max(0, Int(((frame.minX + shift - left) * scale).rounded(.down)))
+            let hi = min(picture.width, Int(((frame.maxX + shift - left) * scale).rounded(.up)))
+            return lo..<max(lo, hi)
+        }
+        guard let shaped = Self.iconShaped(picture, glyphs: cut.glyphs, spread: Self.twinSpread,
+                                           moving: plan.moves, filling: plan.fills) else {
+            wholeTwin()
+            PelmetLog.log("ghost: held bar #\(id) twin whole — the icons moved past what its cut can follow")
+            return
+        }
+        setTwinPicture(shaped.image)
+        twinLayout = layout
+        PelmetLog.log("ghost: held bar #\(id) twin follows the icons — since the cut \(plan.moves.count) moved, \(plan.fills.count) new, \(plan.gone) gone (\(Int(shaped.share * 100))% of the picture)")
+    }
+
+    /// What `fillIcons` does to the cut's glyphs, display-free: `columns`
+    /// places a frame in the picture. A frame the cut did not see moves the
+    /// ink of one it saw when they share a width and the shift two or more
+    /// such pairs agree on (one pair is as likely another icon, whose ink
+    /// would not fit); any other is filled. `gone`: frames the cut saw that
+    /// are neither here nor moved.
+    static func followPlan(cut: [CGRect], now frames: [CGRect], scale: CGFloat, columns: (CGRect) -> Range<Int>)
+        -> (moves: [(columns: Range<Int>, by: Int)], fills: [Range<Int>], gone: Int) {
+        func half(_ v: CGFloat) -> Int { Int((v * 2).rounded()) }
+        let before = Set(cut.map(layoutKey)), now = Set(frames.map(layoutKey))
+        let gone = cut.filter { !now.contains(layoutKey($0)) }
+        let new = frames.filter { !before.contains(layoutKey($0)) }
+        let shifts = new.flatMap { frame in
+            gone.filter { half($0.width) == half(frame.width) }.map { half(frame.minX) - half($0.minX) }
+        }
+        let dx = Dictionary(grouping: shifts, by: { $0 }).max { $0.value.count < $1.value.count }
+            .flatMap { $0.value.count >= 2 ? $0.key : nil }
+        var moves: [(columns: Range<Int>, by: Int)] = [], fills: [Range<Int>] = []
+        for frame in new {
+            if let dx, let from = gone.first(where: { half($0.width) == half(frame.width) && half(frame.minX) - half($0.minX) == dx }) {
+                moves.append((columns(from), Int((CGFloat(dx) / 2 * scale).rounded())))
+            } else {
+                fills.append(columns(frame))
+            }
+        }
+        return (moves, fills, gone.count - moves.count)
     }
 
     /// The twin directly below its held bar: opaque while it is cut to the
@@ -1301,7 +1408,10 @@ final class ConcealGhostOverlay {
     /// picture's own colour space, so what is kept matches the held bar
     /// pixel for pixel. Nil with no ink, or with ink over most of it (not
     /// a bar of icons).
-    static func iconShaped(_ picture: CGImage, glyphs: CGImage, spread: Int) -> (image: CGImage, share: Double)? {
+    static func iconShaped(
+        _ picture: CGImage, glyphs: CGImage, spread: Int,
+        moving moves: [(columns: Range<Int>, by: Int)] = [], filling columns: [Range<Int>] = []
+    ) -> (image: CGImage, share: Double)? {
         let w = picture.width, h = picture.height
         guard let ink = rgba(glyphs, width: w, height: h),
               let ctx = CGContext(
@@ -1311,6 +1421,30 @@ final class ConcealGhostOverlay {
               let data = ctx.data
         else { return nil }
         ctx.draw(picture, in: CGRect(x: 0, y: 0, width: w, height: h))
+        // Pixel columns (`fillIcons`): their ink copied `by` px over, or
+        // inked across the rows the glyphs' own ink spans.
+        if !(moves.isEmpty && columns.isEmpty) {
+            var source = [UInt8](repeating: 0, count: w * h)
+            for y in 0..<h {
+                let row = ink.pointer + y * ink.stride
+                for x in 0..<w { source[y * w + x] = row[x * 4 + 3] }
+            }
+            for y in 0..<h {
+                let row = ink.pointer + y * ink.stride
+                for move in moves {
+                    for x in move.columns where (0..<w).contains(x + move.by) {
+                        row[(x + move.by) * 4 + 3] = max(row[(x + move.by) * 4 + 3], source[y * w + x])
+                    }
+                }
+            }
+            let rows = (0..<h).filter { y in (0..<w).contains { source[y * w + $0] > 8 } }
+            if let top = rows.first, let bottom = rows.last {
+                for y in top...bottom {
+                    let row = ink.pointer + y * ink.stride
+                    for x in columns.joined() { row[x * 4 + 3] = 255 }
+                }
+            }
+        }
         // A square max filter, rows then columns.
         var wide = [Bool](repeating: false, count: w * h)
         for y in 0..<h {
@@ -1342,6 +1476,51 @@ final class ConcealGhostOverlay {
         }
         RunLoop.main.add(timer, forMode: .common)
         missionWatch = timer
+        watchAgent()
+    }
+
+    private static func watchAgent() {
+        guard agentWatch == nil,
+              let agent = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == PelmetBundle.agentID })
+        else { return }
+        var observer: AXObserver?
+        let made = AXObserverCreate(agent.processIdentifier, { _, element, _, _ in
+            var pid: pid_t = 0
+            AXUIElementGetPid(element, &pid)
+            MainActor.assumeIsolated { ConcealGhostOverlay.agentChanged(pid: pid) }
+        }, &observer)
+        guard made == .success, let observer else { return }
+        let app = AXUIElementCreateApplication(agent.processIdentifier)
+        let heard = [kAXLayoutChangedNotification, kAXUIElementDestroyedNotification].filter {
+            AXObserverAddNotification(observer, app, $0 as CFString, nil) == .success
+        }
+        guard !heard.isEmpty else { return }
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
+        agentWatch = (observer, agent.processIdentifier)
+    }
+
+    private static func unwatchAgent() {
+        guard let agentWatch else { return }
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(agentWatch.observer), .defaultMode)
+        self.agentWatch = nil
+    }
+
+    /// Reads the bar afresh once it has settled, and lets every cut twin
+    /// follow its icons. One read covers every change before it.
+    private static func agentChanged(pid: pid_t) {
+        // The observer hears other apps' elements too.
+        guard pid == agentWatch?.pid, !agentReadPending else { return }
+        agentReadPending = true
+        let wait = max(agentSettle, agentReadGap - Date().timeIntervalSince(agentReadAt))
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
+            agentReadPending = false
+            guard registry.allObjects.contains(where: { $0.twinLayout != nil && !$0.finished }) else { return }
+            agentReadAt = Date()
+            Task {
+                await refreshIconFrames?()
+                for cover in registry.allObjects { await cover.followIcons() }
+            }
+        }
     }
 
     private static func checkHeldBars(_ interval: TimeInterval) {
@@ -1350,7 +1529,13 @@ final class ConcealGhostOverlay {
             missionWatch?.invalidate()
             missionWatch = nil
             awayHeld = []
+            unwatchAgent()
             return
+        }
+        // MenuBarAgent restarted: watch the new one.
+        if let watch = agentWatch, kill(watch.pid, 0) != 0, errno == ESRCH {
+            unwatchAgent()
+            watchAgent()
         }
         awayHeld.formIntersection(held.map(\.id))
         for cover in held {
@@ -1376,11 +1561,11 @@ final class ConcealGhostOverlay {
     private func showTwin() {
         guard let twin, (imageView.layer?.opacity ?? 1) > 0.99 else { return }
         // Icons that moved under a twin cut to them would show beside it.
-        let stale = twinLayout != nil && Self.iconLayout?() != twinLayout
-        if stale { wholeTwin() }
+        let stale = twinLayout != nil && Self.iconLayout() != twinLayout
+        if stale { fillIcons() }
         twin.order(.below, relativeTo: window.windowNumber)
         twin.alphaValue = 1
-        let kind = twinLayout != nil ? "its twin, cut to the icons," : stale ? "its whole twin (the icons moved since the cut)" : "its whole twin"
+        let kind = twinLayout != nil ? "its twin, cut to the icons," : stale ? "its whole twin (the icons moved past its cut)" : "its whole twin"
         PelmetLog.log("ghost: held bar #\(id) back — \(kind) covers the window server's fade")
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.twinHold) { [weak self] in self?.syncTwin() }
     }
