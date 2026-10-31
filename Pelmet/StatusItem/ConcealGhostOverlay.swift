@@ -327,6 +327,9 @@ final class ConcealGhostOverlay {
     private var twinPicture: CGImage?
     /// `iconLayout` when the twin was cut; nil while it is whole.
     private var twinLayout: [Int]?
+    /// Cut to the icons, the twin sits opaque beneath its held bar
+    /// (`syncTwin`).
+    private var twinCovers = false
     private var twinShapeGeneration = 0
     private var finished = false
     private var stoodDown = false
@@ -920,8 +923,8 @@ final class ConcealGhostOverlay {
             // Up for a whole reveal: on every Space of its display. Transient,
             // not stationary: a stationary one stayed in Mission Control, a
             // dark band over the Spaces bar (#108). The window server hides it
-            // with the bar, and its stationary twin covers its way back
-            // (`watchMissionControl`).
+            // with the bar, and its stationary twin covers its way out and
+            // back (`watchMissionControl`).
             panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
             // A cut, not the window server's default: ordered in it grows ~5pt
             // and fades up over ~60ms, ordered out it shrinks 5pt and fades
@@ -1029,7 +1032,11 @@ final class ConcealGhostOverlay {
         window.setFrame(frame, display: true)
         twin?.setFrame(frame, display: false)
         // The « moved, and the icons with it: the twin's cut is stale.
-        if twin != nil { scheduleTwinShape() }
+        if twin != nil {
+            twinCovers = false
+            syncTwin()
+            scheduleTwinShape()
+        }
     }
 
     /// Directly below another cover: the one above stays what is seen while
@@ -1037,6 +1044,7 @@ final class ConcealGhostOverlay {
     func order(beneath other: ConcealGhostOverlay) {
         guard !finished else { return }
         window.order(.below, relativeTo: other.windowNumber)
+        syncTwin()
     }
     var windowFrame: NSRect { window.frame }
 
@@ -1056,7 +1064,11 @@ final class ConcealGhostOverlay {
     /// Out of the way (the real bar shows) or back over it, no animation.
     func setShown(_ shown: Bool) {
         guard !finished else { return }
-        if !shown { window.orderOut(nil); return }
+        if !shown {
+            window.orderOut(nil)
+            twin?.alphaValue = 0
+            return
+        }
         orderBelowForeign()
     }
 
@@ -1072,6 +1084,7 @@ final class ConcealGhostOverlay {
         let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? 0
         let cg = CGRect(x: f.minX, y: primaryMaxY - f.maxY, width: f.width, height: f.height)
         let foreign = Self.foreignBandWindows(intersecting: cg, bandHeight: f.height)
+        defer { syncTwin() }
         if let lowest = foreign.last {
             beneathID = lowest.id
             window.order(.below, relativeTo: Int(lowest.id))
@@ -1132,6 +1145,14 @@ final class ConcealGhostOverlay {
     /// invisible (a stationary window is what stayed over the Spaces bar),
     /// that goes opaque the moment the held bar is listed on screen again
     /// (the bar's first frame, measured) and clears once the fade is done.
+    /// On the way in (Mission Control, App Exposé) the held bar is cut
+    /// ~40 ms after their first frame while the bar fades out over the next
+    /// ~250 ms, the icons at full contrast for ~120 ms, and nothing tells
+    /// the app sooner than the held bar's own listing, ~300 ms in (measured
+    /// 2026-10-31). So a twin cut to the icons stays opaque beneath its held
+    /// bar all along, unseen, covers that fade, and clears once the held bar
+    /// is off screen: by then the bar is gone, and what is left over the
+    /// Spaces bar is the picture's own few pixels.
     /// Looked at every 100 ms while held bars are up, every 8 ms while one
     /// is away.
     private static var missionWatch: Timer?
@@ -1208,7 +1229,12 @@ final class ConcealGhostOverlay {
         guard twin != nil, !finished, let picture = twinPicture, listedOnScreen else { return }
         let layout = Self.iconLayout?()
         if twinLayout != nil, twinLayout != layout { wholeTwin() }
-        guard twinLayout == nil else { return }
+        guard twinLayout == nil else {
+            // Still cut right (a clip that moved no icon).
+            twinCovers = true
+            syncTwin()
+            return
+        }
         guard Self.captureIndicatorLit else {
             PelmetLog.log("ghost: held bar #\(id) twin stays whole — the capture indicator is out")
             return
@@ -1228,13 +1254,27 @@ final class ConcealGhostOverlay {
         }
         setTwinPicture(shaped.image)
         twinLayout = layout
-        PelmetLog.log("ghost: held bar #\(id) twin cut to its icons (\(Int(shaped.share * 100))% of the picture)")
+        twinCovers = true
+        syncTwin()
+        PelmetLog.log("ghost: held bar #\(id) twin cut to its icons (\(Int(shaped.share * 100))% of the picture), under it from now on")
     }
 
     private func wholeTwin() {
         guard let picture = twinPicture else { return }
         setTwinPicture(picture)
         twinLayout = nil
+        twinCovers = false
+        syncTwin()
+    }
+
+    /// The twin directly below its held bar: opaque while it is cut to the
+    /// icons and the held bar is on screen, clear otherwise. Whole, it would
+    /// sit over the Spaces bar as a block.
+    private func syncTwin() {
+        guard let twin, !finished else { return }
+        let covers = twinCovers && window.isVisible && !Self.awayHeld.contains(id)
+        if covers { twin.order(.below, relativeTo: window.windowNumber) }
+        twin.alphaValue = covers ? 1 : 0
     }
 
     /// WindowServer's Menubar window over `frame` (global Cocoa points),
@@ -1315,7 +1355,11 @@ final class ConcealGhostOverlay {
         awayHeld.formIntersection(held.map(\.id))
         for cover in held {
             if !cover.listedOnScreen {
-                if awayHeld.insert(cover.id).inserted { PelmetLog.log("ghost: held bar #\(cover.id) off screen (Mission Control or the like)") }
+                if awayHeld.insert(cover.id).inserted {
+                    let covered = cover.twinCovers
+                    cover.twin?.alphaValue = 0
+                    PelmetLog.log("ghost: held bar #\(cover.id) off screen (Mission Control or the like)\(covered ? " — its twin covered the bar's fade, now clear" : "")")
+                }
             } else if awayHeld.remove(cover.id) != nil {
                 cover.showTwin()
             }
@@ -1338,7 +1382,7 @@ final class ConcealGhostOverlay {
         twin.alphaValue = 1
         let kind = twinLayout != nil ? "its twin, cut to the icons," : stale ? "its whole twin (the icons moved since the cut)" : "its whole twin"
         PelmetLog.log("ghost: held bar #\(id) back — \(kind) covers the window server's fade")
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.twinHold) { [weak self] in self?.twin?.alphaValue = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.twinHold) { [weak self] in self?.syncTwin() }
     }
 
     /// One decrement per overlay, however it ends.
