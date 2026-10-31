@@ -239,6 +239,11 @@ final class AppState {
         ConcealGhostOverlay.onHeldBarClick = { [weak self] display, clicks in
             self?.heldBarClicked(display: display, clickCount: clicks)
         }
+        ConcealGhostOverlay.iconLayout = { [weak self] in
+            guard let self else { return [] }
+            let frames = (chevronWindowFrame.map { [$0] } ?? []) + (snapshot?.items.compactMap(\.frame) ?? [])
+            return frames.map { Int(($0.minX * 2).rounded()) * 10_000 + Int(($0.width * 2).rounded()) }.sorted()
+        }
         transitions.onRevealSettled = { [weak self] in
             guard let self else { return }
             dispatch(rehide.handle(.transitionSettled))

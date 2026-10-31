@@ -323,6 +323,11 @@ final class ConcealGhostOverlay {
     private let imageView: NSImageView
     /// A held bar's stationary twin (`watchMissionControl`).
     private var twin: NSWindow?
+    /// The twin's picture before `shapeTwin` cuts it down to the icons.
+    private var twinPicture: CGImage?
+    /// `iconLayout` when the twin was cut; nil while it is whole.
+    private var twinLayout: [Int]?
+    private var twinShapeGeneration = 0
     private var finished = false
     private var stoodDown = false
     /// Counted in `stripActive`: a transition's cover. A held bar
@@ -956,6 +961,8 @@ final class ConcealGhostOverlay {
         if holdsBar {
             twin = Self.makeTwin(of: shot, frame: frame)
             twin?.order(.below, relativeTo: window.windowNumber)
+            twinPicture = shot
+            scheduleTwinShape()
         }
         if countsAsStrip { Self.activeStripCount += 1 }
         Self.register(self)
@@ -1021,6 +1028,8 @@ final class ConcealGhostOverlay {
         frame.size.width = x - frame.minX
         window.setFrame(frame, display: true)
         twin?.setFrame(frame, display: false)
+        // The « moved, and the icons with it: the twin's cut is stale.
+        if twin != nil { scheduleTwinShape() }
     }
 
     /// Directly below another cover: the one above stays what is seen while
@@ -1130,6 +1139,12 @@ final class ConcealGhostOverlay {
     private static let watchRest: TimeInterval = 0.1
     private static let watchAway: TimeInterval = 0.008
     private static let twinHold: TimeInterval = 0.4
+    /// After the held bar goes up: the icons it hides are out by then
+    /// (a reveal's slide is 320 ms), and the hold's own capture still has
+    /// the capture indicator lit.
+    private static let twinShapeDelay: TimeInterval = 1.0
+    /// Pixels kept around each glyph's ink.
+    private static let twinSpread = 2
 
     private static func makeTwin(of shot: CGImage, frame: NSRect) -> NSWindow {
         let twin = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -1153,6 +1168,131 @@ final class ConcealGhostOverlay {
     private func dropTwin() {
         twin?.orderOut(nil)
         twin = nil
+        twinPicture = nil
+    }
+
+    /// Where the bar's icons stand now (AppState: the «'s window and every
+    /// item's AX frame). A twin cut to the icons only serves while this
+    /// reads the same as when it was cut.
+    static var iconLayout: (() -> [Int])?
+
+    /// The latest call wins: a cut waits out the icons settling.
+    private func scheduleTwinShape() {
+        twinShapeGeneration += 1
+        let generation = twinShapeGeneration
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.twinShapeDelay))
+            guard let self, generation == twinShapeGeneration else { return }
+            await shapeTwin()
+        }
+    }
+
+    private func setTwinPicture(_ image: CGImage) {
+        guard let twin, let picture = twinPicture else { return }
+        let scale = window.backingScaleFactor
+        let size = NSSize(width: CGFloat(picture.width) / scale, height: CGFloat(picture.height) / scale)
+        (twin.contentView?.subviews.first as? NSImageView)?.image = NSImage(cgImage: image, size: size)
+    }
+
+    /// Cuts the twin down to the icons the held bar hides, plus a couple of
+    /// pixels. Whole, it snapped opaque over the Spaces bar still sliding
+    /// out of the band at a Mission Control close: with many Desktops their
+    /// names showed cut off at the cover's edge for ~120 ms, a block on a
+    /// light wallpaper (#108, 2026-10-30). The icons are WindowServer's
+    /// Menubar window filmed alone, glyphs on clear. It films empty while
+    /// Mission Control is up, so this runs once the held bar has settled.
+    /// Only while the capture indicator is already lit: a capture that
+    /// lights it shifts the bar 3pt, which re-holds, which would capture
+    /// again. Any miss keeps the whole twin.
+    private func shapeTwin() async {
+        guard twin != nil, !finished, let picture = twinPicture, listedOnScreen else { return }
+        let layout = Self.iconLayout?()
+        if twinLayout != nil, twinLayout != layout { wholeTwin() }
+        guard twinLayout == nil else { return }
+        guard Self.captureIndicatorLit else {
+            PelmetLog.log("ghost: held bar #\(id) twin stays whole — the capture indicator is out")
+            return
+        }
+        guard let glyphs = await Self.barGlyphs(in: window.frame, scale: window.backingScaleFactor) else {
+            PelmetLog.log("ghost: held bar #\(id) twin stays whole — no picture of the bar's icons")
+            return
+        }
+        guard twin != nil, !finished, twinPicture === picture else { return }
+        guard let layout, Self.iconLayout?() == layout else {
+            PelmetLog.log("ghost: held bar #\(id) twin stays whole — the icons moved while they were filmed")
+            return
+        }
+        guard let shaped = Self.iconShaped(picture, glyphs: glyphs, spread: Self.twinSpread) else {
+            PelmetLog.log("ghost: held bar #\(id) twin stays whole — no icons under it")
+            return
+        }
+        setTwinPicture(shaped.image)
+        twinLayout = layout
+        PelmetLog.log("ghost: held bar #\(id) twin cut to its icons (\(Int(shaped.share * 100))% of the picture)")
+    }
+
+    private func wholeTwin() {
+        guard let picture = twinPicture else { return }
+        setTwinPicture(picture)
+        twinLayout = nil
+    }
+
+    /// WindowServer's Menubar window over `frame` (global Cocoa points),
+    /// filmed alone: the bar's glyphs on clear, whatever covers them.
+    private static func barGlyphs(in frame: NSRect, scale: CGFloat) async -> CGImage? {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return nil }
+        let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? 0
+        let cg = CGRect(x: frame.minX, y: primaryMaxY - frame.maxY, width: frame.width, height: frame.height)
+        guard let bar = content.windows.first(where: { isSystemBar($0) && $0.frame.intersects(cg) }) else { return nil }
+        let config = SCStreamConfiguration()
+        config.sourceRect = CGRect(x: cg.minX - bar.frame.minX, y: cg.minY - bar.frame.minY, width: cg.width, height: cg.height)
+        config.width = Int((cg.width * scale).rounded())
+        config.height = Int((cg.height * scale).rounded())
+        config.showsCursor = false
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.shouldBeOpaque = false
+        let image = await captureFrame(filter: SCContentFilter(desktopIndependentWindow: bar), configuration: config)
+        if image != nil { lastCaptureAt = Date() }
+        return image
+    }
+
+    /// `picture` kept only where `glyphs` has ink, spread `spread` px each
+    /// way, clear elsewhere, and the share of it kept. Drawn in the
+    /// picture's own colour space, so what is kept matches the held bar
+    /// pixel for pixel. Nil with no ink, or with ink over most of it (not
+    /// a bar of icons).
+    static func iconShaped(_ picture: CGImage, glyphs: CGImage, spread: Int) -> (image: CGImage, share: Double)? {
+        let w = picture.width, h = picture.height
+        guard let ink = rgba(glyphs, width: w, height: h),
+              let ctx = CGContext(
+                data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                space: picture.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+              let data = ctx.data
+        else { return nil }
+        ctx.draw(picture, in: CGRect(x: 0, y: 0, width: w, height: h))
+        // A square max filter, rows then columns.
+        var wide = [Bool](repeating: false, count: w * h)
+        for y in 0..<h {
+            let row = ink.pointer + y * ink.stride
+            for x in 0..<w where row[x * 4 + 3] > 8 {
+                for dx in max(0, x - spread)...min(w - 1, x + spread) { wide[y * w + dx] = true }
+            }
+        }
+        var keep = wide
+        for y in 0..<h {
+            for x in 0..<w where wide[y * w + x] {
+                for dy in max(0, y - spread)...min(h - 1, y + spread) { keep[dy * w + x] = true }
+            }
+        }
+        let px = data.assumingMemoryBound(to: UInt8.self)
+        var kept = 0
+        for i in 0..<(w * h) {
+            if keep[i] { kept += 1 } else { (px + i * 4).update(repeating: 0, count: 4) }
+        }
+        let share = Double(kept) / Double(w * h)
+        guard kept > 0, share < 0.6, let image = ctx.makeImage() else { return nil }
+        return (image: image, share: share)
     }
 
     private static func watchMissionControl(every interval: TimeInterval) {
@@ -1191,9 +1331,13 @@ final class ConcealGhostOverlay {
 
     private func showTwin() {
         guard let twin, (imageView.layer?.opacity ?? 1) > 0.99 else { return }
+        // Icons that moved under a twin cut to them would show beside it.
+        let stale = twinLayout != nil && Self.iconLayout?() != twinLayout
+        if stale { wholeTwin() }
         twin.order(.below, relativeTo: window.windowNumber)
         twin.alphaValue = 1
-        PelmetLog.log("ghost: held bar #\(id) back — its twin covers the window server's fade")
+        let kind = twinLayout != nil ? "its twin, cut to the icons," : stale ? "its whole twin (the icons moved since the cut)" : "its whole twin"
+        PelmetLog.log("ghost: held bar #\(id) back — \(kind) covers the window server's fade")
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.twinHold) { [weak self] in self?.twin?.alphaValue = 0 }
     }
 
