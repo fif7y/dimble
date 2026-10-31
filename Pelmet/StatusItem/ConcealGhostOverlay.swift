@@ -1386,7 +1386,7 @@ final class ConcealGhostOverlay {
 
     /// WindowServer's Menubar window over `frame` (global Cocoa points),
     /// filmed alone: the bar's glyphs on clear, whatever covers them.
-    private static func barGlyphs(in frame: NSRect, scale: CGFloat) async -> CGImage? {
+    static func barGlyphs(in frame: NSRect, scale: CGFloat) async -> CGImage? {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else { return nil }
         let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? 0
         let cg = CGRect(x: frame.minX, y: primaryMaxY - frame.maxY, width: frame.width, height: frame.height)

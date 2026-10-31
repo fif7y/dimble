@@ -109,6 +109,9 @@ final class ShowRules {
             percent = Int((Double(current) / Double(capacity) * 100).rounded())
             break
         }
+        // Debug: `-pelmet.debug.onBattery YES` reads as unplugged at 10%, for a
+        // Battery out on its own on a Mac that is plugged in.
+        if UserDefaults.standard.bool(forKey: "pelmet.debug.onBattery") { return (true, 10) }
         return (providing == kIOPSBatteryPowerValue, percent)
     }
 

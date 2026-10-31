@@ -569,6 +569,12 @@ final class LiveMirror {
         var aloneRun: ClosedRange<CGFloat>?
         var alone: CALayer?
         var aloneAttached = false
+        /// The icons in that run: their AX identifier, where the layer has
+        /// them (x from the run's left end, points) and what they said. A
+        /// Battery's percentage moves on while live mode lasts.
+        var aloneItems: [(id: String, x: CGFloat, width: CGFloat, said: String)] = []
+        var aloneDrawnAt = Date.distantPast
+        var aloneFresh = false
         /// When the picture was taken, and under which backdrop.
         var pictureAt = Date()
         var pictureGeneration = 0
@@ -1272,8 +1278,202 @@ final class LiveMirror {
             copies[id]?.first { bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) }?.minX
         }.filter { $0 > left + 40 && $0 < right }.min()
         guard let edge else { return }
-        side.aloneRun = edge...right
-        PelmetLog.log("livemirror: display \(side.id) icons out on their own \(Int(edge))..\(Int(right)) — they keep beside the «, the mirrors left of them")
+        let ids = Set(alone.compactMap(Self.axIdentifier))
+        let shift = side.screen.frame.maxX - primaryMaxX
+        let read = await Task.detached(priority: .userInitiated) { Self.agentItems(ids) }.value
+        // The run ends where the « stands now, read with the icons: the bar
+        // can reflow as the activity starts (the « 1601 → 1567 between the
+        // start and this read), and a run to the « it had at the start held
+        // the « itself, a second « beside the real one all through live mode.
+        let upper = min(right, (appState.chevronWindowFrame.map { chevronMinX($0, on: side) } ?? right + 1) - 1)
+        guard upper > edge + 8 else { return }
+        side.aloneRun = edge...upper
+        side.aloneItems = read.compactMap { id, item in
+            let x = item.frame.minX + shift
+            guard x >= edge - 1, x + item.frame.width <= upper + 1 else { return nil }
+            return (id, x - edge, item.frame.width, item.said)
+        }.sorted { $0.x < $1.x }
+        // Drawn from the live icons as soon as live mode has them (the cut
+        // is a picture, taken while the bar may still move).
+        side.aloneFresh = true
+        PelmetLog.log("livemirror: display \(side.id) icons out on their own \(Int(edge))..\(Int(upper))\(upper < right ? " (the « moved to \(Int(upper + 1)))" : "") — they keep beside the «, the mirrors left of them")
+    }
+
+    /// The AX identifier a bar item's id ends with (`…::com.apple.menuextra.battery`).
+    nonisolated private static func axIdentifier(_ id: ItemID) -> String? {
+        guard let range = id.rawValue.range(of: "::") else { return nil }
+        let tail = String(id.rawValue[range.upperBound...])
+        return tail.isEmpty ? nil : tail
+    }
+
+    /// MenuBarAgent's bar items by AX identifier: what each says (value,
+    /// description, title, width) and its frame, CG global, the main
+    /// display's copy.
+    nonisolated private static func agentItems(_ ids: Set<String>) -> [String: (said: String, frame: CGRect)] {
+        guard !ids.isEmpty,
+              let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.MenuBarAgent").first
+        else { return [:] }
+        let app = AXUIElementCreateApplication(agent.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        func value(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+            var out: CFTypeRef?
+            return AXUIElementCopyAttributeValue(element, name as CFString, &out) == .success ? out : nil
+        }
+        func children(_ element: AXUIElement) -> [AXUIElement] { value(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] }
+        var found: [String: (said: String, frame: CGRect)] = [:]
+        for window in children(app) {
+            for group in children(window) {
+                for item in children(group) {
+                    guard let id = value(item, kAXIdentifierAttribute) as? String, ids.contains(id), found[id] == nil,
+                          let p = value(item, kAXPositionAttribute), let s = value(item, kAXSizeAttribute)
+                    else { continue }
+                    var origin = CGPoint.zero, size = CGSize.zero
+                    guard AXValueGetValue(p as! AXValue, .cgPoint, &origin), AXValueGetValue(s as! AXValue, .cgSize, &size) else { continue }
+                    let texts = [kAXValueAttribute, kAXDescriptionAttribute, kAXTitleAttribute].compactMap { value(item, $0) as? String }
+                    found[id] = ((texts + ["w\(Int(size.width.rounded()))"]).joined(separator: " | "), CGRect(origin: origin, size: size))
+                }
+            }
+        }
+        return found
+    }
+
+    /// The icons out on their own are a cut of the picture: what they show
+    /// stays as it was when it was taken (Battery "19" twenty minutes on, at
+    /// 10%), and it may hold a « that slid while it was taken. So the run is
+    /// drawn from the live icons beneath the cover once live mode has them,
+    /// then again whenever one says something else (their AX elements are
+    /// read every 5 s):
+    /// the picture's own bar background, each icon's ink from the screen
+    /// where the bar alone has ink, laid out right to left from the « with
+    /// the picture's gaps (a wider "100%" takes room on the left).
+    private func refreshAlone(_ side: Side) async {
+        // Debug: `-pelmet.debug.aloneRedraw YES` draws the run again every 5 s
+        // with nothing changed, which must look like the cut it replaces.
+        let redraw = UserDefaults.standard.bool(forKey: "pelmet.debug.aloneRedraw") || side.aloneFresh
+        guard !side.aloneItems.isEmpty, side.alone != nil, hiddenOut == nil, !coverLifted,
+              !entering, !exiting, !handingOver, !retaking,
+              side.aloneFresh || Date().timeIntervalSince(side.aloneDrawnAt) > (redraw ? 5 : 20)
+        else { return }
+        let ids = Set(side.aloneItems.map(\.id))
+        let read = await Task.detached(priority: .userInitiated) { Self.agentItems(ids) }.value
+        let changed = side.aloneItems.filter { item in read[item.id].map { redraw || $0.said != item.said } ?? false }
+        guard !changed.isEmpty else { return }
+        let what = side.aloneFresh ? "live mode has them"
+            : "changed (" + changed.map { "\($0.said) → \(read[$0.id]!.said)" }.joined(separator: ", ") + ")"
+        side.aloneFresh = false
+        side.aloneDrawnAt = Date()
+        let started = Date()
+        guard let picture = side.picture, let run = side.aloneRun,
+              side.aloneItems.allSatisfy({ read[$0.id] != nil })
+        else {
+            PelmetLog.log("livemirror: display \(side.id) icons out on their own: \(what) — one isn't on the bar, kept as it is")
+            return
+        }
+        let shift = side.screen.frame.maxX - primaryMaxX
+        let live = side.aloneItems.map { read[$0.id]!.frame.offsetBy(dx: shift, dy: 0) }
+        let height = CGFloat(picture.image.height) / (CGFloat(picture.image.width) / picture.windowFrame.width)
+        let lo = floor(live.map(\.minX).min()!), hi = ceil(live.map(\.maxX).max()!)
+        let rect = CGRect(x: lo, y: side.bounds.minY, width: hi - lo, height: height)
+        let excluded = await windowsToExclude(over: rect, on: side)
+        let config = SCStreamConfiguration()
+        let local = rect.offsetBy(dx: -side.bounds.minX, dy: -side.bounds.minY)
+        config.sourceRect = local
+        config.width = max(2, Int((local.width * side.scale).rounded()))
+        config.height = max(2, Int((local.height * side.scale).rounded()))
+        config.showsCursor = false
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.shouldBeOpaque = true
+        config.ignoreShadowsDisplay = true
+        let cocoa = NSRect(x: rect.minX, y: (NSScreen.screens.first?.frame.maxY ?? 0) - rect.maxY, width: rect.width, height: rect.height)
+        guard let seen = try? await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: side.scDisplay, excludingWindows: excluded), configuration: config),
+              let glyphs = await ConcealGhostOverlay.barGlyphs(in: cocoa, scale: side.scale),
+              isActive, !exiting, !handingOver, side.aloneRun == run, let old = side.alone
+        else {
+            PelmetLog.log("livemirror: display \(side.id) icons out on their own: \(what) — the live icons couldn't be filmed, kept as it is")
+            return
+        }
+        let items = side.aloneItems
+        let (placed, moved) = Self.aloneLayout(items.map { ($0.x, $0.width) }, widths: live.map(\.width))
+        let lower = run.lowerBound + moved
+        let scale = CGFloat(picture.image.width) / picture.windowFrame.width
+        let slots = live.indices.map { i in
+            (source: Int(((live[i].minX - lo) * scale).rounded()), target: Int(((placed[i] - moved) * scale).rounded()),
+             width: Int((live[i].width * scale).rounded()))
+        }
+        // The picture is bar background only from the run on to its right end.
+        let column = picture.image.cropping(to: CGRect(x: picture.image.width - 1, y: 0, width: 1, height: picture.image.height))
+        guard lower < run.upperBound - 8, let column,
+              let image = Self.aloneImage(column: column, width: Int(((run.upperBound - lower) * scale).rounded()),
+                                          seen: seen, glyphs: glyphs, slots: slots)
+        else { return }
+        let layer = CALayer()
+        layer.contents = image
+        layer.contentsScale = old.contentsScale
+        layer.bounds = CGRect(x: 0, y: 0, width: CGFloat(image.width) / scale, height: picture.windowFrame.height)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        old.removeFromSuperlayer()
+        CATransaction.commit()
+        side.alone = layer
+        side.aloneAttached = false
+        side.aloneRun = lower...run.upperBound
+        side.aloneItems = items.indices.map { i in (items[i].id, placed[i] - moved, live[i].width, read[items[i].id]!.said) }
+        layoutMirrors(side)
+        PelmetLog.log("livemirror: display \(side.id) icons out on their own: \(what) — drawn from the live icons in \(Int(-started.timeIntervalSinceNow * 1000))ms, \(Int(lower))..\(Int(run.upperBound))")
+    }
+
+    /// The icons laid out again at `widths`: right to left from the last
+    /// one's right end, each gap as the picture had it, x from the run's
+    /// left end. The run then starts `moved` further right (left when the
+    /// icons grew).
+    nonisolated static func aloneLayout(_ items: [(x: CGFloat, width: CGFloat)], widths: [CGFloat]) -> (placed: [CGFloat], moved: CGFloat) {
+        guard let last = items.last, items.count == widths.count else { return (items.map(\.x), 0) }
+        var right = last.x + last.width
+        var placed: [CGFloat] = Array(repeating: 0, count: items.count)
+        for i in items.indices.reversed() {
+            placed[i] = right - widths[i]
+            if i > 0 { right = placed[i] - (items[i].x - items[i - 1].x - items[i - 1].width) }
+        }
+        return (placed, placed[0] - items[0].x)
+    }
+
+    /// A run of `width` px of bar (`column` repeated) with each slot's ink:
+    /// `seen` where `glyphs` has ink within 1 px, blended by that ink.
+    nonisolated static func aloneImage(column: CGImage, width: Int, seen: CGImage, glyphs: CGImage,
+                                       slots: [(source: Int, target: Int, width: Int)]) -> CGImage? {
+        let height = column.height
+        guard width > 0, seen.height == height, glyphs.height == height, glyphs.width == seen.width else { return nil }
+        func context(_ w: Int) -> CGContext? {
+            CGContext(data: nil, width: w, height: height, bitsPerComponent: 8, bytesPerRow: w * 4,
+                      space: column.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        }
+        guard let out = context(width), let seenCtx = context(seen.width), let inkCtx = context(glyphs.width) else { return nil }
+        out.interpolationQuality = .none
+        out.draw(column, in: CGRect(x: 0, y: 0, width: width, height: height))
+        seenCtx.draw(seen, in: CGRect(x: 0, y: 0, width: seen.width, height: height))
+        inkCtx.draw(glyphs, in: CGRect(x: 0, y: 0, width: glyphs.width, height: height))
+        guard let o = out.data?.assumingMemoryBound(to: UInt8.self),
+              let s = seenCtx.data?.assumingMemoryBound(to: UInt8.self),
+              let g = inkCtx.data?.assumingMemoryBound(to: UInt8.self)
+        else { return nil }
+        let sw = seen.width
+        for slot in slots {
+            for y in 0..<height {
+                for dx in 0..<slot.width {
+                    let sx = slot.source + dx, tx = slot.target + dx
+                    guard sx >= 0, sx < sw, tx >= 0, tx < width else { continue }
+                    var ink = 0
+                    for ny in max(0, y - 1)...min(height - 1, y + 1) {
+                        for nx in max(0, sx - 1)...min(sw - 1, sx + 1) { ink = max(ink, Int(g[(ny * sw + nx) * 4 + 3])) }
+                    }
+                    guard ink > 0 else { continue }
+                    let m = min(255, ink * 2)
+                    let op = (y * width + tx) * 4, sp = (y * sw + sx) * 4
+                    for c in 0..<4 { o[op + c] = UInt8(Int(o[op + c]) + (Int(s[sp + c]) - Int(o[op + c])) * m / 255) }
+                }
+            }
+        }
+        return out.makeImage()
     }
 
     /// `run` of `picture`, cut column for column into a layer.
@@ -2900,6 +3100,7 @@ final class LiveMirror {
             if side.mirrors.contains(where: { !$0.provisional }), moving || net || looked { await refreshSide(side, why: looked ? "found" : "poll", full: deep) }
         }
         for side in sides { side.cover?.keepUp(for: Self.coverSafety) }
+        for side in sides where side.aloneFresh || tickCount % 20 == 0 { await refreshAlone(side) }
         // Hidden out under live mode goes back once the pointer has been off
         // the bar for the re-hide delay (the tick's quarter second at least),
         // with no button down (a ⌘-drag may pass below the bar).
