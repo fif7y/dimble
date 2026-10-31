@@ -2293,6 +2293,14 @@ extension TransitionCoordinator {
             PelmetLog.log("pass: no Screen Recording, skipped")
             return nil
         }
+        // Live mode's cover is over the bar and every capture but the
+        // mirror's comes back empty: the reveal filmed nothing, 0 of 20
+        // pictures, on every open while a Live Activity ran (2026-10-31).
+        // The first open after it takes them.
+        guard !ConcealGhostOverlay.liveModeBlocksCaptures else {
+            PelmetLog.log("pass: live mode has the bar, skipped")
+            return nil
+        }
         beginBarHold(.picturePass)
         // By section, not the walk's `concealed`: that misses system items
         // such as Sound, which leave the AX tree when hidden.
