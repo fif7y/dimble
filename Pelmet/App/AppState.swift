@@ -1729,16 +1729,18 @@ final class AppState {
         if launchBaselineApplied { reconcileAnchor("screen recording \(granted ? "granted" : "lost")") }
     }
 
-    /// Grant arrived: the engine's walks were empty until now, and the clock
-    /// relay's tap never came up — re-read the bar, retry the tap, and
-    /// re-apply the model. Grant lost: nothing to tear down (walks just go
-    /// empty), but the status item and settings show the warning.
+    /// Grant arrived: the engine's walks were empty until now, the clock
+    /// relay's tap never came up, and the band's pointer tap was blind to
+    /// other apps — re-read the bar, retry both taps, and re-apply the
+    /// model. Grant lost: nothing to tear down (walks just go empty), but
+    /// the status item and settings show the warning.
     private func accessibilityChanged(_ granted: Bool) {
         accessibilityGranted = granted
         PelmetLog.log("ax: trusted=\(granted)")
         statusItem?.updateAccessibilityWarning(granted: granted)
         guard granted else { return }
         clockRelay?.setEnabled(settings.clockClickOpensNotificationCenter)
+        bandMonitor?.accessibilityGranted()
         Task {
             updateSnapshot(await engine.snapshot())
             await engine.setModel(settings.sectionModel)

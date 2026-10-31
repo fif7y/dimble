@@ -179,6 +179,24 @@ final class MenuBarBandMonitor {
         }
     }
 
+    /// Accessibility arrived after `start`. A tap made before it comes up
+    /// but sees only the pointer over Pelmet's own windows, so hover worked
+    /// in Settings and nowhere else until the next launch (#116: an update
+    /// relaunch started untrusted, the grant landed 45 s later). A fresh tap
+    /// sees every move, and the NSEvent fallback gives way to it.
+    func accessibilityGranted() {
+        let tap = PointerMoveTap { [weak self] in self?.pointerMoved() }
+        guard tap.start() else { return }
+        pointerTap?.stop()
+        pointerTap = tap
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+        if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
+        mouseMonitor = nil
+        localMouseMonitor = nil
+        rebuildScreenGeometry()
+        PelmetLog.log("band: pointer tap restarted — Accessibility arrived")
+    }
+
     private func dragEvent(_ event: NSEvent) {
         guard let appState else { return }
         switch event.type {
