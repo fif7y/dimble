@@ -2097,7 +2097,9 @@ final class LiveMirror {
                 CGRect(x: (node.frame.minX - union.minX) * scale - pixels.minX, y: (node.frame.minY - union.minY) * scale - pixels.minY,
                        width: node.frame.width * scale, height: node.frame.height * scale)
             }
-            let blanked = Self.blanked(crop, rects: rects)
+            let capsule = CGRect(x: (tree.frame.minX - union.minX) * scale - pixels.minX, y: (tree.frame.minY - union.minY) * scale - pixels.minY,
+                                 width: tree.frame.width * scale, height: tree.frame.height * scale)
+            let blanked = Self.cut(Self.blanked(crop, rects: rects), toCapsule: capsule)
             let had = mirror.base.contents
             CATransaction.begin(); CATransaction.setDisableActions(true)
             mirror.base.contents = blanked
@@ -2120,6 +2122,27 @@ final class LiveMirror {
         }
         PelmetLog.log("livemirror: snapshot #\(side.snapshots) — \(reason) [display \(side.id), \(image.width)×\(image.height)px, \(Int(-started.timeIntervalSinceNow * 1000))ms, \(excluded.count) window(s) left out, \(shown.count) pill(s)]")
         return true
+    }
+
+    /// The still with everything outside the pill's capsule (`rect`, pixels,
+    /// top-left origin, fully round ends) made clear. The still is cut to the
+    /// pill's visual, hit area included, which reaches 1–1.5 pt past the
+    /// capsule: those edges and the four corners held the backdrop where the
+    /// real pill stands, and the copy stands somewhere else, a box around the
+    /// pill on any wallpaper that isn't flat (#120). The capsule's ink is the
+    /// pill's AX frame, radius half its height (measured, 2026-10-31).
+    nonisolated private static func cut(_ image: CGImage, toCapsule rect: CGRect) -> CGImage {
+        let width = image.width, height = image.height
+        guard rect.width > 4, rect.height > 4, let space = image.colorSpace,
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return image }
+        let flipped = CGRect(x: rect.minX, y: CGFloat(height) - rect.maxY, width: rect.width, height: rect.height)
+        let radius = min(rect.width, rect.height) / 2
+        context.addPath(CGPath(roundedRect: flipped, cornerWidth: radius, cornerHeight: radius, transform: nil))
+        context.clip()
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage() ?? image
     }
 
     /// The still with each rect (pixels, top-left origin) painted over from
