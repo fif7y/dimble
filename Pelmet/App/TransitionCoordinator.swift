@@ -2341,7 +2341,7 @@ extension TransitionCoordinator {
             empty = await ConcealGhostOverlay.snapshotSet(
                 of: precaptureRect, excludingOwnWindows: true, primaryOnly: true, bare: anchoredPass)
         }
-        PelmetLog.log("pass: empty bar \(emptySource) at \(ms())ms (\(empty.count) display(s))")
+        PelmetLog.log("pass: empty bar \(emptySource) at \(ms())ms\(livePass ? "" : " (\(empty.count) display(s))")")
 
         // A walk that shows the icons `watch` names and agrees with the one
         // before it: read while they still slid in, S1's crops were off by
@@ -2416,7 +2416,9 @@ extension TransitionCoordinator {
             wanted($0) && $0.bundleID.map(running.contains) != false
                 && !(livePass && $0.bundleID.map(PelmetBundle.ownIDs.contains) == true)
         })
-        let snap = await settledWalk(watching: { wanted($0) }, awaiting: awaiting)
+        // Live, the icons are already out and nothing slides in: one still
+        // missing never comes, and waiting on it held the bar 0.6 s.
+        let snap = await settledWalk(watching: { wanted($0) }, awaiting: livePass ? [] : awaiting)
         appState.updateSnapshot(snap)
         // The panel orders its tiles the way the bar just drew them.
         appState.recordDrawnOrder(snap, revealed: anchoredPass ? passSections.union(anchoredSections) : sections)
