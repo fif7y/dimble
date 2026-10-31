@@ -4143,6 +4143,18 @@ final class AppState {
         return carried.union(drawnHidden)
     }
     private var collateralTracker = CollateralTracker()
+    /// What decides a destroyed verdict once a report comes in (#115): where
+    /// the app runs from (#30's kill keys on that) and whether its own extras
+    /// bar still lists the icon (none: the app took it off itself, or the
+    /// agent parked it).
+    private func collateralEvidence(_ key: ItemID) -> String {
+        guard let bundle = key.bundleID,
+              let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first
+        else { return "not running" }
+        let lists = ItemEnumerator.listsStatusItem(pid: app.processIdentifier).map { $0 ? "lists its icon" : "lists none" }
+        let path = app.bundleURL.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "?"
+        return "pid \(app.processIdentifier) at \(path), its extras bar \(lists ?? "unreadable")"
+    }
     /// Canonical keys of icons the bar destroyed although the allowlist
     /// protects them (#30) — same badge, and the editor keeps their tile
     /// instead of losing them to every section at once. See CollateralTracker.
@@ -4930,8 +4942,10 @@ final class AppState {
             running: { NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty == false }
         )
         if collateralTracker.confirmed != destroyedKeys {
+            let added = collateralTracker.confirmed.subtracting(destroyedKeys)
             destroyedKeys = collateralTracker.confirmed
             PelmetLog.log("snapshot: destroyed by the bar \(destroyedKeys.map(\.rawValue))")
+            for key in added { PelmetLog.log("snapshot: \(key.rawValue) destroyed — \(collateralEvidence(key))") }
         }
         snapshot = snap
         grouper.noteChange()
