@@ -5265,8 +5265,15 @@ final class AppState {
                 // mid-transition superseded the transition's own converge
                 // for nothing; a known bundle rejoining the allowlist is
                 // picked up by the next converge, a new one is routed now.
-                if !isTransitioning || !registered.isEmpty {
+                // Nor during a blink (the clock, Camera & mic): its drop
+                // reflows the bar and lands here, and converging took the
+                // assertion back before the press, which macOS refused; the
+                // panel came 1.7s late and the next click closed it (#103).
+                // The blink re-acquires on its own once its click is in.
+                if (!isTransitioning && !clockBlinkInFlight) || !registered.isEmpty {
                     await engine.setModel(settings.sectionModel)
+                } else if clockBlinkInFlight {
+                    PelmetLog.log("items changed: no converge — a blink has the assertion down for its click")
                 }
                 updateSnapshot(await engine.snapshot())
                 // The system camera pill appearing/vanishing is an
