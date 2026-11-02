@@ -632,7 +632,11 @@ final class LiveMirror {
     /// Before the assertion drops nothing is held: a reveal that comes then
     /// goes first and the start stands down (`standDown`). After it, the
     /// reveal waits for the start to settle.
-    private var assertionDropped = false
+    /// Dimble's own Hidden extras come and go with it, under the covers
+    /// (`ExtrasManager.holdForLive`).
+    private var assertionDropped = false {
+        didSet { if oldValue != assertionDropped { appState?.holdExtrasForLive(assertionDropped) } }
+    }
     private var standDown = false
     /// The displays changed while a start or a retake ran.
     private var displaysChangedWhileEntering = false

@@ -1459,6 +1459,7 @@ final class AppState {
     func showExtrasAlone(_ keys: Set<ItemID>) { extras?.showAlone(keys) }
     func releaseExtrasAlone(_ keys: Set<ItemID>) { extras?.releaseAlone(keys) }
     func forgetExtrasAlone(_ keys: Set<ItemID>) { extras?.forgetAlone(keys) }
+    func holdExtrasForLive(_ held: Bool) { extras?.holdForLive(held) }
 
     /// False for one of Pelmet's own extras its section would not bring out
     /// (media controls with nothing playing); true for anything else.

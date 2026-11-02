@@ -89,6 +89,8 @@ final class ExtrasManager {
     /// Attached ahead of an uncovered swap (see `preattach`): the companion's
     /// show only fades them, and a pending layout drop must leave them be.
     private var preattached: Set<UUID> = []
+    /// Live mode has the assertion down under its covers (`holdForLive`).
+    private var heldForLive = false
     private var cameraMicMonitor: CameraMicMonitor?
     /// Pelmet's own countdown, alive while a timer item exists.
     private var pelmetTimer: PelmetTimer?
@@ -410,6 +412,7 @@ final class ExtrasManager {
             // Shown on its own, the extra reads as if its section were out:
             // its own rule below (media playing, app running) still decides.
             var visible = section == .visible || revealed.contains(section) || shownAlone.contains(id)
+                || (heldForLive && section == .hidden && ridesSection(spec))
             switch spec.kind {
             case .cameraMicIndicator:
                 // Pure indicator, like Apple's: exists ONLY while hardware is
@@ -638,33 +641,52 @@ final class ExtrasManager {
     func preattach(model: SectionModel, revealing: Set<PelmetCore.Section>) -> [NSStatusItem] {
         var attached: [NSStatusItem] = []
         for (id, item) in items {
-            guard let spec = specs[id], lastVisible[id] != true else { continue }
-            switch spec.kind {
-            case .airdrop, .shortcut, .userSwitching, .shortcutsMenu, .siri, .quickNote: break
-            case .timer:
-                // Counting: already in the bar on its own. Idle under
-                // "While a timer runs": stays out.
-                guard !(pelmetTimer?.isActive ?? false), spec.resolvedShowRule == .always else { continue }
-            case .focus, .timeMachine:
-                // Each rides its section under the card's rule; one already
-                // out on its rule was skipped above. Idle under "only while
-                // active": stays out.
-                guard !spec.isOnlyWhileActive else { continue }
-            case .mediaControls:
-                // Audio-driven unless it always shows.
-                guard spec.resolvedShowRule == .always else { continue }
-            case .appLauncher:
-                // The running edge has its own placement walk; only a plain
-                // launcher (or one already running) rides the section.
-                guard spec.resolvedShowRule != .whenActive || Self.isRunning(spec) else { continue }
-            case .cameraMicIndicator, .liveActivity: continue  // driven by what runs
-            }
+            // One already out on its rule is in the bar.
+            guard let spec = specs[id], lastVisible[id] != true, ridesSection(spec) else { continue }
             guard revealing.contains(model.section(of: Self.itemID(for: spec))) else { continue }
             StatusItemFader.attach(item, shownLength: Self.shownLength(for: spec))
             preattached.insert(id)
             attached.append(item)
         }
         return attached
+    }
+
+    /// Comes and goes with its section alone, nothing it watches deciding:
+    /// what `preattach` attaches and live mode holds (`holdForLive`).
+    private func ridesSection(_ spec: ExtraItemSpec) -> Bool {
+        switch spec.kind {
+        case .airdrop, .shortcut, .userSwitching, .shortcutsMenu, .siri, .quickNote: return true
+        case .timer:
+            // Counting: already in the bar on its own. Idle under
+            // "While a timer runs": stays out.
+            return !(pelmetTimer?.isActive ?? false) && spec.resolvedShowRule == .always
+        case .focus, .timeMachine:
+            // Each rides its section under the card's rule. Idle under
+            // "only while active": stays out.
+            return !spec.isOnlyWhileActive
+        case .mediaControls:
+            // Audio-driven unless it always shows.
+            return spec.resolvedShowRule == .always
+        case .appLauncher:
+            // The running edge has its own placement walk; only a plain
+            // launcher (or one already running) rides the section.
+            return spec.resolvedShowRule != .whenActive || Self.isRunning(spec)
+        case .cameraMicIndicator, .liveActivity: return false  // driven by what runs
+        }
+    }
+
+    /// Live mode lets the assertion go under its covers (`LiveMirror`): the
+    /// Hidden icons come back beneath them, and the extras of Hidden join
+    /// them there, as if Hidden were out. A hover or the « then ends the
+    /// covers at the Always Hidden icons, the edge measured with the extras
+    /// in, and they show where they stand: nothing joins the layout, nothing
+    /// reflows (they stayed out, 2026-11-01). The assertion back, they leave
+    /// the way a conceal takes them, under the covers.
+    func holdForLive(_ held: Bool) {
+        guard held != heldForLive else { return }
+        heldForLive = held
+        PelmetLog.log("extras: \(held ? "Hidden's extras join the bar under live mode's covers" : "live mode's hold ends")")
+        applyCurrent()
     }
 
     /// Two-phase hide: width-collapse rides the same bar reflow as the
