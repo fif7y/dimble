@@ -1933,6 +1933,7 @@ final class LiveMirror {
             guard let self, let side else { return }
             self.clicked(side, at: point)
         }
+        if pressPassesClicks { overlay.passClicks(true) }
         if !keepMirrors {
             for mirror in side.mirrors { mirror.attached = false }
             side.aloneAttached = false
@@ -3062,6 +3063,32 @@ final class LiveMirror {
             self.toggleCover("\(Int(Self.liftedCoverReturn))s")
         }
     }
+
+    /// A press clicks an item on the bar under the cover (a panel or row
+    /// tile, the command bar): the cover took that click for a mirror click
+    /// and opened the pill's card instead. For the press the covers stay
+    /// drawn and let clicks through to the bar (`takeClicksAfterPress`).
+    /// Lifting the cover instead showed the hidden icons, and a panel pass
+    /// pictured them on the bare bar (2026-11-01). False when no cover is up.
+    ///
+    /// The window server has the new setting only once the run loop commits:
+    /// a click posted at once still landed on the cover, 12–45 ms after it
+    /// was told. The press waits two frames.
+    func passClicksForPress() async -> Bool {
+        guard isActive, sides.contains(where: { $0.cover != nil }) else { return false }
+        pressPassesClicks = true
+        ConcealGhostOverlay.liveCoversPassClicks(true)
+        PelmetLog.log("livemirror: covers let the press's click through")
+        try? await Task.sleep(for: .milliseconds(40))
+        return true
+    }
+
+    func takeClicksAfterPress() {
+        guard pressPassesClicks else { return }
+        pressPassesClicks = false
+        ConcealGhostOverlay.liveCoversPassClicks(false)
+    }
+    private var pressPassesClicks = false
 
     // MARK: Tick
 

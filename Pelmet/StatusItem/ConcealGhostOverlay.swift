@@ -1011,6 +1011,14 @@ final class ConcealGhostOverlay {
         window.ignoresMouseEvents = through || countsAsStrip
     }
 
+    /// Every live cover, one still fading out included, lets clicks through
+    /// to the bar under it, or takes them again.
+    static func liveCoversPassClicks(_ through: Bool) {
+        for cover in registry.allObjects where cover.isLiveCover && !cover.finished {
+            cover.passClicks(through)
+        }
+    }
+
     // MARK: Live mode
 
     var windowNumber: Int { window.windowNumber }

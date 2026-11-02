@@ -268,6 +268,8 @@ final class ItemPress {
             let unheld = transitions.unholdForPress(
                 display: (clickedElsewhere ? aimDisplay : nil) ?? CGMainDisplayID(), at: frame.midX)
             defer { if unheld { transitions.reholdAfterPress() } }
+            // Live mode's cover takes every click on the bar: this one goes through it.
+            let passed = await appState.liveMirror.passClicksForPress()
             let geometry = Self.geometry(at: frame)
             let before = await Self.counts(pid: target.pid, geometry: geometry)
             let wasFront = Self.isFrontmost(target.pid)
@@ -275,6 +277,7 @@ final class ItemPress {
                 at: CGPoint(x: frame.midX, y: frame.midY),
                 button: button == .secondary ? .right : .left
             )
+            if passed { appState.liveMirror.takeClicksAfterPress() }
             let bar = aimDisplay.map {
                 clickedElsewhere ? ", on display \($0)'s bar" : ", on the main bar (display \($0)'s had no copy to click)"
             } ?? ""
