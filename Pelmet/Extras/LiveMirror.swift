@@ -606,14 +606,17 @@ final class LiveMirror {
     private var coverLifted = false
     /// Hidden is out under live mode (a hover or the «): the covers end at
     /// the Always Hidden icons, the assertion stays down, nothing on the bar
-    /// moves. `outSince`: when the pointer left the bar.
-    private struct HiddenOut { let reason: RevealReason; var outSince: Date? }
+    /// moves. `outSince`: when the pointer left the bar. `displays`: the
+    /// bars it is out on, the one it was asked on, as a reveal outside live
+    /// mode (2026-11-03, a hover on the built-in showed the BenQ's too).
+    private struct HiddenOut { let reason: RevealReason; var outSince: Date?; var displays: Set<CGDirectDisplayID> }
     private var hiddenOut: HiddenOut? {
         // No reveal runs, so the « takes its revealed face from here (#107).
         didSet { if (oldValue == nil) != (hiddenOut == nil) { appState?.chevronFaceChanged() } }
     }
     /// The covers end at the Always Hidden icons: Hidden is out, live.
     var hiddenIsOut: Bool { hiddenOut != nil }
+    private func isOut(_ side: Side) -> Bool { hiddenOut?.displays.contains(side.id) ?? false }
     private var liftedReturn: Task<Void, Never>?
     private var lastBlockedWhy = ""
     private var lastSummaryAt = Date()
@@ -821,13 +824,19 @@ final class LiveMirror {
         if sections == [.hidden], [.hover, .statusItem, .barDrag].contains(reason), how != .toggleAll, !coverLifted {
             // On a display that shows every icon Hidden is out already: a
             // hover or a drag asks nothing, the « opens Always Hidden there (#96).
-            if appState?.pointerDisplayBehavior == .alwaysShowAll, hiddenOut == nil {
+            if appState?.pointerDisplayBehavior == .alwaysShowAll {
                 if reason != .statusItem { return true }
+                hiddenOut = nil
                 beginHandOver(reason)
                 return false
             }
-            if hiddenOut != nil {
-                if reason == .statusItem { Task { @MainActor in await self.hideHidden("the « again") } }
+            if let out = hiddenOut {
+                // Another display's bar: Hidden comes out there too.
+                if let side = pointerSide(), !side.showsAll, !out.displays.contains(side.id) {
+                    Task { @MainActor in await self.showHidden(reason) }
+                } else if reason == .statusItem {
+                    Task { @MainActor in await self.hideHidden("the « again") }
+                }
                 return true
             }
             Task { @MainActor in await self.showHidden(reason) }
@@ -840,11 +849,17 @@ final class LiveMirror {
 
     /// The covers end at the Always Hidden icons: Hidden shows, live.
     private func showHidden(_ reason: RevealReason) async {
-        guard isActive, !entering, !exiting, !handingOver, hiddenOut == nil else { return }
-        hiddenOut = HiddenOut(reason: reason, outSince: nil)
+        guard isActive, !entering, !exiting, !handingOver else { return }
+        // On the bar it was asked on, or on every hiding one when the
+        // pointer is on none (an AX press of the «).
+        let here = pointerSide().flatMap { $0.showsAll ? nil : $0 }
+        let targets = (here.map { [$0] } ?? sides.filter { !$0.showsAll }).filter { !isOut($0) }
+        guard !targets.isEmpty else { return }
+        if hiddenOut == nil { hiddenOut = HiddenOut(reason: reason, outSince: nil, displays: []) }
+        hiddenOut?.displays.formUnion(targets.map(\.id))
         let started = Date()
         var fresh = true
-        for side in sides where !side.showsAll {
+        for side in targets {
             await measureRunEdge(side, fresh: fresh)
             fresh = false
             guard hiddenOut != nil, isActive, !exiting, !handingOver else { return }
@@ -854,18 +869,24 @@ final class LiveMirror {
             }
             buildCover(side, left: side.coverMinX, right: edge - 1, why: "hidden out")
         }
-        PelmetLog.log("livemirror: reveal(\(reason)) — Hidden out under live mode in \(Int(-started.timeIntervalSinceNow * 1000))ms, the assertion stays down")
+        PelmetLog.log("livemirror: reveal(\(reason)) — Hidden out under live mode on display(s) \(targets.map(\.id).sorted()) in \(Int(-started.timeIntervalSinceNow * 1000))ms, the assertion stays down")
     }
 
     /// The covers reach the « again: Hidden is hidden.
     private func hideHidden(_ why: String) async {
-        guard hiddenOut != nil else { return }
+        guard let out = hiddenOut else { return }
         hiddenOut = nil
         guard isActive, !entering, !exiting, !handingOver, let chevron = lastChevron else { return }
-        for side in sides where !side.showsAll {
+        for side in sides where !side.showsAll && out.displays.contains(side.id) {
             buildCover(side, left: side.coverMinX, right: coverEnd(chevron, on: side) - 1, why: "hidden back")
         }
         PelmetLog.log("livemirror: Hidden back under the covers (\(why))")
+    }
+
+    /// The live display under the pointer.
+    private func pointerSide() -> Side? {
+        let point = NSEvent.mouseLocation
+        return sides.first { NSMouseInRect(point, $0.screen.frame, false) }
     }
 
     /// The pointer is in a menu bar (the top 40 pt of any display).
@@ -1248,7 +1269,7 @@ final class LiveMirror {
     /// that shows every icon, the left edge of the Hidden icons (they stay
     /// out, the cover is only over what the assertion hides left of them).
     private func coverEnd(_ chevron: NSRect, on side: Side) -> CGFloat {
-        if side.showsAll || hiddenOut != nil, let edge = side.runEdge { return edge }
+        if side.showsAll || isOut(side), let edge = side.runEdge { return edge }
         return chevronMinX(chevron, on: side)
     }
 
@@ -1363,7 +1384,7 @@ final class LiveMirror {
         // Debug: `-pelmet.debug.aloneRedraw YES` draws the run again every 5 s
         // with nothing changed, which must look like the cut it replaces.
         let redraw = UserDefaults.standard.bool(forKey: "pelmet.debug.aloneRedraw") || side.aloneFresh
-        guard !side.aloneItems.isEmpty, side.alone != nil, hiddenOut == nil, !coverLifted,
+        guard !side.aloneItems.isEmpty, side.alone != nil, !isOut(side), !coverLifted,
               !entering, !exiting, !handingOver, !retaking,
               side.aloneFresh || Date().timeIntervalSince(side.aloneDrawnAt) > (redraw ? 5 : 20)
         else { return }
@@ -2480,7 +2501,7 @@ final class LiveMirror {
         if let alone = side.alone {
             // Beside the « only: a cover ended at the Hidden icons (a hover
             // under live mode) no longer reaches it.
-            let beside = hiddenOut == nil
+            let beside = !isOut(side)
             CATransaction.begin(); CATransaction.setDisableActions(true)
             if !side.aloneAttached {
                 alone.removeFromSuperlayer()
@@ -3107,7 +3128,7 @@ final class LiveMirror {
             lastChevron = chevron
             var short = false
             for side in sides {
-                if side.showsAll || hiddenOut != nil { await measureRunEdge(side) }
+                if side.showsAll || isOut(side) { await measureRunEdge(side) }
                 // A picture that ends short of the « (an extra right of it,
                 // Dimble's ▶, went away since it was taken) can't reach it:
                 // the hidden icons showed in between until the activity
