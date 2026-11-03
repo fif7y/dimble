@@ -1507,7 +1507,13 @@ final class TransitionCoordinator {
             if entering { cover.animate(enter, entering: true) }
             if heldPassClicks { cover.passClicks(true) }
             // Replaced in place: the new picture is up before the old goes.
-            held.removeValue(forKey: id)?.dismiss()
+            // The window server draws a new window a frame after it is
+            // ordered in, so the old one stays a few frames more: dismissed
+            // at once, the hidden icons showed for one frame at every trim
+            // (2026-11-03, built-in and BenQ, live mode's exit).
+            if let old = held.removeValue(forKey: id) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { old.dismiss() }
+            }
             held[id] = cover
         }
         let edges = "strip \(lastConcealedStripRect.map { "\(Int($0.minX))..\(Int($0.maxX))" } ?? "-"), live \(liveHiddenRun.map { "\(Int($0.minX))..\(Int($0.maxX))" } ?? "-"), chevron \(primaryChevronMinX.map { "\(Int($0))" } ?? "-")"
