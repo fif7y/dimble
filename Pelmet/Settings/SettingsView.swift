@@ -8,13 +8,56 @@ import PelmetEngine
 import ServiceManagement
 import SwiftUI
 
-/// The brand accent — pelmet purple; slightly lighter in dark mode for contrast.
-enum PelmetAccent {
-    static let nsColor = NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(red: 0.494, green: 0.373, blue: 0.949, alpha: 1)  // #7E5FF2
-            : NSColor(red: 0.408, green: 0.255, blue: 0.929, alpha: 1)  // #6841ED
+/// Accent presets for Settings › General. Purple is the brand default.
+/// Read once at launch; changing it offers a relaunch.
+enum AccentChoice: String, CaseIterable, Identifiable {
+    case purple, blue, green, orange, pink
+    static let key = "pelmet.accent"
+    static var current: AccentChoice {
+        UserDefaults.standard.string(forKey: key).flatMap(AccentChoice.init) ?? .purple
     }
+
+    var id: String { rawValue }
+
+    var label: LocalizedStringKey {
+        switch self {
+        case .purple: "Purple"
+        case .blue: "Blue"
+        case .green: "Green"
+        case .orange: "Orange"
+        case .pink: "Pink"
+        }
+    }
+
+    /// (light, dark) as 0xRRGGBB; dark is lighter for contrast.
+    private var hex: (UInt32, UInt32) {
+        switch self {
+        case .purple: (0x6841ED, 0x7E5FF2)
+        case .blue: (0x0A6CFF, 0x4C93FF)
+        case .green: (0x1F9D55, 0x3DBE76)
+        case .orange: (0xD9610A, 0xFF9640)
+        case .pink: (0xD6336C, 0xF06595)
+        }
+    }
+
+    private static func ns(_ hex: UInt32) -> NSColor {
+        NSColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+
+    var nsColor: NSColor {
+        let (light, dark) = hex
+        return NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? Self.ns(dark) : Self.ns(light)
+        }
+    }
+}
+
+/// The accent — pelmet purple unless the user picked another; slightly
+/// lighter in dark mode for contrast.
+enum PelmetAccent {
+    static let nsColor = AccentChoice.current.nsColor
     static let accent = Color(nsColor: nsColor)
 
     /// GitHub-star gold: bright on dark, amber on light so the label stays legible.
@@ -806,6 +849,17 @@ struct SettingNote: View {
 private struct GeneralPane: View {
     @Environment(AppState.self) private var appState
     @State private var language = AppLanguage.current
+    @State private var accent = AccentChoice.current
+
+    private func offerAccentRelaunch() {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Relaunch Dimble to change its accent color?")
+        alert.informativeText = String(localized: "The new color applies the next time Dimble opens. Your menu bar layout is kept.")
+        alert.addButton(withTitle: String(localized: "Relaunch Now"))
+        alert.addButton(withTitle: String(localized: "Later"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        AppLanguage.relaunchReopeningSettings(tab: .general)
+    }
 
     var body: some View {
         SettingsCard {
@@ -890,6 +944,32 @@ private struct GeneralPane: View {
                     }
             }
             .settingAnchor("language")
+        }
+
+        SettingsCard(title: "Appearance") {
+            SettingRow(title: "Accent color", caption: "Relaunches Dimble to apply.") {
+                HStack(spacing: 8) {
+                    ForEach(AccentChoice.allCases) { choice in
+                        Button {
+                            guard choice != accent else { return }
+                            accent = choice
+                            UserDefaults.standard.set(choice.rawValue, forKey: AccentChoice.key)
+                            offerAccentRelaunch()
+                        } label: {
+                            Circle()
+                                .fill(Color(nsColor: choice.nsColor))
+                                .frame(width: 18, height: 18)
+                                .padding(3)
+                                .overlay(Circle().strokeBorder(
+                                    Color(nsColor: choice.nsColor), lineWidth: accent == choice ? 1.5 : 0))
+                        }
+                        .buttonStyle(.plain)
+                        .help(Text(choice.label))
+                        .accessibilityLabel(Text(choice.label))
+                    }
+                }
+            }
+            .settingAnchor("accentColor")
         }
 
         SettingsCard(title: "Permissions") {
