@@ -14,7 +14,7 @@ import SwiftUI
 struct PanelTileArt {
     enum Image {
         /// Cut from the bar (ItemPictures); one-colour glyphs are tinted.
-        case picture(CGImage, size: CGSize, monochrome: Bool)
+        case picture(CGImage, size: CGSize, monochrome: Bool, highlighted: Bool)
         /// The stand-in until a picture lands: the app's icon or a symbol.
         case icon(NSImage)
     }
@@ -630,7 +630,7 @@ struct PanelTileLabel: View {
         // draws as it is (#102).
         let room = CGSize(width: well.width - PanelMetrics.pictureMargin, height: well.height - PanelMetrics.pictureMargin)
         switch art.image {
-        case .picture(let image, let size, let monochrome):
+        case .picture(let image, let size, let monochrome, let highlighted):
             // The bar's own size, pulled in only when it can't fit (a wide
             // text item in a 44pt well), on whole device pixels: centred in
             // points, an odd picture in an even well sat at half a pixel and
@@ -646,7 +646,7 @@ struct PanelTileLabel: View {
                 .interpolation(placed.isOneToOne ? .none : .high)
             Group {
                 if monochrome {
-                    picture.foregroundStyle(ink.primary)
+                    picture.foregroundStyle(highlighted ? PelmetAccent.accent : ink.primary)
                 } else {
                     picture
                 }

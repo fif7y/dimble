@@ -2827,6 +2827,7 @@ extension TransitionCoordinator {
                 background: bgRect.flatMap { under?.image.cropping(to: $0) })
             else { continue }
             pictures[key] = picture
+            if picture.isHighlighted { PelmetLog.log("pass: \(key.rawValue) on a coloured capsule") }
             if dump { dumpPass([column], name: key.rawValue) }
         }
         return pictures

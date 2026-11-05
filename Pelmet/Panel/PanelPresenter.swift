@@ -1166,7 +1166,7 @@ final class PanelPresenter: RevealPresenter {
                     let name = item.map(ItemNaming.displayName(for:)) ?? ItemNaming.displayName(for: key)
                     if let picture = pictures.picture(for: key) {
                         content.art[tile] = PanelTileArt(
-                            image: .picture(picture.image, size: picture.size, monochrome: picture.isMonochrome), name: name)
+                            image: .picture(picture.image, size: picture.size, monochrome: picture.isMonochrome, highlighted: picture.isHighlighted), name: name)
                         // Shown while the pass retakes it.
                         if pictures.isStale(picture), !didntFitKeys.contains(key) { missing.append(key) }
                     } else {
@@ -1756,7 +1756,7 @@ final class PanelPresenter: RevealPresenter {
         let art: PanelTileArt
         var pictureWidth: CGFloat?
         if let id, let picture = pictures.picture(for: id.sectionKey) {
-            art = PanelTileArt(image: .picture(picture.image, size: picture.size, monochrome: picture.isMonochrome), name: "")
+            art = PanelTileArt(image: .picture(picture.image, size: picture.size, monochrome: picture.isMonochrome, highlighted: picture.isHighlighted), name: "")
             pictureWidth = picture.size.width
         } else {
             art = PanelTileArt(image: .icon(id.map(Self.standIn(for:)) ?? Self.placeholder), name: "")

@@ -22,6 +22,10 @@ final class ItemPictures {
         /// panel's own appearance, since the bar it was taken on can be
         /// dark over a light panel or the other way round.
         let isMonochrome: Bool
+        /// The bar draws a coloured capsule behind it, macOS's sign that the
+        /// item is on (Screen Mirroring in use, #125). The mask leaves the
+        /// capsule out, so the tile puts the sign in the glyph's colour.
+        let isHighlighted: Bool
     }
 
     /// Past this a picture is retaken on the next open: an app can redraw
@@ -30,6 +34,9 @@ final class ItemPictures {
     /// stays on its tile until the new one lands: dropped at expiry, every
     /// tile turned app icon for the pass's second (#81).
     static let maxAge: TimeInterval = 900
+    /// A highlight says something about now and nothing tells Pelmet when it
+    /// ends, so it is looked at again sooner.
+    static let highlightedMaxAge: TimeInterval = 30
 
     private var pictures: [ItemID: Picture] = [:]
     /// Light or dark, as the pictures were taken. A one-colour picture is
@@ -50,7 +57,7 @@ final class ItemPictures {
     }
 
     func isStale(_ picture: Picture) -> Bool {
-        -picture.takenAt.timeIntervalSinceNow >= Self.maxAge
+        -picture.takenAt.timeIntervalSinceNow >= (picture.isHighlighted ? Self.highlightedMaxAge : Self.maxAge)
     }
 
     func store(_ new: [ItemID: Picture]) {
@@ -100,6 +107,8 @@ final class ItemPictures {
             let height: Double
             let takenAt: Date
             let isMonochrome: Bool
+            /// Nil in a file from before highlights.
+            let isHighlighted: Bool?
         }
         let dark: Bool
         let entries: [Entry]
@@ -114,7 +123,7 @@ final class ItemPictures {
                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }
             loaded[ItemID(rawValue: entry.key)] = Picture(
                 image: image, size: CGSize(width: entry.width, height: entry.height),
-                takenAt: entry.takenAt, isMonochrome: entry.isMonochrome)
+                takenAt: entry.takenAt, isMonochrome: entry.isMonochrome, isHighlighted: entry.isHighlighted ?? false)
         }
         guard !loaded.isEmpty else { return }
         pictures = loaded
@@ -136,7 +145,7 @@ final class ItemPictures {
         let entries = pictures.compactMap { key, picture -> Kept.Entry? in
             guard -picture.takenAt.timeIntervalSinceNow < Self.keepFor, let png = Self.png(picture.image) else { return nil }
             return Kept.Entry(key: key.rawValue, png: png, width: picture.size.width, height: picture.size.height,
-                              takenAt: picture.takenAt, isMonochrome: picture.isMonochrome)
+                              takenAt: picture.takenAt, isMonochrome: picture.isMonochrome, isHighlighted: picture.isHighlighted)
         }
         guard let data = try? PropertyListEncoder().encode(Kept(dark: dark, entries: entries)) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -171,13 +180,15 @@ final class ItemPictures {
         // bar draws behind an item drops out of the mask but stays in the
         // keyed column as faint ink, and a 17pt glyph in a 38pt capsule made
         // a 42pt row tile (Vorssaint, #102).
-        guard let ink = inkBounds(of: mask ?? image), let trimmed = (mask ?? image).cropping(to: ink) else { return nil }
+        let source = mask?.image ?? image
+        guard let ink = inkBounds(of: source), let trimmed = source.cropping(to: ink) else { return nil }
         let scale = CGFloat(image.width) / snap.windowFrame.width
         return Picture(
             image: trimmed,
             size: CGSize(width: CGFloat(trimmed.width) / scale, height: CGFloat(trimmed.height) / scale),
             takenAt: snap.takenAt,
-            isMonochrome: mask != nil)
+            isMonochrome: mask != nil,
+            isHighlighted: mask?.isHighlighted ?? false)
     }
 
     /// The box around the item's own ink, padded by one pixel. Ink is any
@@ -218,6 +229,11 @@ final class ItemPictures {
         return CGRect(x: lo, y: top, width: hi - lo + 1, height: bottom - top + 1)
     }
 
+    private struct Mask {
+        let image: CGImage
+        let isHighlighted: Bool
+    }
+
     /// A one-colour glyph as a white mask, or nil when it is not one: every
     /// clearly changed pixel lighter than the bar (or every one darker),
     /// barely any colour of its own (`inkTint`). Faint changes get no say: a
@@ -227,7 +243,7 @@ final class ItemPictures {
     /// far the glyph's core is: antialiased edges come out partial, not in
     /// the bar's colour, and a grey capsule inside the frame comes out as a
     /// faint fill (one the frame cuts through drops out, `capsuleFill`).
-    private static func flatMask(raw: CGImage, background: CGImage) -> CGImage? {
+    private static func flatMask(raw: CGImage, background: CGImage) -> Mask? {
         let w = raw.width, h = raw.height
         // Both drawn once, for both reads.
         guard w > 0, h > 0, background.width == w, background.height == h,
@@ -245,7 +261,7 @@ final class ItemPictures {
     /// `s` the item as filmed, `b` the empty bar, RGBA8 of one size.
     /// `fromCapsule`: nil when the crop cuts through no capsule.
     private static func flatMask(_ s: UnsafeMutablePointer<UInt8>, _ b: UnsafeMutablePointer<UInt8>,
-                                 width w: Int, height h: Int, fromCapsule: Bool) -> CGImage? {
+                                 width w: Int, height h: Int, fromCapsule: Bool) -> Mask? {
         // A capsule the bar draws behind the item, wider than its frame
         // (Velja's and Herd's on macOS 27): measured from its fill rather
         // than the bar, the capsule drops out and the glyph is left. A
@@ -321,12 +337,15 @@ final class ItemPictures {
             let a = UInt8(clamping: max(0, min(255, dl * 255 / peak)))
             out[i] = a; out[i + 1] = a; out[i + 2] = a; out[i + 3] = a
         }
-        return ctx.makeImage()
+        return ctx.makeImage().map { Mask(image: $0, isHighlighted: fill?.isColoured ?? false) }
     }
 
     private struct CapsuleFill {
         let luma: Int
         let color: (r: Int, g: Int, b: Int)
+        /// More colour than the bar behind it. A see-through capsule (Velja's,
+        /// Herd's) can only wash the bar's colour out, so this one has its own.
+        let isColoured: Bool
     }
 
     /// A capsule's fill when the crop cuts through one: a third or more of
@@ -343,7 +362,8 @@ final class ItemPictures {
             changed += column
         }
         let middle = changed.sorted { luma(s, $0) < luma(s, $1) }[changed.count / 2]
-        return CapsuleFill(luma: luma(s, middle), color: (Int(s[middle]), Int(s[middle + 1]), Int(s[middle + 2])))
+        return CapsuleFill(luma: luma(s, middle), color: (Int(s[middle]), Int(s[middle + 1]), Int(s[middle + 2])),
+                           isColoured: chroma(s, middle) - chroma(b, middle) >= 40)
     }
 
     private static func luma(_ p: UnsafeMutablePointer<UInt8>, _ i: Int) -> Int {
