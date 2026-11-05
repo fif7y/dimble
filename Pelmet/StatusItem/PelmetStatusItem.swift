@@ -419,6 +419,7 @@ final class AccentDotView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layer?.cornerRadius = frame.width / 2
+        needsDisplay = true
         track()
     }
 
