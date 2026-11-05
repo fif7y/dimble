@@ -33,6 +33,21 @@ struct ShowRuleSettingsTests {
         #expect(back.showRules.battery == .below20)
     }
 
+    // A blob from before the hotspot choice stays on "When it drops". The
+    // choice is kept while the rule is off, and watched only while it is on.
+    @Test func hotspotChoiceDefaultsOffAndIsKept() throws {
+        let legacy = try JSONDecoder().decode(ShowRuleSettings.self, from: Data(#"{"wifiOn":true}"#.utf8))
+        #expect(legacy.wifiOn && !legacy.wifiHotspot && !legacy.wifiWatchesHotspot)
+
+        var rules = ShowRuleSettings()
+        rules.wifiHotspot = true
+        #expect(!rules.wifiWatchesHotspot)
+        rules.wifiOn = true
+        #expect(rules.wifiWatchesHotspot)
+        let back = try JSONDecoder().decode(ShowRuleSettings.self, from: JSONEncoder().encode(rules))
+        #expect(back == rules)
+    }
+
     // One unreadable field resets that field alone, not the whole store.
     @Test func badFieldsFallBackOneByOne() throws {
         let blob = #"{"showRules":{"batteryOn":true,"batteryCondition":"nonsense","wifiOn":true},"autoRehide":false}"#

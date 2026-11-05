@@ -25579,6 +25579,64 @@
         }
       }
     },
+    "When it drops or on a hotspot": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bei Verbindungsabbruch oder über Hotspot"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Al perder la conexión o en un hotspot"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À la déconnexion ou sur un hotspot"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quando la connessione cade o su hotspot"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接続が切れたとき、またはホットスポット接続時"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연결이 끊겼을 때 또는 핫스팟 사용 시"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quando a conexão cai ou em um hotspot"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "При потере соединения или через точку доступа"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "断开连接或使用热点时"
+          }
+        }
+      }
+    },
     "When the pointer leaves the bar": {
       "localizations": {
         "de": {

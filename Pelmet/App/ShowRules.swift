@@ -11,6 +11,7 @@
 
 import AppKit
 import IOKit.ps
+import Network
 import notify
 import PelmetCore
 import PelmetEngine
@@ -34,6 +35,9 @@ final class ShowRules {
     private var wifiInterface: String?
     private var wifiDown = false
     private var wifiGraceTask: Task<Void, Never>?
+    private var hotspotMonitor: NWPathMonitor?
+    private var onHotspot = false
+    private var hotspotHoldTask: Task<Void, Never>?
     private var sleepObservers: [NSObjectProtocol] = []
     /// Between willSleep and didWake: a grace that runs out then does
     /// nothing, didWake starts it over.
@@ -50,6 +54,7 @@ final class ShowRules {
     isolated deinit {
         stopBattery()
         stopWifi()
+        stopHotspot()
     }
 
     /// The rules as Settings holds them now: watchers start for a rule that
@@ -65,6 +70,10 @@ final class ShowRules {
         if new.wifiOn != old.wifiOn {
             stopWifi()
             if new.wifiOn { watchWifi() }
+        }
+        if new.wifiWatchesHotspot != old.wifiWatchesHotspot {
+            stopHotspot()
+            if new.wifiWatchesHotspot { watchHotspot() }
         }
         evaluate()
     }
@@ -163,6 +172,7 @@ final class ShowRules {
                         self.wifiDown = false
                         self.note("wifi", "Wi-Fi grace ran across sleep, starts over on wake")
                     }
+                    if self.hotspotHoldTask != nil { self.holdHotspot() }
                     self.evaluate()
                 }
             },
@@ -194,6 +204,70 @@ final class ShowRules {
         let powered = (airport?["Power Status"] as? NSNumber)?.boolValue ?? false
         let joined = (link?["Active"] as? NSNumber)?.boolValue ?? false
         return powered && !joined
+    }
+
+    // MARK: Hotspot
+
+    /// Apple counts a Personal Hotspot as an expensive path, and reading that
+    /// asks for no permission, where the network's name needs Location
+    /// (#121). This monitor sees only Wi-Fi's path. Low Data Mode is
+    /// `isConstrained`, on any network, so that flag doesn't count.
+    private func watchHotspot() {
+        let monitor = NWPathMonitor(requiredInterfaceType: .wifi)
+        monitor.pathUpdateHandler = { [weak self] path in
+            // Debug: `-pelmet.debug.onHotspot YES` reads as on a hotspot, for
+            // the rule's show path on a Mac that isn't on one.
+            let hotspot = UserDefaults.standard.bool(forKey: "pelmet.debug.onHotspot")
+                || (path.status == .satisfied && path.isExpensive)
+            MainActor.assumeIsolated { self?.readHotspot(hotspot) }
+        }
+        monitor.start(queue: .main)
+        hotspotMonitor = monitor
+    }
+
+    private func stopHotspot() {
+        hotspotMonitor?.cancel()
+        hotspotMonitor = nil
+        onHotspot = false
+        hotspotHoldTask?.cancel()
+        hotspotHoldTask = nil
+        lastLine.removeValue(forKey: "hotspot")
+    }
+
+    private func readHotspot(_ hotspot: Bool) {
+        // A reading already queued when the rule went off has nothing to set.
+        guard rules.wifiWatchesHotspot else { return }
+        if hotspot {
+            hotspotHoldTask?.cancel()
+            hotspotHoldTask = nil
+            guard !onHotspot else { return }
+            onHotspot = true
+            note("hotspot", "Wi-Fi on a hotspot, Wi-Fi shows")
+            evaluate()
+        } else if onHotspot, hotspotHoldTask == nil {
+            holdHotspot()
+        }
+    }
+
+    /// The flag clears whenever Wi-Fi leaves its network, a roam included: the
+    /// icon goes only once it has stayed clear for the grace. Across sleep the
+    /// hold works like the Wi-Fi grace, starting over on wake.
+    private func holdHotspot() {
+        hotspotHoldTask?.cancel()
+        hotspotHoldTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.wifiGrace)
+            guard !Task.isCancelled, let self, !self.asleep else { return }
+            // Wi-Fi's own grace is still running: wait for it, or the icon
+            // blinks off between the two.
+            if self.wifiGraceTask != nil {
+                self.holdHotspot()
+                return
+            }
+            self.hotspotHoldTask = nil
+            self.onHotspot = false
+            self.note("hotspot", "Wi-Fi off the hotspot, Wi-Fi follows its section")
+            self.evaluate()
+        }
     }
 
     // MARK: Evaluate
@@ -233,6 +307,7 @@ final class ShowRules {
                 items.insert(Self.wifi)
             }
         }
+        if onHotspot { items.insert(Self.wifi) }
         guard items != shown else { return }
         shown = items
         apply(items)

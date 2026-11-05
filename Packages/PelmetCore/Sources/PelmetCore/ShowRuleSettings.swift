@@ -32,16 +32,22 @@ public struct ShowRuleSettings: Codable, Equatable, Sendable {
     /// Kept while the rule is off, so switching it back on finds the
     /// condition the person picked.
     public var batteryCondition: BatteryShowCondition = .onBattery
-    /// Wi-Fi has one condition: it is on and joined to no network.
+    /// Wi-Fi is on and joined to no network.
     public var wifiOn = false
+    /// Also while Wi-Fi is on a hotspot (#121). Kept while the rule is off,
+    /// like Battery's condition. A plain flag, so an older build ignores it.
+    public var wifiHotspot = false
 
     public init() {}
 
     /// The condition in force, nil with the rule off.
     public var battery: BatteryShowCondition? { batteryOn ? batteryCondition : nil }
 
+    /// Whether anything needs to read Wi-Fi's path for a hotspot.
+    public var wifiWatchesHotspot: Bool { wifiOn && wifiHotspot }
+
     private enum CodingKeys: String, CodingKey {
-        case batteryOn, batteryCondition, wifiOn
+        case batteryOn, batteryCondition, wifiOn, wifiHotspot
     }
 
     // Per field, like the store: a blob from before this existed, or one bad
@@ -52,6 +58,7 @@ public struct ShowRuleSettings: Codable, Equatable, Sendable {
         batteryOn = c.field(Bool.self, .batteryOn, defaults.batteryOn)
         batteryCondition = c.field(BatteryShowCondition.self, .batteryCondition, defaults.batteryCondition)
         wifiOn = c.field(Bool.self, .wifiOn, defaults.wifiOn)
+        wifiHotspot = c.field(Bool.self, .wifiHotspot, defaults.wifiHotspot)
     }
 }
 

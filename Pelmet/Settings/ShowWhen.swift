@@ -11,7 +11,7 @@ import SwiftUI
 /// What an icon waits for before it comes back.
 enum ShowWhenCondition: Hashable {
     case onBattery, below20
-    case wifiDrops
+    case wifiDrops, wifiDropsOrHotspot
     case focusOn
     case backingUp
 
@@ -20,6 +20,7 @@ enum ShowWhenCondition: Hashable {
         case .onBattery: "On battery power"
         case .below20: "Below \(BatteryShowCondition.lowCharge)%"
         case .wifiDrops: "When it drops"
+        case .wifiDropsOrHotspot: "When it drops or on a hotspot"
         case .focusOn: "While a Focus is on"
         case .backingUp: "While backing up"
         }
@@ -106,7 +107,7 @@ enum ShowWhenSubject: CaseIterable, Hashable {
     var conditions: [ShowWhenCondition] {
         switch self {
         case .battery: [.onBattery, .below20]
-        case .wifi: [.wifiDrops]
+        case .wifi: [.wifiDrops, .wifiDropsOrHotspot]
         case .focus: [.focusOn]
         case .timeMachine: [.backingUp]
         }
@@ -134,11 +135,12 @@ struct ShowWhenRule {
     }
 
     /// The condition in force when it is on, kept while it is off. Only
-    /// Battery has a choice of them.
+    /// Battery and Wi-Fi have a choice of them.
     var condition: ShowWhenCondition {
         switch subject {
         case .battery: appState.settings.showRules.batteryCondition == .below20 ? .below20 : .onBattery
-        case .wifi, .focus, .timeMachine: subject.conditions[0]
+        case .wifi: appState.settings.showRules.wifiHotspot ? .wifiDropsOrHotspot : .wifiDrops
+        case .focus, .timeMachine: subject.conditions[0]
         }
     }
 
@@ -193,6 +195,7 @@ struct ShowWhenRule {
             if let condition { appState.settings.showRules.batteryCondition = condition == .below20 ? .below20 : .onBattery }
         case .wifi:
             if let on { appState.settings.showRules.wifiOn = on }
+            if let condition { appState.settings.showRules.wifiHotspot = condition == .wifiDropsOrHotspot }
         case .focus, .timeMachine:
             guard let on, let index = specIndex else { return }
             appState.settings.extraItems[index].showRule = on ? .whenActive : .always
