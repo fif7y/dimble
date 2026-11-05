@@ -147,7 +147,7 @@ enum CommandBarCorpus {
         case .keyboard: "keyboard"
         case .volume: "speaker.wave.2"
         case .wifi: "wifi"
-        case .screenMirroring: pick("airplayvideo", "rectangle.on.rectangle")
+        case .screenMirroring: "rectangle.on.rectangle"
         case .primaryBentoBox: pick("switch.2", "slider.horizontal.3")
         }
     }

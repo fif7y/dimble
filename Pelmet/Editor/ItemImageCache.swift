@@ -75,7 +75,7 @@ enum ItemImageCache {
         let symbol: String
         if id.contains("wifi") { symbol = "wifi" }
         else if id.contains("battery") { symbol = "battery.75percent" }
-        else if id.contains("screen-mirroring") { symbol = "airplayvideo" }
+        else if id.contains("screen-mirroring") { symbol = "rectangle.on.rectangle" }
         else if id.contains("clock") { symbol = "clock" }
         else if id.contains("audiovideo") { symbol = "video" }
         else if id.contains("controlcenter") { symbol = "switch.2" }

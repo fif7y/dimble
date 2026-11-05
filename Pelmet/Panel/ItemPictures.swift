@@ -251,7 +251,7 @@ final class ItemPictures {
         // than the bar, the capsule drops out and the glyph is left. A
         // tinted one (over a purple wallpaper) failed the check below, and
         // the tile showed the capsule cut square at the frame (2026-10-12).
-        let fill: Int?
+        let fill: CapsuleFill?
         if fromCapsule {
             guard let found = capsuleFill(s, b, width: w, height: h) else { return nil }
             fill = found
@@ -275,7 +275,7 @@ final class ItemPictures {
         tinted = sign > 0 ? tintedLight : tintedDark
         func base(_ i: Int) -> Int {
             guard let fill else { return luma(b, i) }
-            return sign > 0 ? max(luma(b, i), fill + 4) : min(luma(b, i), fill - 4)
+            return sign > 0 ? max(luma(b, i), fill.luma + 4) : min(luma(b, i), fill.luma - 4)
         }
         if fill != nil {
             strong = 0
@@ -296,15 +296,18 @@ final class ItemPictures {
             if seen * 10 >= strong * 9 { peak = level; break }
         }
         guard peak >= 40 else { return nil }
-        if fill != nil {
+        if let fill {
             // The glyph's antialiased rim is a blend with the capsule's
             // colour, tinted whenever the capsule is: only the core is
-            // judged (Herd's H, a fifth of its pixels tinted, none in the core).
+            // judged (Herd's H, a fifth of its pixels tinted, none in the
+            // core). A saturated capsule keeps that blend bright enough to
+            // reach the core (Screen Mirroring in use, a fifth of it, #125),
+            // so a pixel counts only when it is no blend of ink and capsule.
             var core = 0
             tinted = 0
             for i in stride(from: 0, to: w * h * 4, by: 4) where (luma(s, i) - base(i)) * sign >= peak / 2 {
                 core += 1
-                if chroma(s, i) > 40 { tinted += 1 }
+                if chroma(s, i) > 40, inkTint(s, i, over: fill.color, sign: sign) > 60 { tinted += 1 }
             }
             guard tinted * 10 <= core else { return nil }
         }
@@ -321,20 +324,26 @@ final class ItemPictures {
         return ctx.makeImage()
     }
 
-    /// The luma of a capsule's fill when the crop cuts through one: a third
-    /// or more of both side columns changed from the bar (Velja's 18pt
-    /// capsule is 36 of a 39pt column's 78 rows). Their median, so the
-    /// capsule's antialiased rim does not set it. Nil when either side is
-    /// the bar, as it is around a glyph alone.
-    private static func capsuleFill(_ s: UnsafeMutablePointer<UInt8>, _ b: UnsafeMutablePointer<UInt8>, width w: Int, height h: Int) -> Int? {
+    private struct CapsuleFill {
+        let luma: Int
+        let color: (r: Int, g: Int, b: Int)
+    }
+
+    /// A capsule's fill when the crop cuts through one: a third or more of
+    /// both side columns changed from the bar (Velja's 18pt capsule is 36 of
+    /// a 39pt column's 78 rows). Their median by luma, so the capsule's
+    /// antialiased rim does not set it. Nil when either side is the bar, as
+    /// it is around a glyph alone.
+    private static func capsuleFill(_ s: UnsafeMutablePointer<UInt8>, _ b: UnsafeMutablePointer<UInt8>, width w: Int, height h: Int) -> CapsuleFill? {
         guard w > 4 else { return nil }
-        var levels: [Int] = []
+        var changed: [Int] = []
         for x in [1, w - 2] {
             let column = (0..<h).map { ($0 * w + x) * 4 }.filter { distance(s, b, $0) >= 26 }
             guard column.count * 3 >= h else { return nil }
-            levels += column.map { luma(s, $0) }
+            changed += column
         }
-        return levels.sorted()[levels.count / 2]
+        let middle = changed.sorted { luma(s, $0) < luma(s, $1) }[changed.count / 2]
+        return CapsuleFill(luma: luma(s, middle), color: (Int(s[middle]), Int(s[middle + 1]), Int(s[middle + 2])))
     }
 
     private static func luma(_ p: UnsafeMutablePointer<UInt8>, _ i: Int) -> Int {
@@ -349,14 +358,20 @@ final class ItemPictures {
     /// glyph 170 and up (2026-10-12). A channel the bar already holds near
     /// the ink's end says nothing and is left out.
     private static func inkTint(_ s: UnsafeMutablePointer<UInt8>, _ b: UnsafeMutablePointer<UInt8>, _ i: Int, sign: Int) -> Int {
+        inkTint(s, i, over: (Int(b[i]), Int(b[i + 1]), Int(b[i + 2])), sign: sign)
+    }
+
+    /// The same, over one colour: a capsule's fill.
+    private static func inkTint(_ s: UnsafeMutablePointer<UInt8>, _ i: Int, over ground: (r: Int, g: Int, b: Int), sign: Int) -> Int {
         var lo = Int.max, hi = Int.min
-        for c in 0..<3 {
-            let pixel = Int(s[i + c]), bar = Int(b[i + c])
-            let room = sign > 0 ? 255 - bar : bar
-            guard room >= 24 else { continue }
-            let alpha = (sign > 0 ? pixel - bar : bar - pixel) * 255 / room
+        func channel(_ offset: Int, _ level: Int) {
+            let pixel = Int(s[i + offset])
+            let room = sign > 0 ? 255 - level : level
+            guard room >= 24 else { return }
+            let alpha = (sign > 0 ? pixel - level : level - pixel) * 255 / room
             lo = min(lo, alpha); hi = max(hi, alpha)
         }
+        channel(0, ground.r); channel(1, ground.g); channel(2, ground.b)
         return hi >= lo ? hi - lo : 0
     }
 
