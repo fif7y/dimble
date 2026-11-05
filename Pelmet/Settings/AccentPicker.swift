@@ -122,7 +122,7 @@ struct AccentHSB: Equatable {
 
     /// "#7E5FF2", "7e5ff2" or "#abc"; nil for anything else.
     static func parse(_ text: String) -> UInt32? {
-        var digits = text.trimmingCharacters(in: .whitespaces)
+        var digits = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if digits.hasPrefix("#") { digits.removeFirst() }
         if digits.count == 3 { digits = digits.map { "\($0)\($0)" }.joined() }
         guard digits.count == 6, digits.allSatisfy(\.isHexDigit) else { return nil }

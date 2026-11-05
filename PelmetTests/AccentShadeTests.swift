@@ -73,6 +73,7 @@ struct AccentShadeTests {
         #expect(AccentHSB.parse("#7E5FF2") == 0x7E5FF2)
         #expect(AccentHSB.parse("7e5ff2") == 0x7E5FF2)
         #expect(AccentHSB.parse(" #abc ") == 0xAABBCC)
+        #expect(AccentHSB.parse("#7E5FF2\n") == 0x7E5FF2)
         #expect(AccentHSB.parse("#7E5FF") == nil)
         #expect(AccentHSB.parse("purple") == nil)
     }
