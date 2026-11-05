@@ -267,8 +267,24 @@ struct AccentPopover: View {
                 endTyping()
             }
             .onChange(of: typing) { _, now in
-                if !now { text = AccentHSB.text(color.hex) }
+                if now { selectWholeOnRelease() } else { text = AccentHSB.text(color.hex) }
             }
+    }
+
+    /// A click into the field takes the whole color, ready to be replaced. It
+    /// waits for the release, which would put the caret back, and a drag keeps
+    /// the selection it made.
+    private func selectWholeOnRelease() {
+        guard !opening else { return }
+        Task {
+            while NSEvent.pressedMouseButtons & 1 != 0 {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            try? await Task.sleep(for: .milliseconds(40))
+            guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView,
+                  editor.selectedRange().length == 0 else { return }
+            editor.selectAll(nil)
+        }
     }
 
     private var eyedropper: some View {
