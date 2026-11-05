@@ -10,15 +10,20 @@ import SwiftUI
 
 /// What an icon waits for before it comes back.
 enum ShowWhenCondition: Hashable {
-    case onBattery, below20
+    case battery(BatteryShowCondition)
     case wifiDrops, wifiDropsOrHotspot
     case focusOn
     case backingUp
 
     var label: LocalizedStringKey {
         switch self {
-        case .onBattery: "On battery power"
-        case .below20: "Below \(BatteryShowCondition.lowCharge)%"
+        case .battery(let condition):
+            switch condition {
+            case .onBattery: "On battery power"
+            case .below20, .below30, .below40: "Below \(condition.lowCharge)%"
+            case .charging: "While charging"
+            case .chargingOrBelow20: "While charging or below \(condition.lowCharge)%"
+            }
         case .wifiDrops: "When it drops"
         case .wifiDropsOrHotspot: "When it drops or on a hotspot"
         case .focusOn: "While a Focus is on"
@@ -106,7 +111,7 @@ enum ShowWhenSubject: CaseIterable, Hashable {
 
     var conditions: [ShowWhenCondition] {
         switch self {
-        case .battery: [.onBattery, .below20]
+        case .battery: BatteryShowCondition.allCases.map(ShowWhenCondition.battery)
         case .wifi: [.wifiDrops, .wifiDropsOrHotspot]
         case .focus: [.focusOn]
         case .timeMachine: [.backingUp]
@@ -138,7 +143,7 @@ struct ShowWhenRule {
     /// Battery and Wi-Fi have a choice of them.
     var condition: ShowWhenCondition {
         switch subject {
-        case .battery: appState.settings.showRules.batteryCondition == .below20 ? .below20 : .onBattery
+        case .battery: .battery(appState.settings.showRules.batteryCondition)
         case .wifi: appState.settings.showRules.wifiHotspot ? .wifiDropsOrHotspot : .wifiDrops
         case .focus, .timeMachine: subject.conditions[0]
         }
@@ -192,7 +197,7 @@ struct ShowWhenRule {
         switch subject {
         case .battery:
             if let on { appState.settings.showRules.batteryOn = on }
-            if let condition { appState.settings.showRules.batteryCondition = condition == .below20 ? .below20 : .onBattery }
+            if case .battery(let condition)? = condition { appState.settings.showRules.batteryCondition = condition }
         case .wifi:
             if let on { appState.settings.showRules.wifiOn = on }
             if let condition { appState.settings.showRules.wifiHotspot = condition == .wifiDropsOrHotspot }

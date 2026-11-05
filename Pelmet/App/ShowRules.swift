@@ -84,11 +84,13 @@ final class ShowRules {
         notify_register_dispatch(kIOPSNotifyPowerSource, &powerToken, .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.evaluate() }
         }
-        // The charge changes all day: listened to only for the rule that reads
+        // The charge changes all day: listened to only for the rules that read
         // it. The SDK has no percent-only key; this one fires when the percent
-        // or the time remaining changes.
-        if condition == .below20 {
-            notify_register_dispatch(kIOPSNotifyTimeRemaining, &percentToken, .main) { [weak self] _ in
+        // or the time remaining changes. Charging can end with neither moving,
+        // so a rule on it hears of any change to the power source.
+        if condition.watchesCharge {
+            let key = condition.watchesCharging ? kIOPSNotifyAnyPowerSource : kIOPSNotifyTimeRemaining
+            notify_register_dispatch(key, &percentToken, .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.evaluate() }
             }
         }
@@ -102,11 +104,13 @@ final class ShowRules {
         lastLine.removeValue(forKey: "battery")
     }
 
-    /// On battery power, and the internal battery's charge (nil with none).
-    private func batteryReading() -> (onBattery: Bool, percent: Int?) {
+    /// On battery power, the internal battery's charge (nil with none), and
+    /// whether it is charging right now.
+    private func batteryReading() -> (onBattery: Bool, percent: Int?, charging: Bool) {
         let info = IOPSCopyPowerSourcesInfo().takeRetainedValue()
         let providing = IOPSGetProvidingPowerSourceType(info).takeUnretainedValue() as String
         var percent: Int?
+        var charging = false
         let sources = IOPSCopyPowerSourcesList(info).takeRetainedValue() as [CFTypeRef]
         for source in sources {
             guard let description = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any],
@@ -116,12 +120,15 @@ final class ShowRules {
             else { continue }
             // Rounded, like the percentage Battery itself draws.
             percent = Int((Double(current) / Double(capacity) * 100).rounded())
+            charging = description[kIOPSIsChargingKey] as? Bool ?? false
             break
         }
         // Debug: `-pelmet.debug.onBattery YES` reads as unplugged at 10%, for a
         // Battery out on its own on a Mac that is plugged in.
-        if UserDefaults.standard.bool(forKey: "pelmet.debug.onBattery") { return (true, 10) }
-        return (providing == kIOPSBatteryPowerValue, percent)
+        if UserDefaults.standard.bool(forKey: "pelmet.debug.onBattery") { return (true, 10, false) }
+        // `-pelmet.debug.charging YES`, on a Mac that is plugged in and full.
+        if UserDefaults.standard.bool(forKey: "pelmet.debug.charging") { return (false, 50, true) }
+        return (providing == kIOPSBatteryPowerValue, percent, charging)
     }
 
     // MARK: Wi-Fi
@@ -276,7 +283,7 @@ final class ShowRules {
         var items: Set<ItemID> = []
         if let condition = rules.battery {
             let reading = batteryReading()
-            let met = condition.isMet(onBattery: reading.onBattery, percent: reading.percent)
+            let met = condition.isMet(onBattery: reading.onBattery, percent: reading.percent, charging: reading.charging)
             let charge = reading.percent.map { ", \($0)%" } ?? ""
             note("battery", met
                 ? "\(condition.rawValue) holds\(charge), Battery shows"

@@ -5,17 +5,60 @@ import Testing
 struct ShowRuleSettingsTests {
     // On battery power alone, or only once the charge is under 20%.
     @Test func batteryConditionsReadPowerAndCharge() {
-        #expect(BatteryShowCondition.onBattery.isMet(onBattery: true, percent: 90))
-        #expect(BatteryShowCondition.onBattery.isMet(onBattery: true, percent: nil))
-        #expect(!BatteryShowCondition.onBattery.isMet(onBattery: false, percent: 5))
+        #expect(BatteryShowCondition.onBattery.isMet(onBattery: true, percent: 90, charging: false))
+        #expect(BatteryShowCondition.onBattery.isMet(onBattery: true, percent: nil, charging: false))
+        #expect(!BatteryShowCondition.onBattery.isMet(onBattery: false, percent: 5, charging: true))
 
-        #expect(BatteryShowCondition.below20.isMet(onBattery: true, percent: 19))
-        #expect(!BatteryShowCondition.below20.isMet(onBattery: true, percent: 20))
-        #expect(!BatteryShowCondition.below20.isMet(onBattery: true, percent: 80))
+        #expect(BatteryShowCondition.below20.isMet(onBattery: true, percent: 19, charging: false))
+        #expect(!BatteryShowCondition.below20.isMet(onBattery: true, percent: 20, charging: false))
+        #expect(!BatteryShowCondition.below20.isMet(onBattery: true, percent: 80, charging: false))
         // Plugged in, a low charge is already being fixed.
-        #expect(!BatteryShowCondition.below20.isMet(onBattery: false, percent: 4))
+        #expect(!BatteryShowCondition.below20.isMet(onBattery: false, percent: 4, charging: true))
         // A charge that can't be read says nothing.
-        #expect(!BatteryShowCondition.below20.isMet(onBattery: true, percent: nil))
+        #expect(!BatteryShowCondition.below20.isMet(onBattery: true, percent: nil, charging: false))
+    }
+
+    // Each line is its own, and only counts on the battery (#126).
+    @Test func higherChargeLines() {
+        #expect(BatteryShowCondition.below30.isMet(onBattery: true, percent: 29, charging: false))
+        #expect(!BatteryShowCondition.below30.isMet(onBattery: true, percent: 30, charging: false))
+        #expect(BatteryShowCondition.below40.isMet(onBattery: true, percent: 39, charging: false))
+        #expect(!BatteryShowCondition.below40.isMet(onBattery: true, percent: 40, charging: false))
+        #expect(!BatteryShowCondition.below40.isMet(onBattery: false, percent: 10, charging: false))
+    }
+
+    // Charging is its own reading: plugged in and full doesn't count (#126).
+    @Test func chargingConditions() {
+        #expect(BatteryShowCondition.charging.isMet(onBattery: false, percent: 50, charging: true))
+        #expect(!BatteryShowCondition.charging.isMet(onBattery: false, percent: 100, charging: false))
+        #expect(!BatteryShowCondition.charging.isMet(onBattery: true, percent: 5, charging: false))
+
+        let either = BatteryShowCondition.chargingOrBelow20
+        #expect(either.isMet(onBattery: false, percent: 50, charging: true))
+        #expect(either.isMet(onBattery: true, percent: 19, charging: false))
+        #expect(!either.isMet(onBattery: true, percent: 20, charging: false))
+        #expect(!either.isMet(onBattery: false, percent: 100, charging: false))
+    }
+
+    // What each condition listens for beyond the power source changing.
+    @Test func conditionsWatchWhatTheyRead() {
+        #expect(!BatteryShowCondition.onBattery.watchesCharge)
+        #expect(BatteryShowCondition.below30.watchesCharge && !BatteryShowCondition.below30.watchesCharging)
+        #expect(BatteryShowCondition.charging.watchesCharge && BatteryShowCondition.charging.watchesCharging)
+        #expect(BatteryShowCondition.chargingOrBelow20.watchesCharging)
+    }
+
+    // The new choices survive a save, and a saved below20 still reads as one.
+    @Test func newConditionsRoundTrip() throws {
+        for condition in BatteryShowCondition.allCases {
+            var rules = ShowRuleSettings()
+            rules.batteryOn = true
+            rules.batteryCondition = condition
+            let back = try JSONDecoder().decode(ShowRuleSettings.self, from: JSONEncoder().encode(rules))
+            #expect(back.battery == condition)
+        }
+        let saved = try JSONDecoder().decode(ShowRuleSettings.self, from: Data(#"{"batteryOn":true,"batteryCondition":"below20"}"#.utf8))
+        #expect(saved.battery == .below20)
     }
 
     // A blob from before the rules existed decodes with every rule off.
