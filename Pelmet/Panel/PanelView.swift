@@ -806,7 +806,7 @@ private struct Caret: View {
 
     var body: some View {
         Rectangle()
-            .fill(Color.accentColor)
+            .fill(PelmetAccent.accent)
             .frame(width: 1.5, height: 15)
             .opacity(on ? 1 : 0)
             .task {

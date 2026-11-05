@@ -41,6 +41,8 @@ enum SettingsIndex {
                     ["hotkey", "shortcut", "keyboard shortcut", "toggle", "show hide", "key", "always hidden", "notification center"]),
             general("settingsHotkey", String(localized: "Open Settings"),
                     ["hotkey", "shortcut"]),
+            general("accentColor", String(localized: "Accent color"),
+                    ["color", "colour", "theme", "tint", "purple", "blue", "green", "orange", "pink"]),
             general("rightClickMenu", String(localized: "Right-click menu"),
                     ["context menu", "empty spot", "bar menu"]),
             general("language", String(localized: "Display language"),

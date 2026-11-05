@@ -9,7 +9,8 @@ import ServiceManagement
 import SwiftUI
 
 /// Accent presets for Settings › General. Purple is the brand default.
-/// Read once at launch; changing it offers a relaunch.
+/// Stored under its own defaults key (not in the settings blob), so a value
+/// this build doesn't know falls back to purple and an older build ignores it.
 enum AccentChoice: String, CaseIterable, Identifiable {
     case purple, blue, green, orange, pink
     static let key = "pelmet.accent"
@@ -52,13 +53,30 @@ enum AccentChoice: String, CaseIterable, Identifiable {
                 ? Self.ns(dark) : Self.ns(light)
         }
     }
+
+    /// The dark-mode shade, for surfaces that are always dark (onboarding).
+    var darkColor: Color { Color(nsColor: Self.ns(hex.1)) }
+}
+
+/// The chosen accent. Observable, so every SwiftUI view that reads
+/// `PelmetAccent` repaints when it changes — no relaunch.
+@Observable
+final class AccentStore {
+    static let shared = AccentStore()
+    var choice: AccentChoice {
+        didSet { UserDefaults.standard.set(choice.rawValue, forKey: AccentChoice.key) }
+    }
+    private init() { choice = .current }
 }
 
 /// The accent — pelmet purple unless the user picked another; slightly
-/// lighter in dark mode for contrast.
+/// lighter in dark mode for contrast. Computed on every read from the
+/// observable store, so never cache it in a `let` or a layer color.
 enum PelmetAccent {
-    static let nsColor = AccentChoice.current.nsColor
-    static let accent = Color(nsColor: nsColor)
+    static var nsColor: NSColor { AccentStore.shared.choice.nsColor }
+    static var accent: Color { Color(nsColor: nsColor) }
+    /// The dark-mode shade, for always-dark surfaces.
+    static var onDark: Color { AccentStore.shared.choice.darkColor }
 
     /// GitHub-star gold: bright on dark, amber on light so the label stays legible.
     static let star = Color(nsColor: NSColor(name: nil) { appearance in
@@ -884,17 +902,6 @@ struct SettingNote: View {
 private struct GeneralPane: View {
     @Environment(AppState.self) private var appState
     @State private var language = AppLanguage.current
-    @State private var accent = AccentChoice.current
-
-    private func offerAccentRelaunch() {
-        let alert = NSAlert()
-        alert.messageText = String(localized: "Relaunch Dimble to change its accent color?")
-        alert.informativeText = String(localized: "The new color applies the next time Dimble opens. Your menu bar layout is kept.")
-        alert.addButton(withTitle: String(localized: "Relaunch Now"))
-        alert.addButton(withTitle: String(localized: "Later"))
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        AppLanguage.relaunchReopeningSettings(tab: .general)
-    }
 
     var body: some View {
         SettingsCard {
@@ -919,6 +926,28 @@ private struct GeneralPane: View {
                     StatusIconPicker(selection: binding(\.statusIconStyle))
                 }
             }
+            SettingRow(title: "Accent color") {
+                HStack(spacing: 8) {
+                    ForEach(AccentChoice.allCases) { choice in
+                        let selected = AccentStore.shared.choice == choice
+                        Button {
+                            AccentStore.shared.choice = choice
+                        } label: {
+                            Circle()
+                                .fill(Color(nsColor: choice.nsColor))
+                                .frame(width: 18, height: 18)
+                                .padding(3)
+                                .overlay(Circle().strokeBorder(
+                                    Color(nsColor: choice.nsColor), lineWidth: selected ? 1.5 : 0))
+                        }
+                        .buttonStyle(.plain)
+                        .help(Text(choice.label))
+                        .accessibilityLabel(Text(choice.label))
+                        .accessibilityAddTraits(selected ? .isSelected : [])
+                    }
+                }
+            }
+            .settingAnchor("accentColor")
             SettingToggleRow(
                 // Named, not spelled out: a sentence long enough to say the
                 // whole thing pushed the switch onto its own line in
@@ -979,32 +1008,6 @@ private struct GeneralPane: View {
                     }
             }
             .settingAnchor("language")
-        }
-
-        SettingsCard(title: "Appearance") {
-            SettingRow(title: "Accent color", caption: "Relaunches Dimble to apply.") {
-                HStack(spacing: 8) {
-                    ForEach(AccentChoice.allCases) { choice in
-                        Button {
-                            guard choice != accent else { return }
-                            accent = choice
-                            UserDefaults.standard.set(choice.rawValue, forKey: AccentChoice.key)
-                            offerAccentRelaunch()
-                        } label: {
-                            Circle()
-                                .fill(Color(nsColor: choice.nsColor))
-                                .frame(width: 18, height: 18)
-                                .padding(3)
-                                .overlay(Circle().strokeBorder(
-                                    Color(nsColor: choice.nsColor), lineWidth: accent == choice ? 1.5 : 0))
-                        }
-                        .buttonStyle(.plain)
-                        .help(Text(choice.label))
-                        .accessibilityLabel(Text(choice.label))
-                    }
-                }
-            }
-            .settingAnchor("accentColor")
         }
 
         SettingsCard(title: "Permissions") {

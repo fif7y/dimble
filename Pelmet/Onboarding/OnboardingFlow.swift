@@ -15,8 +15,9 @@ private enum Ink {
     /// Warm near-black, never pure black.
     static let base = Color(red: 0.055, green: 0.05, blue: 0.045)
     static let raised = Color(red: 0.10, green: 0.095, blue: 0.09)
-    /// The pelmet purple — the one accent, used for the boundary and moments.
-    static let accent = Color(red: 0.494, green: 0.373, blue: 0.949)  // #7E5FF2 — lighter brand purple for the always-dark surface
+    /// The accent (pelmet purple unless changed in Settings), in its lighter
+    /// dark-mode shade for the always-dark surface.
+    static var accent: Color { PelmetAccent.onDark }
     static let text = Color(red: 0.96, green: 0.95, blue: 0.93)
     static let textDim = Color(red: 0.96, green: 0.95, blue: 0.93).opacity(0.55)
 }

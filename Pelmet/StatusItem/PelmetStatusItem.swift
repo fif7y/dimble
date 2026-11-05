@@ -89,19 +89,16 @@ final class PelmetStatusItem {
     /// An available update earns a 5pt accent dot at the chevron's top
     /// right — the one surface most users ever look at. It lives until the
     /// install relaunches the app.
-    private var updateDot: NSView?
+    private var updateDot: AccentDotView?
 
     func showUpdateDot(_ show: Bool) {
         guard let button = item.button else { return }
         if show, updateDot == nil {
             let size: CGFloat = 5
-            let dot = NSView(frame: NSRect(
+            let dot = AccentDotView(frame: NSRect(
                 x: button.bounds.width - size - 3, y: button.bounds.height - size - 3,
                 width: size, height: size
             ))
-            dot.wantsLayer = true
-            dot.layer?.backgroundColor = PelmetAccent.nsColor.cgColor
-            dot.layer?.cornerRadius = size / 2
             dot.autoresizingMask = [.minXMargin, .minYMargin]
             button.addSubview(dot)
             updateDot = dot
@@ -413,4 +410,38 @@ final class AppMenuTarget: NSObject {
     /// rather than straight in Sparkle's window.
     @objc func installUpdate() { SparkleController.shared.openUpdateHub() }
     @objc func quit() { NSApp.terminate(nil) }
+}
+
+/// The update dot. Its color is resolved when it draws, so it follows the
+/// accent chosen in Settings and the bar's light or dark appearance.
+final class AccentDotView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = frame.width / 2
+        track()
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = PelmetAccent.nsColor.cgColor
+        }
+    }
+
+    /// Redraw whenever the chosen accent changes; stops once the dot is gone.
+    private func track() {
+        withObservationTracking {
+            _ = AccentStore.shared.choice
+        } onChange: { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.needsDisplay = true
+                self.track()
+            }
+        }
+    }
 }
