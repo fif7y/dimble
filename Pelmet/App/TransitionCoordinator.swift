@@ -2734,7 +2734,25 @@ extension TransitionCoordinator {
         if !moved.isEmpty {
             PelmetLog.log("pass: \(moved.count) moved while filmed, not cut \(moved.map(\.key.rawValue))")
         }
-        return (Self.pictures(of: still, strip: strip, empty: under, dump: dump), Set(moved.map(\.key)), !under.isEmpty)
+        // An app that came to the front just as the icons came out draws its
+        // menus over the slots AX reports for them: a cut there is the end of
+        // Window and the start of Help, stored under the icon's key (#127).
+        // These wait for a round like an icon that moved.
+        let menusEnd = await frontMenusRight()
+        let behindMenus = menusEnd.map { end in items.filter { $0.frame.minX + 1 < end } } ?? []
+        if let menusEnd, !behindMenus.isEmpty {
+            PelmetLog.log("pass: \(behindMenus.count) behind the front app's menus (to \(Int(menusEnd))), not cut \(behindMenus.map(\.key.rawValue))")
+        }
+        let clear = still.filter { item in !behindMenus.contains { $0.key == item.key } }
+        return (Self.pictures(of: clear, strip: strip, empty: under, dump: dump), Set((moved + behindMenus).map(\.key)), !under.isEmpty)
+    }
+
+    /// Where the front app's menus end on the primary bar, read now. Nil when
+    /// it shows none there.
+    private func frontMenusRight() async -> CGFloat? {
+        guard let pid = NSWorkspace.shared.menuBarOwningApplication?.processIdentifier else { return nil }
+        let bounds = CGDisplayBounds(CGMainDisplayID())
+        return await Task.detached(priority: .userInitiated) { PillProbe.menusRight(pid: pid, in: bounds) }.value
     }
 
     /// A fresh picture of one item drawn on the bar right now: a relay's,
