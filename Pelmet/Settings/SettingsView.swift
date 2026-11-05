@@ -8,12 +8,14 @@ import PelmetEngine
 import ServiceManagement
 import SwiftUI
 
-/// Accent presets for Settings › General. Purple is the brand default.
+/// Accent choices for Settings › General: flat presets in hue order from the
+/// brand purple, the default, then the user's own color.
 /// Stored under its own defaults key (not in the settings blob), so a value
 /// this build doesn't know falls back to purple and an older build ignores it.
 enum AccentChoice: String, CaseIterable, Identifiable {
-    case purple, blue, green, orange, pink
+    case purple, pink, orange, green, blue, indigo, custom
     static let key = "pelmet.accent"
+    static let customKey = "pelmet.accent.custom"
     static var current: AccentChoice {
         UserDefaults.standard.string(forKey: key).flatMap(AccentChoice.init) ?? .purple
     }
@@ -23,39 +25,55 @@ enum AccentChoice: String, CaseIterable, Identifiable {
     var label: LocalizedStringKey {
         switch self {
         case .purple: "Purple"
-        case .blue: "Blue"
-        case .green: "Green"
-        case .orange: "Orange"
         case .pink: "Pink"
+        case .orange: "Orange"
+        case .green: "Green"
+        case .blue: "Blue"
+        case .indigo: "Indigo"
+        case .custom: "Choose your own"
         }
     }
 
-    /// (light, dark) as 0xRRGGBB; dark is lighter for contrast.
-    private var hex: (UInt32, UInt32) {
+    /// (light, dark) as 0xRRGGBB. Light is deep enough to read on a light
+    /// window, dark is the softer shade. The user's own is theirs on both,
+    /// moved only where it would vanish.
+    var hex: (light: UInt32, dark: UInt32) {
         switch self {
         case .purple: (0x6841ED, 0x7E5FF2)
-        case .blue: (0x0A6CFF, 0x4C93FF)
-        case .green: (0x1F9D55, 0x3DBE76)
-        case .orange: (0xD9610A, 0xFF9640)
-        case .pink: (0xD6336C, 0xF06595)
+        case .pink: (0xD1408E, 0xE993D1)
+        case .orange: (0xD4660A, 0xF6AB6B)
+        case .green: (0x1E9447, 0x7BD77F)
+        case .blue: (0x0A7AD1, 0x69C6FA)
+        case .indigo: (0x5061DC, 0x9CAFFE)
+        case .custom: AccentShade.shades(of: AccentStore.shared.customHex ?? AccentChoice.purple.hex.dark)
         }
     }
 
-    private static func ns(_ hex: UInt32) -> NSColor {
+    static func ns(_ hex: UInt32) -> NSColor {
         NSColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
                 blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
 
-    var nsColor: NSColor {
-        let (light, dark) = hex
-        return NSColor(name: nil) { appearance in
+    private static func dynamic(light: UInt32, dark: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? Self.ns(dark) : Self.ns(light)
+                ? ns(dark) : ns(light)
         }
     }
 
+    var nsColor: NSColor {
+        let (light, dark) = hex
+        return Self.dynamic(light: light, dark: dark)
+    }
+
+    /// The label on a solid fill of this accent.
+    var onFill: NSColor {
+        let (light, dark) = hex
+        return Self.dynamic(light: AccentShade.label(on: light), dark: AccentShade.label(on: dark))
+    }
+
     /// The dark-mode shade, for surfaces that are always dark (onboarding).
-    var darkColor: Color { Color(nsColor: Self.ns(hex.1)) }
+    var darkColor: Color { Color(nsColor: Self.ns(hex.dark)) }
 }
 
 /// The chosen accent. Observable, so every SwiftUI view that reads
@@ -66,7 +84,18 @@ final class AccentStore {
     var choice: AccentChoice {
         didSet { UserDefaults.standard.set(choice.rawValue, forKey: AccentChoice.key) }
     }
-    private init() { choice = .current }
+    /// The color from "Choose your own", 0xRRGGBB. Kept while a preset is on,
+    /// so its swatch still shows it and one click brings it back.
+    var customHex: UInt32? {
+        didSet {
+            UserDefaults.standard.set(customHex.map { String(format: "%06X", $0) }, forKey: AccentChoice.customKey)
+        }
+    }
+    private init() {
+        let custom = UserDefaults.standard.string(forKey: AccentChoice.customKey).flatMap { UInt32($0, radix: 16) }
+        customHex = custom
+        choice = AccentChoice.current == .custom && custom == nil ? .purple : .current
+    }
 }
 
 /// The accent — pelmet purple unless the user picked another; slightly
@@ -75,6 +104,8 @@ final class AccentStore {
 enum PelmetAccent {
     static var nsColor: NSColor { AccentStore.shared.choice.nsColor }
     static var accent: Color { Color(nsColor: nsColor) }
+    /// The label on a solid accent fill: white, near-black on a shade too light for it.
+    static var onFill: Color { Color(nsColor: AccentStore.shared.choice.onFill) }
     /// The dark-mode shade, for always-dark surfaces.
     static var onDark: Color { AccentStore.shared.choice.darkColor }
 
@@ -927,25 +958,7 @@ private struct GeneralPane: View {
                 }
             }
             SettingRow(title: "Accent color") {
-                HStack(spacing: 8) {
-                    ForEach(AccentChoice.allCases) { choice in
-                        let selected = AccentStore.shared.choice == choice
-                        Button {
-                            AccentStore.shared.choice = choice
-                        } label: {
-                            Circle()
-                                .fill(Color(nsColor: choice.nsColor))
-                                .frame(width: 18, height: 18)
-                                .padding(3)
-                                .overlay(Circle().strokeBorder(
-                                    Color(nsColor: choice.nsColor), lineWidth: selected ? 1.5 : 0))
-                        }
-                        .buttonStyle(.plain)
-                        .help(Text(choice.label))
-                        .accessibilityLabel(Text(choice.label))
-                        .accessibilityAddTraits(selected ? .isSelected : [])
-                    }
-                }
+                AccentSwatches()
             }
             .settingAnchor("accentColor")
             SettingToggleRow(
@@ -1795,7 +1808,8 @@ struct StatusChip: View {
     }
 }
 
-/// The one true CTA treatment: solid brand accent, white label.
+/// The one true CTA treatment: solid brand accent, white label, or near-black
+/// on an accent too light for white.
 struct AccentChipButton: View {
     let text: LocalizedStringKey
     let symbol: String
@@ -1805,7 +1819,7 @@ struct AccentChipButton: View {
         Button(action: action) {
             Label(text, systemImage: symbol)
                 .font(.callout.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(PelmetAccent.onFill)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
                 .background(PelmetAccent.accent, in: Capsule())

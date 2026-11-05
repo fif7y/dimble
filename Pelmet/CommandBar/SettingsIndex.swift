@@ -42,7 +42,7 @@ enum SettingsIndex {
             general("settingsHotkey", String(localized: "Open Settings"),
                     ["hotkey", "shortcut"]),
             general("accentColor", String(localized: "Accent color"),
-                    ["color", "colour", "theme", "tint", "purple", "blue", "green", "orange", "pink"]),
+                    ["color", "colour", "theme", "tint", "purple", "blue", "green", "orange", "pink", "indigo", "custom", "choose your own"]),
             general("rightClickMenu", String(localized: "Right-click menu"),
                     ["context menu", "empty spot", "bar menu"]),
             general("language", String(localized: "Display language"),

@@ -837,7 +837,7 @@ private struct RuleMark: View {
     var body: some View {
         Image(systemName: "bolt.fill")
             .font(.system(size: 7, weight: .bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(PelmetAccent.onFill)
             .frame(width: 13, height: 13)
             .background(Circle().fill(PelmetAccent.accent))
             .padding(2)
