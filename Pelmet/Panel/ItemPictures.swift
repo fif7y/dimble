@@ -219,8 +219,11 @@ final class ItemPictures {
     }
 
     /// A one-colour glyph as a white mask, or nil when it is not one: every
-    /// changed pixel lighter than the bar (or every one darker), barely any
-    /// colour of its own (`inkTint`). Each pixel's alpha is how far it is from the bar, over how
+    /// clearly changed pixel lighter than the bar (or every one darker),
+    /// barely any colour of its own (`inkTint`). Faint changes get no say: a
+    /// window under the bar that gained focus since the empty bar was taken
+    /// shades the bar's bottom rows a few levels, which refused a white
+    /// glyph its mask (#127). Each pixel's alpha is how far it is from the bar, over how
     /// far the glyph's core is: antialiased edges come out partial, not in
     /// the bar's colour, and a grey capsule inside the frame comes out as a
     /// faint fill (one the frame cuts through drops out, `capsuleFill`).
@@ -255,22 +258,19 @@ final class ItemPictures {
         } else {
             fill = nil
         }
-        var changed = 0, strong = 0, tinted = 0, lighter = 0, darker = 0
+        var strong = 0, tinted = 0, lighter = 0, darker = 0
         var tintedLight = 0, tintedDark = 0
         var spread = [Int](repeating: 0, count: 256)
         for i in stride(from: 0, to: w * h * 4, by: 4) {
-            let d = distance(s, b, i)
-            guard d > 6 else { continue }
-            changed += 1
+            guard distance(s, b, i) >= 26 else { continue }
+            strong += 1
             let dl = luma(s, i) - luma(b, i)
             if dl > 0 { lighter += 1 } else if dl < 0 { darker += 1 }
-            guard d >= 26 else { continue }
-            strong += 1
             spread[min(255, abs(dl))] += 1
             if inkTint(s, b, i, sign: 1) > 60 { tintedLight += 1 }
             if inkTint(s, b, i, sign: -1) > 60 { tintedDark += 1 }
         }
-        let sign = lighter * 20 >= changed * 19 ? 1 : darker * 20 >= changed * 19 ? -1 : 0
+        let sign = lighter * 20 >= strong * 19 ? 1 : darker * 20 >= strong * 19 ? -1 : 0
         guard sign != 0 else { return nil }
         tinted = sign > 0 ? tintedLight : tintedDark
         func base(_ i: Int) -> Int {

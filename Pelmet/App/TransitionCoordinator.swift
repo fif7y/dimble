@@ -2788,11 +2788,15 @@ extension TransitionCoordinator {
             // Exactly the item's frame, less a point a side: neighbouring
             // frames overlap by a point or two, and `cropped(toPrimaryX:)`
             // pads, which let a neighbour's capsule (Velja's, Herd's) ride
-            // along.
+            // along. The band's last point stays out: it is no icon's, and a
+            // window under the bar that gained focus since the empty bar was
+            // taken draws its dark top edge there, with its shadow's darkest
+            // row above it, which read as ink: a line under every tile, and
+            // the icon pushed up its tile on a bright bar (#127).
             guard f.minX >= base.windowFrame.minX, f.maxX <= base.windowFrame.maxX else { continue }
             let rect = CGRect(
                 x: ((f.minX + 1 - base.windowFrame.minX) * scale).rounded(), y: 0,
-                width: ((f.width - 2) * scale).rounded(), height: CGFloat(base.image.height))
+                width: ((f.width - 2) * scale).rounded(), height: CGFloat(base.image.height) - scale.rounded())
             guard rect.width > 0, let image = base.image.cropping(to: rect) else { continue }
             let column = ConcealGhostOverlay.BarSnapshot(
                 image: image,
