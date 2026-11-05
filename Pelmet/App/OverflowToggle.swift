@@ -137,7 +137,7 @@ enum OverflowToggle {
             var el: AXUIElement?
             guard AXUIElementCopyElementAtPosition(app, Float(x), 12, &el) == .success, let el else { continue }
             var roleV: CFTypeRef?
-            AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &roleV)
+            axCopyAttribute(el, kAXRoleAttribute as CFString, &roleV)
             guard roleV as? String == "AXButton" else { continue }
             guard let expanded = state(of: el) else { continue }
             return Toggle(element: el, frame: currentFrame(of: el) ?? .zero, expanded: expanded)
@@ -147,15 +147,15 @@ enum OverflowToggle {
 
     nonisolated static func state(of element: AXUIElement) -> Bool? {
         var descV: CFTypeRef?
-        AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descV)
+        axCopyAttribute(element, kAXDescriptionAttribute as CFString, &descV)
         return (descV as? String).flatMap(OverflowToggleLabels.expandedState(forDescription:))
     }
 
     nonisolated private static func currentFrame(of element: AXUIElement) -> CGRect? {
         var posV: CFTypeRef?
         var sizeV: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posV) == .success,
-              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeV) == .success
+        guard axCopyAttribute(element, kAXPositionAttribute as CFString, &posV) == .success,
+              axCopyAttribute(element, kAXSizeAttribute as CFString, &sizeV) == .success
         else { return nil }
         var p = CGPoint.zero
         var s = CGSize.zero

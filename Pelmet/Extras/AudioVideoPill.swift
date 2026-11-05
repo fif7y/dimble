@@ -127,21 +127,21 @@ enum AudioVideoPill {
 
     nonisolated private static func collect(_ element: AXUIElement, depth: Int, matching ids: Set<String>, into pills: inout [(AXUIElement, CGRect, String)]) {
         var value: AnyObject?
-        AXUIElementCopyAttributeValue(element, kAXIdentifierAttribute as CFString, &value)
+        axCopyAttribute(element, kAXIdentifierAttribute as CFString, &value)
         if let id = value as? String, ids.contains(id) {
             if let frame = frame(of: element), frame.width > 0 { pills.append((element, frame, id)) }
             return
         }
         guard depth > 0 else { return }
         var children: AnyObject?
-        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        axCopyAttribute(element, kAXChildrenAttribute as CFString, &children)
         for child in (children as? [AXUIElement]) ?? [] { collect(child, depth: depth - 1, matching: ids, into: &pills) }
     }
 
     nonisolated private static func frame(of element: AXUIElement) -> CGRect? {
         var position: AnyObject?, size: AnyObject?
-        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &position) == .success,
-              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
+        guard axCopyAttribute(element, kAXPositionAttribute as CFString, &position) == .success,
+              axCopyAttribute(element, kAXSizeAttribute as CFString, &size) == .success,
               let position, let size else { return nil }
         var origin = CGPoint.zero, extent = CGSize.zero
         AXValueGetValue(position as! AXValue, .cgPoint, &origin)

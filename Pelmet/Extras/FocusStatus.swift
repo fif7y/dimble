@@ -338,13 +338,13 @@ enum ControlCenterFocus {
         let own = attribute(element, kAXIdentifierAttribute).flatMap { $0.hasPrefix("module-") ? [String($0.dropFirst(7))] : nil } ?? []
         guard depth > 0 else { return own }
         var children: AnyObject?
-        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        axCopyAttribute(element, kAXChildrenAttribute as CFString, &children)
         return own + ((children as? [AXUIElement]) ?? []).flatMap { modules(in: $0, depth: depth - 1) }
     }
 
     nonisolated private static func attribute(_ element: AXUIElement, _ name: String) -> String? {
         var value: AnyObject?
-        AXUIElementCopyAttributeValue(element, name as CFString, &value)
+        axCopyAttribute(element, name as CFString, &value)
         return value as? String
     }
 
@@ -352,7 +352,7 @@ enum ControlCenterFocus {
         if matches(element) { return element }
         guard depth > 0 else { return nil }
         var children: AnyObject?
-        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+        axCopyAttribute(element, kAXChildrenAttribute as CFString, &children)
         for child in (children as? [AXUIElement]) ?? [] {
             if let hit = find(in: child, depth: depth - 1, where: matches) { return hit }
         }

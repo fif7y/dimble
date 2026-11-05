@@ -209,7 +209,7 @@ nonisolated enum PillProbe {
     static func attribute(_ element: AXUIElement, _ name: String) -> AnyObject? {
         AXUIElementSetMessagingTimeout(element, axTimeout)
         var value: AnyObject?
-        return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+        return axCopyAttribute(element, name as CFString, &value) == .success ? value : nil
     }
 
     static func frame(of element: AXUIElement) -> CGRect? {
@@ -1351,7 +1351,7 @@ final class LiveMirror {
         AXUIElementSetMessagingTimeout(app, 0.5)
         func value(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
             var out: CFTypeRef?
-            return AXUIElementCopyAttributeValue(element, name as CFString, &out) == .success ? out : nil
+            return axCopyAttribute(element, name as CFString, &out) == .success ? out : nil
         }
         func children(_ element: AXUIElement) -> [AXUIElement] { value(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] }
         var found: [String: (said: String, frame: CGRect)] = [:]

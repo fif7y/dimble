@@ -430,7 +430,7 @@ public actor ItemEnumerator {
             // Per element: a child read through a hung app waits the 6s default.
             AXUIElementSetMessagingTimeout(element, EngineTiming.axAgentTimeout)
             var out: CFTypeRef?
-            return AXUIElementCopyAttributeValue(element, name as CFString, &out) == .success ? out : nil
+            return axCopyAttribute(element, name as CFString, &out) == .success ? out : nil
         }
         func children(of element: AXUIElement) -> [AXUIElement] {
             value(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
@@ -538,7 +538,7 @@ public actor ItemEnumerator {
 
     private func copyAttribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
-        AXUIElementCopyAttributeValue(element, name as CFString, &value)
+        axCopyAttribute(element, name as CFString, &value)
         return value
     }
 }
