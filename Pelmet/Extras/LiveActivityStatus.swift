@@ -7,7 +7,10 @@
 // does narrate each one's start and end to the unified log, naming the app
 // (`LiveActivities`), so one `log stream` child follows those lines the way
 // FocusStatus follows donotdisturbd, and `log show` replays the last eight
-// hours at boot: no activity runs longer.
+// hours at boot: no activity runs longer. The replay can miss lines the stream
+// delivered, so what the stream saw is saved and folded into it
+// (`LiveActivities.Saved`). What's left over from before this launch is checked
+// against the bar (`noPillFound`).
 
 import AppKit
 import PelmetCore
@@ -17,6 +20,7 @@ import PelmetEngine
 final class LiveActivityStatus {
     private(set) var activities = LiveActivities() {
         didSet {
+            if activities.saved != oldValue.saved { Self.save(activities.saved) }
             guard activities.active != oldValue.active else { return }
             onChange?()
             scheduleExpiry()
@@ -109,6 +113,8 @@ final class LiveActivityStatus {
                 guard let self, !self.stopped else { return }
                 var replayed = since == nil ? LiveActivities() : self.activities
                 for entry in entries { replayed.read(entry.message, at: entry.date, agent: entry.agent) }
+                // A stream gap can have swallowed an end the store lost too.
+                replayed.merge(since == nil ? Self.loadSaved() : LiveActivities.Saved())
                 let dropped = replayed.prune(now: Date(), agent: Self.agentPID())
                 for entry in self.pending { replayed.read(entry.message, at: entry.date, agent: entry.agent) }
                 self.pending = []
@@ -122,6 +128,32 @@ final class LiveActivityStatus {
                 self.activities = replayed
             }
         }
+    }
+
+    /// Live mode or the item's lift had the assertion down and no pill came.
+    func noPillFound() {
+        var next = activities
+        guard next.dropFromBefore() else { return }
+        PelmetLog.log("liveactivity: no pill for what came from before this launch — \(Self.describe(next))")
+        activities = next
+    }
+
+    private static let savedKey = "pelmet.liveActivities.v1"
+    /// The debug activities are for the launch that asked for them.
+    private static var savesState: Bool {
+        debugHost == nil && (UserDefaults.standard.string(forKey: "pelmet.debug.fakeLiveActivity") ?? "").isEmpty
+    }
+
+    private static func save(_ saved: LiveActivities.Saved) {
+        guard savesState, let data = try? JSONEncoder().encode(saved) else { return }
+        UserDefaults.standard.set(data, forKey: savedKey)
+    }
+
+    private static func loadSaved() -> LiveActivities.Saved {
+        guard savesState, let data = UserDefaults.standard.data(forKey: savedKey),
+              let saved = try? JSONDecoder().decode(LiveActivities.Saved.self, from: data)
+        else { return LiveActivities.Saved() }
+        return saved
     }
 
     /// Debug: `open -a Dimble --args -pelmet.debug.fakeLiveActivity <bundle id>`

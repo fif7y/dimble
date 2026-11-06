@@ -647,6 +647,8 @@ final class LiveMirror {
     /// back for a while (longer each time in a row).
     private var noPillSince: Date?
     private var emptyStrikes = 0
+    /// The ones in a row on an unlocked screen, where the bar could be read.
+    private var noPillStrikesAwake = 0
     private var retryNotBefore = Date.distantPast
     /// Why live mode holds off until `retryNotBefore`, for the log.
     private var holdOffWhy = ""
@@ -654,6 +656,9 @@ final class LiveMirror {
     /// (`abort(holdOff:)`), in a row: each waits longer, up to two minutes.
     private var abortStrikes = 0
     static let noPillGrace: TimeInterval = 10
+    /// Times in a row with no pill before an activity from before this launch
+    /// counts as over. One could be a moment the bar couldn't be read.
+    static let noPillStrikes = 2
 
     /// A reveal the live mirror handed the bar to (`beginHandOver`): the
     /// pill and the mirror are away, the cover stays up until the reveal's
@@ -765,7 +770,7 @@ final class LiveMirror {
         // a few seconds (its pill shows a moment after the log line).
         if count != activityCount {
             if isActive { PelmetLog.log("livemirror: activities \(activityCount) → \(count), looking for the pills") }
-            if count > activityCount { retryNotBefore = .distantPast; emptyStrikes = 0; abortStrikes = 0 }
+            if count > activityCount { retryNotBefore = .distantPast; emptyStrikes = 0; noPillStrikesAwake = 0; abortStrikes = 0 }
             activityCount = count
             lookEagerlyUntil = Date().addingTimeInterval(3)
         }
@@ -3184,14 +3189,17 @@ final class LiveMirror {
         if anyPill {
             noPillSince = nil
             emptyStrikes = 0
+            noPillStrikesAwake = 0
         } else if let since = noPillSince {
             if Date().timeIntervalSince(since) > Self.noPillGrace {
                 emptyStrikes += 1
+                if !AppState.sessionAway { noPillStrikesAwake += 1 }
                 let hold = min(600, 60 * pow(2, Double(emptyStrikes - 1)))
                 retryNotBefore = Date().addingTimeInterval(hold)
                 holdOffWhy = "no pill was found last time — holding off (a new activity ends the hold-off)"
                 PelmetLog.log("livemirror: no pill to mirror for \(Int(Self.noPillGrace))s — leaving live mode, not trying again for \(Int(hold))s")
                 await exit("no pill to mirror")
+                if noPillStrikesAwake >= Self.noPillStrikes { appState.liveActivityPillsMissing() }
                 return
             }
         } else {

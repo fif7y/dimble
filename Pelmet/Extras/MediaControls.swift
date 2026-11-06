@@ -1210,6 +1210,11 @@ final class ExtrasManager {
         syncLiveActivityWatcher()
     }
 
+    /// The assertion was down and no pill came (`LiveActivityStatus.noPillFound`).
+    func liveActivityPillsMissing() {
+        liveActivityStatus?.noPillFound()
+    }
+
     private func liveActivityChanged() {
         appState?.liveActivitiesChanged(running: !(liveActivityStatus?.active.isEmpty ?? true), count: liveActivityStatus?.active.count ?? 0)
         guard let spec = specs.values.first(where: { $0.kind == .liveActivity }),

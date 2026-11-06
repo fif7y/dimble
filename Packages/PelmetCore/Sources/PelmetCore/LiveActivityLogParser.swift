@@ -24,7 +24,7 @@
 import Foundation
 
 /// One Live Activity MenuBarAgent is keeping, as far as its log tells.
-public struct LiveActivity: Equatable, Sendable {
+public struct LiveActivity: Equatable, Sendable, Codable {
     /// The id's first eight hex digits, uppercased: all the start line
     /// carries of it.
     public let id: String
@@ -36,6 +36,9 @@ public struct LiveActivity: Equatable, Sendable {
     public let startedAt: Date
     /// The MenuBarAgent process that announced it.
     public let agent: Int32
+    /// Known from before the stream last opened: a replay or the last launch
+    /// vouches for it, and it can be over without anything having said so.
+    public var fromBefore = false
 
     public init(id: String, bundleID: String?, startedAt: Date, agent: Int32) {
         self.id = id
@@ -52,8 +55,57 @@ public struct LiveActivities: Equatable, Sendable {
     /// Requesters the descriptor lines named, by short id, kept for the
     /// start line a millisecond behind them.
     private var requesters: [String: String] = [:]
+    /// When each activity last ended, by short id. The replay can't be
+    /// trusted to know: macOS quarantines a process that logs too much
+    /// ("QUARANTINED DUE TO HIGH LOGGING VOLUME", MenuBarAgent 2026-11-05
+    /// 16:28:24), and after that `log show` had none of its lines while
+    /// `log stream` delivered them all, so an activity that ended at 17:20
+    /// replayed as running. This is what the stream saw, kept across launches
+    /// (`Saved`).
+    public private(set) var ended: [String: Date] = [:]
 
     public init() {}
+
+    /// What a launch hands the next one.
+    public struct Saved: Codable, Equatable, Sendable {
+        public var active: [LiveActivity] = []
+        public var ended: [String: Date] = [:]
+        public init() {}
+    }
+
+    public var saved: Saved {
+        var saved = Saved()
+        saved.active = active
+        saved.ended = ended
+        return saved
+    }
+
+    /// Folds what the last launch knew into a fresh replay of the log: a
+    /// start the log lost still counts, and so does an end it lost. A start
+    /// after the last end is a new run of the id. All of it is `fromBefore`.
+    public mutating func merge(_ saved: Saved) {
+        ended.merge(saved.ended) { max($0, $1) }
+        for activity in saved.active {
+            if let index = active.firstIndex(where: { $0.id == activity.id }) {
+                if activity.startedAt > active[index].startedAt { active[index] = activity }
+            } else {
+                active.append(activity)
+            }
+        }
+        active.removeAll { activity in ended[activity.id].map { $0 >= activity.startedAt } ?? false }
+        active.sort { $0.startedAt < $1.startedAt }
+        for index in active.indices { active[index].fromBefore = true }
+    }
+
+    /// The assertion was down and no pill came: what only the past vouched
+    /// for isn't running. Not recorded as ended, so the next launch asks
+    /// again if this was wrong. True when `active` changed.
+    @discardableResult
+    public mutating func dropFromBefore() -> Bool {
+        let before = active
+        active.removeAll(where: \.fromBefore)
+        return active != before
+    }
 
     /// The longest an activity can run: the system ends one at eight hours
     /// and takes it off the Dynamic Island at once (ActivityKit's rule).
@@ -91,13 +143,16 @@ public struct LiveActivities: Equatable, Sendable {
                 requesters = requesters.filter { live.contains($0.key) }
             }
         } else if let id = Self.id(after: Self.createdPrefix, in: message) {
-            if !active.contains(where: { $0.id == id }) {
+            if let index = active.firstIndex(where: { $0.id == id }) {
+                active[index].fromBefore = false  // the agent just announced it
+            } else {
                 active.append(LiveActivity(id: id, bundleID: requesters[id], startedAt: date, agent: agent))
             }
         } else if let id = Self.id(after: Self.departedPrefix, in: message)
                     ?? Self.id(after: Self.releasedPrefix, in: message) {
             active.removeAll { $0.id == id }
             requesters[id] = nil
+            ended[id] = date
         } else if message.hasPrefix(Self.notShownPrefix) {
             // A dismissal is followed by the per-id lines above; any other
             // state is the agent refusing the app's activities outright
@@ -106,6 +161,7 @@ public struct LiveActivities: Equatable, Sendable {
             let bundle = String(rest.prefix { $0 != ":" })
             let state = rest.range(of: "state=").map { String(rest[$0.upperBound...].prefix { $0 != "," && !$0.isWhitespace }) }
             if state != "dismissed", state != "ended" {
+                for activity in active where activity.bundleID == bundle { ended[activity.id] = date }
                 active.removeAll { $0.bundleID == bundle }
             }
         }
@@ -122,6 +178,7 @@ public struct LiveActivities: Equatable, Sendable {
         active.removeAll { activity in
             now.timeIntervalSince(activity.startedAt) >= Self.lifetime || agent.map { $0 != activity.agent } ?? false
         }
+        ended = ended.filter { now.timeIntervalSince($0.value) < Self.lifetime }
         return active != before
     }
 

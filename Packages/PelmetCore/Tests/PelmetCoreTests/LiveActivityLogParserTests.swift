@@ -140,4 +140,104 @@ struct LiveActivityLogParserTests {
         #expect(LiveActivities.id(after: LiveActivities.createdPrefix, in: "Create client element for Live Activity: a1b2c3d4") == "A1B2C3D4")
         #expect(LiveActivities.id(after: LiveActivities.createdPrefix, in: "Create client element for Live Activity: ") == nil)
     }
+
+    // MARK: Across launches
+
+    private static func saved(_ lines: [String], at date: Date = t0) -> LiveActivities.Saved {
+        var seen = LiveActivities()
+        _ = read(lines, into: &seen, at: date)
+        return seen.saved
+    }
+
+    @Test func anEndOnlyTheLastLaunchSawHolds() {
+        // The stream delivered the end, the replay of the log doesn't have it.
+        let lastLaunch = Self.saved([Self.created, Self.departed])
+        var replay = LiveActivities()
+        _ = Self.read([Self.created], into: &replay, at: Self.t0)
+        replay.merge(lastLaunch)
+        #expect(replay.active.isEmpty)
+    }
+
+    @Test func aStartOnlyTheLastLaunchSawHolds() {
+        var replay = LiveActivities()
+        replay.merge(Self.saved([Self.descriptor, Self.created]))
+        #expect(replay.active.map(\.id) == ["A1B2C3D4"])
+        #expect(replay.active[0].bundleID == "com.example.orders")
+        #expect(replay.active[0].fromBefore)
+    }
+
+    @Test func anEndOnlyTheLogHasHolds() {
+        // Dimble was quit when it ended.
+        let lastLaunch = Self.saved([Self.created])
+        var replay = LiveActivities()
+        _ = Self.read([Self.created], into: &replay, at: Self.t0)
+        _ = Self.read([Self.departed], into: &replay, at: Self.t0.addingTimeInterval(60))
+        replay.merge(lastLaunch)
+        #expect(replay.active.isEmpty)
+    }
+
+    @Test func aStartAfterTheLastEndIsANewRun() {
+        let lastLaunch = Self.saved([Self.created, Self.departed])
+        var replay = LiveActivities()
+        _ = Self.read([Self.created], into: &replay, at: Self.t0.addingTimeInterval(60))
+        replay.merge(lastLaunch)
+        #expect(replay.active.map(\.id) == ["A1B2C3D4"])
+    }
+
+    @Test func aNewerRunTheLastLaunchSawBeatsTheReplaysOlderOne() {
+        // The agent restarted during a quarantine: the replay only has the first run.
+        var lastLaunch = LiveActivities()
+        _ = Self.read([Self.created], into: &lastLaunch, at: Self.t0.addingTimeInterval(3600), agent: Self.agent + 1)
+        var replay = LiveActivities()
+        _ = Self.read([Self.created], into: &replay, at: Self.t0)
+        replay.merge(lastLaunch.saved)
+        #expect(replay.active.map(\.startedAt) == [Self.t0.addingTimeInterval(3600)])
+        let dropped = replay.prune(now: Self.t0.addingTimeInterval(3600), agent: Self.agent + 1)
+        #expect(!dropped)
+        #expect(replay.active.map(\.id) == ["A1B2C3D4"])
+    }
+
+    @Test func anActivityTheLastAgentAnnouncedDoesNotComeBack() {
+        var replay = LiveActivities()
+        replay.merge(Self.saved([Self.created]))
+        let dropped = replay.prune(now: Self.t0, agent: Self.agent + 1)
+        #expect(dropped)
+        #expect(replay.active.isEmpty)
+    }
+
+    @Test func noPillDropsOnlyWhatCameFromBefore() {
+        var activities = LiveActivities()
+        activities.merge(Self.saved([Self.created]))
+        let newOne = "Create client element for Live Activity: B1B2C3D4"
+        _ = Self.read([newOne], into: &activities, at: Self.t0.addingTimeInterval(60))
+        let first = activities.dropFromBefore()
+        #expect(first)
+        #expect(activities.active.map(\.id) == ["B1B2C3D4"])
+        let second = activities.dropFromBefore()
+        #expect(!second)
+        // Not an end: the next launch can ask the bar again.
+        #expect(activities.ended["A1B2C3D4"] == nil)
+    }
+
+    @Test func theAgentAnnouncingOneAgainClearsItsDoubt() {
+        var activities = LiveActivities()
+        activities.merge(Self.saved([Self.created]))
+        _ = Self.read([Self.created], into: &activities, at: Self.t0.addingTimeInterval(60))
+        #expect(!activities.active[0].fromBefore)
+        let dropped = activities.dropFromBefore()
+        #expect(!dropped)
+    }
+
+    @Test func oldEndsAreForgotten() {
+        var activities = LiveActivities()
+        _ = Self.read([Self.created, Self.departed], into: &activities)
+        activities.prune(now: Self.t0.addingTimeInterval(LiveActivities.lifetime), agent: Self.agent)
+        #expect(activities.ended.isEmpty)
+    }
+
+    @Test func savedStateSurvivesCoding() throws {
+        let saved = Self.saved([Self.descriptor, Self.created])
+        let data = try JSONEncoder().encode(saved)
+        #expect(try JSONDecoder().decode(LiveActivities.Saved.self, from: data) == saved)
+    }
 }

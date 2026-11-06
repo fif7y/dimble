@@ -2080,13 +2080,47 @@ final class AppState {
                 // Out already: no reveal is coming to carry the lift.
                 PelmetLog.log("liveactivity: lift — the bar is out, the assertion goes")
                 await transitions.liftOutBar()
+                checkLiftBroughtPills()
                 return
             }
             PelmetLog.log("liveactivity: lift — everything out with the assertion down")
             reveal(all, reason: .itemInBar)
             // After the request: the reveal's task, which runs later, takes it.
             transitions.liftRequestedAt = Date()
+            checkLiftBroughtPills()
         }
+    }
+
+    /// With the assertion down the pills come back, given the time live mode
+    /// gives them or until the re-hide. A lift that brings none back was for
+    /// an activity that's over. `liftUp` also covers a request no reveal took,
+    /// where the assertion never went, so the wait starts at `lifted`.
+    private func checkLiftBroughtPills() {
+        Task { @MainActor [weak self] in
+            var liftedAt: Date?
+            while liftedAt.map({ Date().timeIntervalSince($0) < LiveMirror.noPillGrace }) ?? true {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, self.transitions.liftUp else { break }
+                guard self.transitions.lifted else { continue }
+                if liftedAt == nil { liftedAt = Date() }
+                let found = await Task.detached(priority: .userInitiated) { !PillProbe.copies().isEmpty }.value
+                if found {
+                    PelmetLog.log("liveactivity: the lift brought a pill back")
+                    return
+                }
+            }
+            guard let liftedAt, Date().timeIntervalSince(liftedAt) >= AppTiming.liftPillWait else { return }
+            PelmetLog.log("liveactivity: the lift brought no pill back")
+            self?.liveActivityPillsMissing()
+        }
+    }
+
+    /// The assertion was down and no pill came: what only came from before
+    /// this launch isn't running. A locked screen has no bar to read, and
+    /// the probe that looked needs Accessibility.
+    func liveActivityPillsMissing() {
+        guard !Self.sessionAway, AccessibilityAccess.isGranted else { return }
+        extras?.liveActivityPillsMissing()
     }
     /// From the lift's click until its reveal is asked for (the picture
     /// it keeps first).
@@ -3399,7 +3433,7 @@ final class AppState {
 
     /// The session is locked or switched to another user: drags would go to
     /// the login window.
-    private static var sessionAway: Bool {
+    static var sessionAway: Bool {
         guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
         return (session["CGSSessionScreenIsLocked"] as? Bool) == true
             || (session[kCGSessionOnConsoleKey as String] as? Bool) == false

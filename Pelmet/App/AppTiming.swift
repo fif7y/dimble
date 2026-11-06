@@ -33,6 +33,9 @@ enum AppTiming {
     /// Camera & mic relay (#68): longest Apple's pill may take to rejoin
     /// the AX tree after the drop before the relay gives up on it.
     static let audioVideoPillWait: TimeInterval = 1
+    /// Live Activities lift (#106): a lift the re-hide ended sooner than this
+    /// didn't give the pills time to say anything about them.
+    static let liftPillWait: TimeInterval = 3
     /// Live Activities lift (#106): the re-hide cover's watchdog, past its
     /// longest settle (2s quiet + 1.5s for the concealed items + the
     /// agent's fade + 1s quiet again).
