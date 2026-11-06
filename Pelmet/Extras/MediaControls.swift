@@ -1206,6 +1206,18 @@ final class ExtrasManager {
     }
 
     /// Screen Recording was granted or lost (`AppState.refreshScreenRecording`).
+    /// A play nothing answered opens no device, so no audio edge would ever
+    /// correct the glyph. A slow player's edge still turns it back on.
+    private func checkPlayWasAnswered(_ item: NSStatusItem, spec: ExtraItemSpec) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let self, self.items[spec.id] === item, self.mediaPlaying,
+                  !(self.cameraMicMonitor?.audioOutputActive ?? false) else { return }
+            self.mediaPlaying = false
+            self.updateMediaSymbol(item, spec: spec)
+        }
+    }
+
     func screenRecordingChanged() {
         syncLiveActivityWatcher()
     }
@@ -1441,6 +1453,7 @@ final class ExtrasManager {
                 MediaKey.playPause.send()
                 mediaPlaying.toggle()
                 updateMediaSymbol(statusItem.value, spec: spec)
+                if mediaPlaying { checkPlayWasAnswered(statusItem.value, spec: spec) }
             }
         case .cameraMicIndicator:
             // Apple's own pill (video effects, mic mode, Stop Sharing), which
