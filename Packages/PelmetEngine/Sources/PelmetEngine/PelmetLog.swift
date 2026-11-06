@@ -71,16 +71,25 @@ public enum PelmetLog {
     /// syscalls of pure overhead per line). Written only on `queue`.
     nonisolated(unsafe) private static var handle: FileHandle? = {
         rotateIfNeeded()
-        if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil)
-        }
-        let handle = try? FileHandle(forWritingTo: url)
-        handle?.seekToEndOfFile()
+        let handle = openAppending()
         if let note = folderMigration {
             handle?.write(Data("\(stamp.string(from: Date())) \(note)\n".utf8))
         }
         return handle
     }()
+
+    /// O_APPEND, so every write lands at the file's current end. A handle
+    /// that carries its own offset (what `FileHandle(forWritingTo:)` opens)
+    /// keeps writing past the end once anything truncates the file under
+    /// it — a second copy of the app rotating, a `: > dimble.log` — and the
+    /// kernel fills the gap with NUL bytes, wiping what was there. One
+    /// report came in with 355 KB of zeros ahead of the first line
+    /// (fif7y/dimble#130). O_CREAT covers a missing file.
+    private static func openAppending() -> FileHandle? {
+        let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        guard fd >= 0 else { return nil }
+        return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    }
 
     /// Mid-process rotation — the launch-time check alone never fires again
     /// in a long-lived app. Checked every `rotateCheckInterval` writes, on
@@ -93,9 +102,7 @@ public enum PelmetLog {
         guard size > rotateBytes else { return }
         try? handle?.close()
         rotateIfNeeded()
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        handle = try? FileHandle(forWritingTo: url)
-        handle?.seekToEndOfFile()
+        handle = openAppending()
     }
 
     private static func rotateIfNeeded() {
@@ -112,13 +119,25 @@ public enum PelmetLog {
         return formatter
     }()
 
-    public static func log(_ message: String) {
+    private static func line(_ message: String) -> String {
         // Strip control characters: AX-derived strings (third-party status
         // item titles) flow into log lines, and an embedded newline could
         // forge entries.
         let clean = message.unicodeScalars
             .map { $0 == "\n" || $0.properties.generalCategory == .control ? " " : Character($0) }
-        let line = "\(stamp.string(from: Date())) \(String(clean))\n"
+        return "\(stamp.string(from: Date())) \(String(clean))\n"
+    }
+
+    /// Writes before it returns. For the line at quit: the process can exit
+    /// before `queue` drains, and that line is the one saying Dimble went
+    /// down on purpose rather than being killed.
+    public static func logBlocking(_ message: String) {
+        let line = line(message)
+        queue.sync { handle?.write(Data(line.utf8)) }
+    }
+
+    public static func log(_ message: String) {
+        let line = line(message)
         queue.async {
             handle?.write(Data(line.utf8))
             writesSinceRotateCheck += 1

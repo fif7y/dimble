@@ -48,6 +48,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
+    /// The one line saying Dimble went down on purpose. Without it, a log
+    /// that stops mid-session looks the same whether the app quit, crashed
+    /// or was killed (fif7y/dimble#130). A SIGKILL still leaves nothing,
+    /// which is the point: no line means it didn't quit.
+    func applicationWillTerminate(_ notification: Notification) {
+        PelmetLog.logBlocking("stop: quitting")
+    }
+
     /// Relaunching Pelmet (Finder/Spotlight) while it runs opens Settings —
     /// one of the iconless-mode entry points. A click on one of Pelmet's
     /// banners reopens the app too, racing the banner's own handler: an
