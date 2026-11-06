@@ -100,4 +100,59 @@ struct ClockTimersTests {
         clock.read(Self.rang, at: Self.t0.addingTimeInterval(120))
         #expect(clock.current == .rang)
     }
+
+    @Test func aTimerWhoseEndNeverCameIsGivenUpOn() {
+        var clock = ClockTimers()
+        clock.read(Self.added, at: Self.t0)
+        let ends = Self.t0.addingTimeInterval(120)
+        #expect(clock.nextExpiry == ends.addingTimeInterval(ClockTimers.overdue))
+        let early = clock.expire(now: ends.addingTimeInterval(ClockTimers.overdue - 1))
+        #expect(!early)
+        let due = clock.expire(now: ends.addingTimeInterval(ClockTimers.overdue))
+        #expect(due)
+        #expect(clock.current == nil)
+        #expect(clock.nextExpiry == nil)
+    }
+
+    @Test func aLostEndDoesNotHoldTheNextTimerAtZero() {
+        var clock = ClockTimers()
+        clock.read(Self.added, at: Self.t0)
+        let other = "93DD29CC-038D-4109-8A1C-22C855019D8D"
+        let later = Self.t0.addingTimeInterval(3600)
+        clock.read(Self.added.replacingOccurrences(of: Self.id, with: other), at: later)
+        clock.expire(now: later)
+        #expect(clock.current == .running(ends: later.addingTimeInterval(120)))
+    }
+
+    @Test func aRingJustAfterGivingUpStillRings() {
+        var clock = ClockTimers()
+        clock.read(Self.added, at: Self.t0)
+        let wake = Self.t0.addingTimeInterval(3600)
+        clock.expire(now: wake)
+        #expect(clock.current == nil)
+        clock.read(Self.rang, at: wake)
+        #expect(clock.current == .rang)
+    }
+
+    @Test func aRingNobodyAnsweredIsGivenUpOn() {
+        var clock = ClockTimers()
+        clock.read(Self.added, at: Self.t0)
+        let rang = Self.t0.addingTimeInterval(120)
+        clock.read(Self.rang, at: rang)
+        let early = clock.expire(now: rang.addingTimeInterval(ClockTimers.ringLimit - 1))
+        #expect(!early)
+        #expect(clock.current == .rang)
+        let due = clock.expire(now: rang.addingTimeInterval(ClockTimers.ringLimit))
+        #expect(due)
+        #expect(clock.current == nil)
+    }
+
+    @Test func aPausedTimerHasNoBound() {
+        var clock = ClockTimers()
+        clock.read(Self.added, at: Self.t0)
+        clock.read(Self.update(from: "Running", to: "Paused"), at: Self.t0.addingTimeInterval(20))
+        #expect(clock.nextExpiry == nil)
+        let gone = clock.expire(now: Self.t0.addingTimeInterval(7 * 24 * 3600))
+        #expect(!gone)
+    }
 }

@@ -37,8 +37,47 @@ public struct ClockTimers: Equatable, Sendable {
     /// Each followed timer by its id. One whose start wasn't read (it began
     /// before the replayed window) isn't followed: its end is unknown.
     public private(set) var timers: [String: Phase] = [:]
+    /// When each ringing timer rang.
+    private var rangAt: [String: Date] = [:]
+    /// Given up on past their end. At wake from sleep the bound can pass just
+    /// before the line that says it rang, and that line still counts.
+    private var gaveUp: Set<String> = []
 
     public init() {}
+
+    /// How long past its end a running timer waits for the line that says it
+    /// rang. Without this bound a lost line held the item at 0:00, and being
+    /// the earliest end it put the next real timer at 0:00 too.
+    static let overdue: TimeInterval = 60
+    /// How long a ring waits for its answer. A dismissal that left no line
+    /// held the item with no ring left to answer. The longest wait on record
+    /// is 23 min (2026-10-29), and Clock's own banner stays up regardless.
+    static let ringLimit: TimeInterval = 60 * 60
+
+    private func expiry(of id: String, _ phase: Phase) -> Date? {
+        switch phase {
+        case .running(let ends): ends.addingTimeInterval(Self.overdue)
+        case .rang: rangAt[id]?.addingTimeInterval(Self.ringLimit)
+        case .paused: nil
+        }
+    }
+
+    /// When the next timer is due to be given up on.
+    public var nextExpiry: Date? {
+        timers.compactMap { expiry(of: $0.key, $0.value) }.min()
+    }
+
+    /// Gives up on what's past its bound. True when a timer went.
+    @discardableResult
+    public mutating func expire(now: Date) -> Bool {
+        let before = timers
+        timers = timers.filter { id, phase in expiry(of: id, phase).map { $0 > now } ?? true }
+        rangAt = rangAt.filter { timers[$0.key] == .rang }
+        for (id, phase) in before where timers[id] == nil {
+            if case .running = phase { gaveUp.insert(id) }
+        }
+        return timers != before
+    }
 
     /// The one the bar shows: a ringing timer, else the one ending first,
     /// else the paused one with the least left.
@@ -88,8 +127,13 @@ public struct ClockTimers: Equatable, Sendable {
             if case .running(let ends)? = was { timers[timer.id] = .paused(left: max(0, ends.timeIntervalSince(date))) }
         case "Stopped":
             // The Clock keeps its presets as stopped timers: never followed.
-            guard was != nil else { return }
-            timers[timer.id] = timer.fired && !timer.dismissed ? .rang : nil
+            guard was != nil || gaveUp.remove(timer.id) != nil else { return }
+            if timer.fired && !timer.dismissed {
+                timers[timer.id] = .rang
+                rangAt[timer.id] = date
+            } else {
+                timers[timer.id] = nil
+            }
         default:
             break
         }

@@ -14,7 +14,10 @@ import PelmetEngine
 @MainActor
 final class ClockTimerStatus {
     private(set) var timers = ClockTimers() {
-        didSet { if timers.current != oldValue.current { onChange?() } }
+        didSet {
+            if timers.current != oldValue.current { onChange?() }
+            if timers != oldValue { scheduleExpiry() }
+        }
     }
     var current: ClockTimers.Phase? { timers.current }
     /// Fires on the main actor whenever `current` changes.
@@ -29,6 +32,8 @@ final class ClockTimerStatus {
     private var restarts = 0
     /// Pelmet quitting takes the child with it (see FocusStatus).
     private var termination: NSObjectProtocol?
+    /// Wakes when a timer is past its bound (`ClockTimers.expire`).
+    private var expiry: Task<Void, Never>?
 
     func start() {
         stopped = false
@@ -45,6 +50,7 @@ final class ClockTimerStatus {
     func stop() {
         stopped = true
         pending = []
+        expiry?.cancel()
         (stream?.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
         stream?.terminate()
         stream = nil
@@ -74,6 +80,7 @@ final class ClockTimerStatus {
                 for entry in self.pending { replayed.read(entry.message, at: entry.date) }
                 self.pending = []
                 self.recovering = false
+                replayed.expire(now: Date())
                 self.timers = replayed
             }
         }
@@ -130,6 +137,19 @@ final class ClockTimerStatus {
         }
     }
 
+    private func scheduleExpiry() {
+        expiry?.cancel()
+        guard let due = timers.nextExpiry else { return }
+        expiry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(1, due.timeIntervalSinceNow)))
+            guard let self, !Task.isCancelled, !self.stopped else { return }
+            var next = self.timers
+            guard next.expire(now: Date()) else { return self.scheduleExpiry() }
+            PelmetLog.log("clocktimer: no line came for one past its end — \(Self.describe(next.current))")
+            self.timers = next
+        }
+    }
+
     // MARK: Plumbing
 
     nonisolated private static func describe(_ phase: ClockTimers.Phase?) -> String {
@@ -146,6 +166,7 @@ final class ClockTimerStatus {
     nonisolated private static func entry(in line: String) -> (message: String, date: Date)? {
         guard line.hasPrefix("{"),
               let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              (object["userID"] as? Int).map({ $0 == Int(getuid()) }) ?? true,  // mobiletimerd runs per user
               let message = object["eventMessage"] as? String,
               let stamp = object["timestamp"] as? String
         else { return nil }
