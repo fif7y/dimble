@@ -2560,12 +2560,6 @@ final class LiveMirror {
             mirror.global = global
             mirror.container.frame = CGRect(x: global.minX - window.minX, y: global.minY - window.minY, width: visual.width, height: visual.height)
             mirror.base.frame = mirror.container.bounds
-            // The still is captured at the display's backing scale (a 61×27pt
-            // pill lands as 122×54px), and a layer left on the default scale
-            // of 1 renders it at half resolution: a soft artwork and glyph
-            // beside text layers that do set it. Set per layout pass, so a
-            // mirror that moves to a display of another scale follows it.
-            mirror.base.contentsScale = side.scale
             if !mirror.attached {
                 mirror.container.removeFromSuperlayer()
                 overlay.addLayer(mirror.container)
