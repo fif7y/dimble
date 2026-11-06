@@ -51,7 +51,11 @@ enum AlphaFade {
 }
 
 @MainActor
-/// A held bar's window: the clicks on the covered run are the bar's (#88).
+/// Takes the clicks on a held bar's picture: the clicks on the covered run are
+/// the bar's (#88). A see-through window of its own, because a click raises the
+/// window it lands on, in the window server, before any code here runs (measured
+/// with the main thread blocked). On the picture that hid what sits above it,
+/// Sconce's glass, for 18-41 ms a click. Raised, this one shows nothing.
 private final class HeldBarPanel: NSPanel {
     /// Live mode: takes every click on the picture; the mirror's
     /// forwards it to the real pill.
@@ -330,6 +334,8 @@ final class ConcealGhostOverlay {
     private let imageView: NSImageView
     /// A held bar's stationary twin (`watchMissionControl`).
     private var twin: NSWindow?
+    /// What takes a held bar's clicks, directly above its picture.
+    private var catcher: HeldBarPanel?
     /// The twin's picture before `shapeTwin` cuts it down to the icons.
     private var twinPicture: CGImage?
     /// `iconLayout` when the twin was cut, or when its cut last followed
@@ -929,7 +935,7 @@ final class ConcealGhostOverlay {
         beneathID = beneath
         countsAsStrip = !holdsBar
         if holdsBar {
-            let panel = HeldBarPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.hidesOnDeactivate = false
             // Up for a whole reveal: on every Space of its display. Transient,
             // not stationary: a stationary one stayed in Mission Control, a
@@ -943,13 +949,23 @@ final class ConcealGhostOverlay {
             // under it nor move its edges). Measured, 2026-10-28.
             panel.animationBehavior = .none
             window = panel
+            let catcher = HeldBarPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            catcher.hidesOnDeactivate = false
+            catcher.collectionBehavior = panel.collectionBehavior
+            catcher.animationBehavior = .none
+            catcher.isOpaque = false
+            catcher.backgroundColor = .clear
+            catcher.level = .statusBar
+            catcher.hasShadow = false
+            catcher.ignoresMouseEvents = false
+            self.catcher = catcher
         } else {
             window = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
         }
         window.isOpaque = false
         window.backgroundColor = .clear
         window.level = .statusBar
-        window.ignoresMouseEvents = !holdsBar
+        window.ignoresMouseEvents = true
         window.hasShadow = false
         imageView = NSImageView(
             image: NSImage(cgImage: shot, size: frame.size)
@@ -971,6 +987,7 @@ final class ConcealGhostOverlay {
         } else {
             window.orderFrontRegardless()
         }
+        catcher?.order(.above, relativeTo: window.windowNumber)
         window.displayIfNeeded()
         if holdsBar {
             twin = Self.makeTwin(of: shot, frame: frame)
@@ -1014,7 +1031,7 @@ final class ConcealGhostOverlay {
     }
 
     func passClicks(_ through: Bool) {
-        window.ignoresMouseEvents = through || countsAsStrip
+        catcher?.ignoresMouseEvents = through
     }
 
     /// Every live cover, one still fading out included, lets clicks through
@@ -1049,6 +1066,7 @@ final class ConcealGhostOverlay {
         guard x < frame.maxX, x > frame.minX else { return }
         frame.size.width = x - frame.minX
         window.setFrame(frame, display: true)
+        catcher?.setFrame(frame, display: false)
         twin?.setFrame(frame, display: false)
         // The « moved, and the icons with it: the twin's cut is stale.
         if twin != nil {
@@ -1063,13 +1081,14 @@ final class ConcealGhostOverlay {
     func order(beneath other: ConcealGhostOverlay) {
         guard !finished else { return }
         window.order(.below, relativeTo: other.windowNumber)
+        catcher?.order(.above, relativeTo: window.windowNumber)
         syncTwin()
     }
     var windowFrame: NSRect { window.frame }
 
     /// Every click on the picture goes to `hook` (global Cocoa point).
     func setClickHook(_ hook: ((NSPoint, NSEvent) -> Void)?) {
-        (window as? HeldBarPanel)?.clickHook = hook
+        catcher?.clickHook = hook
     }
 
     /// A layer over the picture, in the picture's own coordinates.
@@ -1085,6 +1104,7 @@ final class ConcealGhostOverlay {
         guard !finished else { return }
         if !shown {
             window.orderOut(nil)
+            catcher?.orderOut(nil)
             twin?.alphaValue = 0
             return
         }
@@ -1103,7 +1123,10 @@ final class ConcealGhostOverlay {
         let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? 0
         let cg = CGRect(x: f.minX, y: primaryMaxY - f.maxY, width: f.width, height: f.height)
         let foreign = Self.foreignBandWindows(intersecting: cg, bandHeight: f.height)
-        defer { syncTwin() }
+        defer {
+            catcher?.order(.above, relativeTo: window.windowNumber)
+            syncTwin()
+        }
         if let lowest = foreign.last {
             beneathID = lowest.id
             window.order(.below, relativeTo: Int(lowest.id))
@@ -1151,7 +1174,9 @@ final class ConcealGhostOverlay {
         func index(_ id: CGWindowID) -> Int? {
             list.firstIndex { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
         }
-        guard let mine = index(CGWindowID(window.windowNumber)) else { return nil }
+        guard let picture = index(CGWindowID(window.windowNumber)) else { return nil }
+        // A click leaves the catcher up there, over what should get the next one.
+        let mine = catcher.flatMap { index(CGWindowID($0.windowNumber)) }.map { min($0, picture) } ?? picture
         return foreign.first { (index($0.id) ?? -1) > mine }
     }
 
@@ -1220,6 +1245,8 @@ final class ConcealGhostOverlay {
     }
 
     private func dropTwin() {
+        catcher?.orderOut(nil)
+        catcher = nil
         twin?.orderOut(nil)
         twin = nil
         twinPicture = nil
@@ -1695,9 +1722,8 @@ final class ConcealGhostOverlay {
     ) {
         guard !finished else { return }
         finished = true
-        dropTwin()
         // A held bar on its way out is the bar beneath: clicks go through.
-        window.ignoresMouseEvents = true
+        dropTwin()
         if slide, let layer = imageView.layer {
             let shift = min(imageView.bounds.width * 0.5, 80)
             let anim = CABasicAnimation(keyPath: "position.x")

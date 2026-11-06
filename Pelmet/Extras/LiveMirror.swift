@@ -2786,6 +2786,10 @@ final class LiveMirror {
             if !onMirror { ConcealGhostOverlay.onHeldBarRightClick?(point) }
             return
         }
+        // The click raised the see-through catcher: back under Sconce at once.
+        for ms in [0, 20, 60, 120] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(ms)) { [weak self] in self?.enforceOrder("click +\(ms)ms") }
+        }
         guard !visible.isEmpty else {
             PelmetLog.log("livemirror: click at \(Int(point.x)),\(Int(point.y)) on display \(side.id) — no mirror yet, swallowed")
             return
@@ -2802,10 +2806,6 @@ final class LiveMirror {
         }
         let id = side.id
         let name = mirror.copy.name
-        // The cover was ordered front by the click: back under Sconce at once.
-        for ms in [0, 20, 60, 120] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(ms)) { [weak self] in self?.enforceOrder("click +\(ms)ms") }
-        }
         Task { @MainActor in
             let at = Date()
             // The card's state is read from AX on every click, never kept; the
