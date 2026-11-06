@@ -17,7 +17,10 @@ import PelmetEngine
 @MainActor
 final class SharePlayStatus {
     private(set) var state = SharePlayState() {
-        didSet { if state.isLive != oldValue.isLive { onChange?() } }
+        didSet {
+            if state.isLive != oldValue.isLive { onChange?() }
+            watchControlCenter()
+        }
     }
     var isLive: Bool { state.isLive }
     /// Fires on the main actor whenever `isLive` changes.
@@ -32,6 +35,10 @@ final class SharePlayStatus {
     private var restarts = 0
     /// Pelmet quitting takes the child with it (see FocusStatus).
     private var termination: NSObjectProtocol?
+    /// When the last controller line was logged, and what checks it against
+    /// the running Control Center while a session is on.
+    private var lastController: Date?
+    private var controlCenterWatch: Task<Void, Never>?
 
     /// The controller's activation and AV-mode lines; the rest of the
     /// category (members, devices, activities) is noise here.
@@ -53,6 +60,8 @@ final class SharePlayStatus {
     func stop() {
         stopped = true
         pending = []
+        controlCenterWatch?.cancel()
+        controlCenterWatch = nil
         (stream?.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
         stream?.terminate()
         stream = nil
@@ -96,7 +105,30 @@ final class SharePlayStatus {
                 for message in self.pending { replayed.read(message) }
                 self.pending = []
                 self.recovering = false
+                self.lastController = [lastController, self.lastController].compactMap { $0 }.max()
                 self.state = replayed
+            }
+        }
+    }
+
+    /// The boot's rule, while a session is on: Control Center restarting
+    /// mid-session never logs its end, and a real session logs again.
+    private func watchControlCenter() {
+        guard state.controllerActive else {
+            controlCenterWatch?.cancel()
+            controlCenterWatch = nil
+            return
+        }
+        guard controlCenterWatch == nil else { return }
+        controlCenterWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self, !Task.isCancelled, !self.stopped else { return }
+                guard !self.recovering, let started = Self.controlCenterStart(),
+                      (self.lastController ?? .distantPast) < started else { continue }
+                PelmetLog.log("shareplay: Control Center restarted, its session is over")
+                self.state = SharePlayState()
+                return
             }
         }
     }
@@ -126,9 +158,11 @@ final class SharePlayStatus {
             let chunk = handle.availableData
             guard !chunk.isEmpty else { handle.readabilityHandler = nil; return }
             for text in lines.split(appending: chunk) {
-                guard let message = Self.entry(in: text)?.message else { continue }
+                guard let entry = Self.entry(in: text) else { continue }
+                let message = entry.message
                 Task { @MainActor [weak self] in
                     guard let self, !self.stopped else { return }
+                    if message.hasPrefix("[Controller] ") { self.lastController = entry.date ?? Date() }
                     guard !self.recovering else { self.pending.append(message); return }
                     var next = self.state
                     guard next.read(message), next != self.state else { return }
@@ -184,6 +218,7 @@ final class SharePlayStatus {
     nonisolated private static func entry(in line: String) -> (message: String, date: Date?)? {
         guard line.hasPrefix("{"),
               let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              (object["userID"] as? Int).map({ $0 == Int(getuid()) }) ?? true,  // Control Center runs per user
               let message = object["eventMessage"] as? String
         else { return nil }
         // `log`'s ndjson timestamps: "2026-09-25 21:49:17.086123-0400".
