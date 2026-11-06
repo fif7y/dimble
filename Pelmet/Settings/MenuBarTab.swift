@@ -1081,11 +1081,14 @@ private struct PelmetItemsStrip: View {
                         : "Know when your camera, mic or SharePlay is on. Without Screen Recording the hidden icons flash by for an instant when you click it.",
                     isOn: hasKind(.cameraMicIndicator)
                 ) { toggleKind(.cameraMicIndicator, on: $0) }
-                PelmetItemRow(
-                    symbol: ExtrasManager.liveActivitySymbol, title: "Live Activities",
-                    caption: "See when a Live Activity is running and bring it back in a click.",
-                    isOn: hasKind(.liveActivity)
-                ) { toggleKind(.liveActivity, on: $0) }
+                // While live mode draws the pills themselves, no stand-in (`liveActivities`).
+                if appState.settings.offersLiveActivityItem(screenRecording: appState.screenRecordingGranted) {
+                    PelmetItemRow(
+                        symbol: ExtrasManager.liveActivitySymbol, title: "Live Activities",
+                        caption: "See when a Live Activity is running and bring it back in a click.",
+                        isOn: hasKind(.liveActivity)
+                    ) { toggleKind(.liveActivity, on: $0) }
+                }
                 PelmetItemRow(
                     symbol: "siri", title: "Siri",
                     caption: "Siri, as an icon you can move. Replaces Apple's while it's on.",
@@ -1159,10 +1162,10 @@ private struct PelmetItemsStrip: View {
         }
     }
 
-    /// Live mode (`LiveMirror`): independent of the Live Activities item
-    /// above, which only shows that one runs. It needs Screen Recording for
-    /// the picture it holds the bar under: without it the switch shows off
-    /// and can't be turned, the row says why, and the stored choice waits.
+    /// Live mode (`LiveMirror`). It needs Screen Recording for the picture
+    /// it holds the bar under: without it the switch shows off and can't be
+    /// turned, the row says why, and the stored choice waits. While it's off
+    /// or can't run, the Live Activities item above is offered instead.
     private var liveActivities: some View {
         let recording = appState.screenRecordingGranted
         return SettingRow(

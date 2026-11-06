@@ -191,4 +191,15 @@ struct SettingsStoreTests {
         #expect(back.panel == settings.panel)
         #expect(back == settings)
     }
+
+    @Test func theLiveActivitiesItemOnlyHasAPlaceWhileLiveModeIsNotDrawing() {
+        var settings = SettingsStore()
+        settings.extraItems = [ExtraItemSpec(kind: .liveActivity), ExtraItemSpec(kind: .timer)]
+        settings.showLiveActivities = true
+        #expect(settings.barExtraItems(screenRecording: true).map(\.kind) == [.timer])
+        #expect(settings.barExtraItems(screenRecording: false).map(\.kind) == [.liveActivity, .timer])
+        settings.showLiveActivities = false
+        #expect(settings.barExtraItems(screenRecording: true).map(\.kind) == [.liveActivity, .timer])
+        #expect(settings.barExtraItems(screenRecording: false).map(\.kind) == [.liveActivity, .timer])
+    }
 }

@@ -452,7 +452,9 @@ final class AppState {
             settings.save()
         }
         extras = ExtrasManager(appState: self)
-        extras?.sync(with: settings.extraItems)
+        extras?.sync(with: settings.barExtraItems(screenRecording: screenRecordingGranted))
+        // Screen Recording granted while quit takes the Live Activities item away.
+        pruneOrderEditsForRemovedOwnItems()
     }
 
     private func startMonitors() {
@@ -1739,6 +1741,8 @@ final class AppState {
         guard granted != screenRecordingGranted else { return }
         screenRecordingGranted = granted
         PelmetLog.log("screen: recording granted=\(granted)")
+        // The Live Activities item goes or comes with the grant.
+        if settings.extraItems.contains(where: { $0.kind == .liveActivity }) { settingsChanged() }
         extras?.screenRecordingChanged()
         if launchBaselineApplied { reconcileAnchor("screen recording \(granted ? "granted" : "lost")") }
     }
@@ -2344,7 +2348,7 @@ final class AppState {
         // its own reason, ahead of the watcher stopping under it.
         liveMirror.settingChanged()
         separators?.sync(with: settings.separators)
-        extras?.sync(with: settings.extraItems)
+        extras?.sync(with: settings.barExtraItems(screenRecording: screenRecordingGranted))
         pruneOrderEditsForRemovedOwnItems()
         let ownIDs = Set((extras?.managedItemIDs ?? []) + (separators?.managedItemIDs ?? []))
         // Separators are drawings: they move at Apply, never on their own.
@@ -3673,7 +3677,7 @@ final class AppState {
             section: section,
             snapshotItems: snapshot?.items ?? [],
             concealed: snapshot?.concealed ?? [],
-            extraItems: settings.extraItems,
+            extraItems: settings.barExtraItems(screenRecording: screenRecordingGranted),
             separators: settings.separators,
             model: settings.sectionModel,
             pelmetBundleID: PelmetBundle.mainID,

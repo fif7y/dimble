@@ -441,6 +441,19 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         extraItems.contains { ExtraKind.collateralReplicas.contains($0.kind) }
     }
 
+    /// The Live Activities item stands in for the pills, so it's only there
+    /// when live mode isn't drawing them: switched off, or without Screen
+    /// Recording.
+    public func offersLiveActivityItem(screenRecording: Bool) -> Bool {
+        !(screenRecording && showLiveActivities)
+    }
+
+    /// The extras that get a place on the bar.
+    public func barExtraItems(screenRecording: Bool) -> [ExtraItemSpec] {
+        offersLiveActivityItem(screenRecording: screenRecording)
+            ? extraItems : extraItems.filter { $0.kind != .liveActivity }
+    }
+
     /// What the engine holds: the user's choice, forced on while a replica
     /// is on.
     public var effectiveHideSystemExtras: Bool {
