@@ -35,6 +35,7 @@ final class HelperHosts {
         var exitWatch: DispatchSourceProcess?
         var launching = false
         var relaunches = 0
+        var lastDeath: Date?
 
         var wantedItems: [HostedItem] { wanted.values.flatMap { $0 } }
         var wantsAnything: Bool { !wantedItems.isEmpty }
@@ -191,6 +192,10 @@ final class HelperHosts {
         host.hosted = []
         hosts[section] = host
         guard host.wantsAnything else { return }
+        // Deaths far apart aren't a crash loop: a long session mustn't run
+        // out of relaunches and lose the section's items.
+        if let last = host.lastDeath, Date().timeIntervalSince(last) > 10 * 60 { host.relaunches = 0 }
+        host.lastDeath = Date()
         host.relaunches += 1
         hosts[section] = host
         guard host.relaunches <= 3 else {
