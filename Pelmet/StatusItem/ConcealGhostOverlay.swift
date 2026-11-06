@@ -55,16 +55,19 @@ enum AlphaFade {
 private final class HeldBarPanel: NSPanel {
     /// Live mode: takes every click on the picture; the mirror's
     /// forwards it to the real pill.
-    var clickHook: ((NSPoint) -> Void)?
+    var clickHook: ((NSPoint, NSEvent) -> Void)?
     override func sendEvent(_ event: NSEvent) {
         switch event.type {
-        case .leftMouseDown:
+        case .leftMouseDown, .rightMouseDown:
+            let point = convertPoint(toScreen: event.locationInWindow)
             if let clickHook {
-                clickHook(convertPoint(toScreen: event.locationInWindow))
-                return
+                clickHook(point, event)
+            } else if event.type == .leftMouseDown {
+                ConcealGhostOverlay.onHeldBarClick?(screen?.directDisplayID, event.clickCount)
+            } else {
+                ConcealGhostOverlay.onHeldBarRightClick?(point)
             }
-            ConcealGhostOverlay.onHeldBarClick?(screen?.directDisplayID, event.clickCount)
-        case .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
+        case .leftMouseUp, .rightMouseUp, .otherMouseDown, .otherMouseUp:
             break
         default:
             super.sendEvent(event)
@@ -76,6 +79,9 @@ final class ConcealGhostOverlay {
     /// A click on a held bar's picture, with its display and click count:
     /// an empty-bar click there, so it does what one would (AppState).
     static var onHeldBarClick: ((CGDirectDisplayID?, Int) -> Void)?
+    /// A right-click there, at its global point. The band's monitor is global,
+    /// so it never sees a click on Dimble's own window.
+    static var onHeldBarRightClick: ((NSPoint) -> Void)?
 
     /// True while a reveal cover is up — SeparatorManager and ExtrasManager
     /// skip their per-item ghosts under it (a fading copy showing through
@@ -1062,7 +1068,7 @@ final class ConcealGhostOverlay {
     var windowFrame: NSRect { window.frame }
 
     /// Every click on the picture goes to `hook` (global Cocoa point).
-    func setClickHook(_ hook: ((NSPoint) -> Void)?) {
+    func setClickHook(_ hook: ((NSPoint, NSEvent) -> Void)?) {
         (window as? HeldBarPanel)?.clickHook = hook
     }
 

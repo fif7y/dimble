@@ -239,6 +239,11 @@ final class AppState {
         ConcealGhostOverlay.onHeldBarClick = { [weak self] display, clicks in
             self?.heldBarClicked(display: display, clickCount: clicks)
         }
+        ConcealGhostOverlay.onHeldBarRightClick = { [weak self] point in
+            guard let self, settings.barRightClickMenuActive else { return }
+            PelmetLog.log("held: right click, the bar's menu at \(Int(point.x)),\(Int(point.y))")
+            PelmetStatusItem.contextMenu(appState: self).popUp(positioning: nil, at: point, in: nil)
+        }
         ConcealGhostOverlay.iconFrames = { [weak self] in
             guard let self else { return [] }
             return (chevronWindowFrame.map { [$0] } ?? []) + (snapshot?.items.compactMap(\.frame) ?? [])

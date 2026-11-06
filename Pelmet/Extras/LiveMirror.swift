@@ -43,6 +43,8 @@ nonisolated struct PillCopy: @unchecked Sendable {
     let frame: CGRect
     let text: String
     let name: String
+    /// Which of the agent's bars this copy came from (see `copies`).
+    let bar: Int
 }
 
 
@@ -179,15 +181,13 @@ nonisolated enum PillProbe {
     /// Every distinct pill on a display, left to right: macOS shows one pill
     /// per running activity, each with its own AX element (and a copy per bar).
     static func pills(in bounds: CGRect) -> [PillCopy] {
-        var out: [PillCopy] = []
-        for copy in copies() where bounds.contains(CGPoint(x: copy.frame.midX, y: copy.frame.midY)) {
-            // Each bar window holds its own element for the same pill, and
-            // while the capture indicator moves things the two can stand a
-            // few points apart: one description within 30 pt is one pill.
-            if out.contains(where: { $0.name == copy.name && abs($0.frame.minX - copy.frame.minX) < 30 }) { continue }
-            out.append(copy)
-        }
-        return out.sorted { $0.frame.minX < $1.frame.minX }
+        let here = copies().filter { bounds.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }
+        // Every bar holds its own element for the same pill, and they don't all
+        // keep up: one bar window's copy opened a card macOS never drew, and
+        // stayed 38 pt behind after a move, a second mirror for 9 s. The list
+        // of one bar decides, the first in `copies`' order.
+        let bar = here.first?.bar
+        return here.filter { $0.bar == bar }.sorted { $0.frame.minX < $1.frame.minX }
     }
 
     /// A pill's identity is its AXDescription ("Sports", "myVW"), the one
@@ -427,26 +427,33 @@ nonisolated enum PillProbe {
     /// Every pill in the agent's tree.
     static func copies() -> [PillCopy] {
         var found: [PillCopy] = []
+        var index = 0
         for app in agentApps() {
             AXUIElementSetMessagingTimeout(app, 0.6)
-            // The pills are the bar windows' own children (app > window > item):
-            // the items' own children are never read.
-            collect(app, depth: 2, into: &found)
+            // The pills are the bars' own children (app > bar > item): the
+            // items' own children are never read. The menu bar first: it's the
+            // one the system keeps current, the bar windows are a copy each.
+            let bars = (attribute(app, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+            let isMenuBar = { (attribute($0, kAXRoleAttribute) as? String) == kAXMenuBarRole }
+            for bar in bars.filter(isMenuBar) + bars.filter({ !isMenuBar($0) }) {
+                index += 1
+                collect(bar, bar: index, depth: 1, into: &found)
+            }
         }
         return found
     }
 
-    private static func collect(_ element: AXUIElement, depth: Int, into found: inout [PillCopy]) {
+    private static func collect(_ element: AXUIElement, bar: Int, depth: Int, into found: inout [PillCopy]) {
         if let id = attribute(element, kAXIdentifierAttribute) as? String, id.hasPrefix(identifierPrefix) {
             if let read = read(element) {
                 let name = (attribute(element, kAXDescriptionAttribute) as? String) ?? id
-                found.append(PillCopy(element: element, frame: read.frame, text: read.text, name: name))
+                found.append(PillCopy(element: element, frame: read.frame, text: read.text, name: name, bar: bar))
             }
             return
         }
         guard depth > 0 else { return }
         for child in (attribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
-            collect(child, depth: depth - 1, into: &found)
+            collect(child, bar: bar, depth: depth - 1, into: &found)
         }
     }
 }
@@ -1871,7 +1878,7 @@ final class LiveMirror {
         for r in memory.pills {
             guard let still = kept[keptKey(side, key: r.key)],
                   now.timeIntervalSince(still.at) < (still.look.items.isEmpty ? 900 : Self.graphicRefresh) else { continue }
-            let mirror = PillMirror(key: r.key, copy: PillCopy(element: AXUIElementCreateSystemWide(), frame: r.visual, text: "", name: r.name))
+            let mirror = PillMirror(key: r.key, copy: PillCopy(element: AXUIElementCreateSystemWide(), frame: r.visual, text: "", name: r.name, bar: 0))
             mirror.provisional = true
             mirror.visual = r.visual
             mirror.base.contents = still.image
@@ -1959,9 +1966,9 @@ final class LiveMirror {
         // cover until its fade is over: it goes with the icons beneath the cover.
         let ghosts = StatusItemFader.cutGhosts(under: overlay.windowFrame)
         if ghosts > 0 { PelmetLog.log("livemirror: \(ghosts) fading item ghost(s) under the cover go with the icons beneath it (\(why))") }
-        overlay.setClickHook { [weak self, weak side] point in
+        overlay.setClickHook { [weak self, weak side] point, event in
             guard let self, let side else { return }
-            self.clicked(side, at: point)
+            self.clicked(side, at: point, event: event)
         }
         if pressPassesClicks { overlay.passClicks(true) }
         if !keepMirrors {
@@ -2503,6 +2510,7 @@ final class LiveMirror {
         }
         let gap = gaps.isEmpty ? Self.pillGap : gaps.sorted()[gaps.count / 2]
         var right = min(side.coverMaxX, side.predictedRight ?? .greatestFiniteMagnitude)
+        var besideIcon = false
         if let alone = side.alone {
             // Beside the « only: a cover ended at the Hidden icons (a hover
             // under live mode) no longer reaches it.
@@ -2517,8 +2525,10 @@ final class LiveMirror {
             alone.frame = CGRect(x: right - alone.bounds.width - window.minX, y: 0, width: alone.bounds.width, height: window.height)
             CATransaction.commit()
             if beside { right -= alone.bounds.width }
+            besideIcon = beside
         }
-        right -= Self.gap
+        // An icon next to the last pill keeps the gap pills keep from each other.
+        right -= besideIcon ? gap : Self.gap
         let left = side.coverMinX + 4
         func need(_ list: [PillMirror]) -> CGFloat { list.reduce(0) { $0 + $1.visual!.width } + gap * CGFloat(max(0, list.count - 1)) }
         var fit = placed
@@ -2766,15 +2776,24 @@ final class LiveMirror {
 
     // MARK: Clicks
 
-    private func clicked(_ side: Side, at point: NSPoint) {
+    private func clicked(_ side: Side, at point: NSPoint, event: NSEvent) {
         let visible = side.mirrors.filter { !$0.dropped && $0.global != nil }
+        // The rest of the cover is empty bar, and its menu lives there too. A
+        // real pill has no right-click, so neither has its mirror.
+        if event.type == .rightMouseDown {
+            let onMirror = visible.contains { !$0.container.isHidden && $0.global!.insetBy(dx: -2, dy: -4).contains(point) }
+            PelmetLog.log("livemirror: right click at \(Int(point.x)),\(Int(point.y)) on display \(side.id) — \(onMirror ? "on a mirror, nothing to do" : "empty bar")")
+            if !onMirror { ConcealGhostOverlay.onHeldBarRightClick?(point) }
+            return
+        }
         guard !visible.isEmpty else {
             PelmetLog.log("livemirror: click at \(Int(point.x)),\(Int(point.y)) on display \(side.id) — no mirror yet, swallowed")
             return
         }
         guard let mirror = visible.first(where: { !$0.container.isHidden && $0.global!.insetBy(dx: -2, dy: -4).contains(point) }) else {
             let span = visible.map { $0.global! }.reduce(visible[0].global!) { $0.union($1) }
-            PelmetLog.log("livemirror: click at \(Int(point.x)),\(Int(point.y)) on display \(side.id) — outside the mirrors (\(Int(span.minX))..\(Int(span.maxX))), swallowed")
+            PelmetLog.log("livemirror: click at \(Int(point.x)),\(Int(point.y)) on display \(side.id) — outside the mirrors (\(Int(span.minX))..\(Int(span.maxX))), an empty-bar click")
+            ConcealGhostOverlay.onHeldBarClick?(side.id, event.clickCount)
             return
         }
         guard !mirror.provisional else {
