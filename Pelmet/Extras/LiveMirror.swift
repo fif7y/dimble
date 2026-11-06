@@ -735,6 +735,14 @@ final class LiveMirror {
     /// progress bar can move without a text. One capture (~0.28 s of the dot,
     /// ~50 ms of work) per interval, none when a text-triggered still came.
     static let graphicRefresh: TimeInterval = 300
+    /// A pill with pictures and no text has nothing that can ask for a new
+    /// still: its width holds, and its image children keep their keys (Now
+    /// Playing's artwork is one unnamed picture whatever is playing, where a
+    /// score's carries the score). So its artwork is whatever was playing up
+    /// to `graphicRefresh` ago, and a track change goes unseen for minutes.
+    /// The pills that do carry text keep the slow beat, their own triggers
+    /// catch them well before it.
+    static let pictureOnlyRefresh: TimeInterval = 45
     private var textSnapAt: [CGDirectDisplayID: Date] = [:]
 
     init(appState: AppState) { self.appState = appState }
@@ -2253,9 +2261,13 @@ final class LiveMirror {
                 reasons.append("display \(active ? "took" : "lost") the focus, the bar's dim went with it")
             }
         }
-        if reasons.isEmpty, !settling, !side.snapping, Date().timeIntervalSince(side.lastSnapshotAt) >= Self.graphicRefresh,
+        let pictureOnly = live.contains { !$0.tree.images.isEmpty && $0.tree.texts.isEmpty && !$0.mirror.dropped }
+        let refreshAfter = pictureOnly ? Self.pictureOnlyRefresh : Self.graphicRefresh
+        if reasons.isEmpty, !settling, !side.snapping, Date().timeIntervalSince(side.lastSnapshotAt) >= refreshAfter,
            live.contains(where: { !$0.tree.images.isEmpty && !$0.mirror.dropped }) {
-            reasons.append("graphic refresh (\(Int(Self.graphicRefresh / 60)) min, no text or size change seen)")
+            reasons.append(pictureOnly
+                ? "graphic refresh (\(Int(Self.pictureOnlyRefresh)) s, a picture with no text to change)"
+                : "graphic refresh (\(Int(Self.graphicRefresh / 60)) min, no text or size change seen)")
         }
         if !reasons.isEmpty, !settling, !side.snapping {
             side.snapping = true
