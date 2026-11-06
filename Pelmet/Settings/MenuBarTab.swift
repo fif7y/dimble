@@ -1193,12 +1193,17 @@ private struct PelmetItemsStrip: View {
 
     /// Apple's Now Playing, camera controls, AirDrop, Focus and Timer hide
     /// whenever any icon is concealed. The choice of what the revealed bar
-    /// does with them only exists while no Pelmet item stands in for one:
-    /// once one does, Apple's stay hidden whatever the choice says, so the row
-    /// gives way to a line saying so.
+    /// does with them only exists while none of `collateralRows` is on: macOS
+    /// hides them together, so one Dimble item keeps them all hidden whatever
+    /// the choice says. The row gives way to a line naming the items that are
+    /// on, the ones to turn off to get the choice back.
     @ViewBuilder private var systemExtras: some View {
         if appState.settings.replacesCollateralExtras {
-            Text("Dimble's items stand in for Apple's Now Playing, camera controls, AirDrop, Focus and Timer, so Apple's stay hidden.")
+            let items = ExtraKind.collateralRows.filter { hasKind($0.kind) }.map(\.title)
+            let names = ListFormatter.localizedString(byJoining: items)
+            Text(items.count == 1
+                ? "Apple's Now Playing, camera controls, AirDrop, Focus and Timer stay hidden while Dimble's \(names) is on."
+                : "Apple's Now Playing, camera controls, AirDrop, Focus and Timer stay hidden while Dimble's \(names) are on.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1797,5 +1802,21 @@ private struct SeparatorOptions: View {
         case .dash: "Dash"
         case .space: "Invisible spacer"
         }
+    }
+}
+
+extension ExtraKind {
+    /// `collateralReplicas` in their Settings order, named as their rows are.
+    static var collateralRows: [(kind: ExtraKind, title: String)] {
+        [
+            (.mediaControls, String(localized: "Media controls")),
+            (.cameraMicIndicator, String(localized: "Camera & mic indicator")),
+            (.quickNote, String(localized: "Quick Note")),
+            (.timer, String(localized: "Timer")),
+            (.focus, String(localized: "Focus")),
+            (.airdrop, String(localized: "AirDrop")),
+            (.userSwitching, String(localized: "Fast user switching")),
+            (.shortcutsMenu, String(localized: "Shortcuts")),
+        ]
     }
 }

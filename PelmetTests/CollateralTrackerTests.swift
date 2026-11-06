@@ -97,3 +97,11 @@ struct CollateralTrackerTests {
         #expect(tracker.confirmed == [istat])
     }
 }
+
+struct CollateralRowsTests {
+    /// The Settings line names whichever item keeps Apple's hidden, so every
+    /// one of them needs a name there.
+    @Test func everyReplicaIsNamed() {
+        #expect(Set(ExtraKind.collateralRows.map(\.kind)) == ExtraKind.collateralReplicas)
+    }
+}

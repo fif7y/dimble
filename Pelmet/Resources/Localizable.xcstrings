@@ -4467,6 +4467,122 @@
         }
       }
     },
+    "Apple's Now Playing, camera controls, AirDrop, Focus and Timer stay hidden while Dimble's %@ are on.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apples „Jetzt läuft“, Kamerasteuerung, AirDrop, Fokus und Timer bleiben ausgeblendet, solange Dimbles Elemente %@ eingeschaltet sind."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ahora suena, los controles de cámara, AirDrop, los modos de concentración y el Temporizador de Apple siguen ocultos mientras los elementos %@ de Dimble estén activados."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lecture en cours, les commandes de caméra, AirDrop, Concentration et Minuteur d’Apple restent masqués tant que les éléments %@ de Dimble sont activés."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In riproduzione, i controlli fotocamera, AirDrop, Full immersion e Timer di Apple restano nascosti finché gli elementi %@ di Dimble sono attivi."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimbleの%@がオンの間、Appleの再生中、カメラコントロール、AirDrop、集中モード、タイマーは隠れたままです。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimble의 %@ 항목이 켜져 있는 동안 Apple의 지금 재생 중, 카메라 제어, AirDrop, 집중 모드, 타이머는 숨겨진 채로 있습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tocando agora, controles de câmera, AirDrop, Foco e Timer da Apple continuam ocultos enquanto os itens %@ do Dimble estiverem ativados."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "«Сейчас играет», управление камерой, AirDrop, Фокусирование и Таймер от Apple остаются скрытыми, пока включены элементы Dimble %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当 Dimble 的%@开启时，Apple 的现在播放、相机控制、隔空投送、专注模式和计时器保持隐藏。"
+          }
+        }
+      }
+    },
+    "Apple's Now Playing, camera controls, AirDrop, Focus and Timer stay hidden while Dimble's %@ is on.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apples „Jetzt läuft“, Kamerasteuerung, AirDrop, Fokus und Timer bleiben ausgeblendet, solange Dimbles Element %@ eingeschaltet ist."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ahora suena, los controles de cámara, AirDrop, los modos de concentración y el Temporizador de Apple siguen ocultos mientras el elemento %@ de Dimble esté activado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lecture en cours, les commandes de caméra, AirDrop, Concentration et Minuteur d’Apple restent masqués tant que l’élément %@ de Dimble est activé."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In riproduzione, i controlli fotocamera, AirDrop, Full immersion e Timer di Apple restano nascosti finché l’elemento %@ di Dimble è attivo."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimbleの%@がオンの間、Appleの再生中、カメラコントロール、AirDrop、集中モード、タイマーは隠れたままです。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimble의 %@ 항목이 켜져 있는 동안 Apple의 지금 재생 중, 카메라 제어, AirDrop, 집중 모드, 타이머는 숨겨진 채로 있습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tocando agora, controles de câmera, AirDrop, Foco e Timer da Apple continuam ocultos enquanto o item %@ do Dimble estiver ativado."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "«Сейчас играет», управление камерой, AirDrop, Фокусирование и Таймер от Apple остаются скрытыми, пока включён элемент Dimble %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当 Dimble 的%@开启时，Apple 的现在播放、相机控制、隔空投送、专注模式和计时器保持隐藏。"
+          }
+        }
+      }
+    },
     "Apply": {
       "localizations": {
         "de": {
@@ -8175,64 +8291,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dimble 始终触手可及"
-          }
-        }
-      }
-    },
-    "Dimble's items stand in for Apple's Now Playing, camera controls, AirDrop, Focus and Timer, so Apple's stay hidden.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dimbles Elemente ersetzen Apples „Jetzt läuft“, Kamerasteuerung, AirDrop, Fokus und Timer, die von Apple bleiben daher ausgeblendet."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Los elementos de Dimble sustituyen a Ahora suena, los controles de cámara, AirDrop, los modos de concentración y el Temporizador de Apple, así que los de Apple siguen ocultos."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Les éléments de Dimble remplacent Lecture en cours, les commandes de caméra, AirDrop, Concentration et Minuteur d’Apple, ceux d’Apple restent donc masqués."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gli elementi di Dimble sostituiscono In riproduzione, i controlli fotocamera, AirDrop, Full immersion e Timer di Apple, quindi quelli di Apple restano nascosti."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dimbleの項目が、Appleの再生中、カメラコントロール、AirDrop、集中モード、タイマーの代わりになるため、Appleのものは隠れたままです。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dimble 항목이 Apple의 지금 재생 중, 카메라 제어, AirDrop, 집중 모드, 타이머를 대신하므로 Apple의 항목은 숨겨진 채로 있습니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Os itens do Dimble ficam no lugar de Tocando agora, controles de câmera, AirDrop, Foco e Timer da Apple, então os da Apple continuam ocultos."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Элементы Dimble заменяют «Сейчас играет», управление камерой, AirDrop, Фокусирование и Таймер от Apple, поэтому значки Apple остаются скрытыми."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dimble 的项目替代了 Apple 的现在播放、相机控制、隔空投送、专注模式和计时器，因此 Apple 的保持隐藏。"
           }
         }
       }
