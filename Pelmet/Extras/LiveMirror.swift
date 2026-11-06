@@ -587,6 +587,10 @@ final class LiveMirror {
         var pictureGeneration = 0
         /// The last still of any kind: the slow graphic refresh counts from it.
         var lastSnapshotAt = Date()
+        /// Whether this display held the focused window when that still was
+        /// taken. macOS draws the menu bar's contents dimmed on every display
+        /// without it, and a still keeps whichever look it caught.
+        var activeAtSnapshot = false
         /// The snapshot time the last "skipped" line was written for: one line
         /// per rate-limit window, not one per read.
         var skippedWindow: Date?
@@ -2237,6 +2241,18 @@ final class LiveMirror {
             }
         }
         if reasons.isEmpty, !settling, !side.snapping, let text = textTrigger(side, live) { reasons.append(text) }
+        // The bar's contents are dimmed on every display but the focused
+        // one, and the still froze one or the other. Nothing else here sees
+        // it: the pill keeps its width, its texts and its image children, so
+        // without this the copy stays dim beside bright icons (or the other
+        // way round) until the slow refresh below, up to five minutes.
+        if reasons.isEmpty, !settling, !side.snapping, side.snapshots > 0,
+           live.contains(where: { !$0.mirror.dropped }) {
+            let active = Self.activeDisplayID() == side.id
+            if active != side.activeAtSnapshot {
+                reasons.append("display \(active ? "took" : "lost") the focus, the bar's dim went with it")
+            }
+        }
         if reasons.isEmpty, !settling, !side.snapping, Date().timeIntervalSince(side.lastSnapshotAt) >= Self.graphicRefresh,
            live.contains(where: { !$0.tree.images.isEmpty && !$0.mirror.dropped }) {
             reasons.append("graphic refresh (\(Int(Self.graphicRefresh / 60)) min, no text or size change seen)")
@@ -2292,6 +2308,44 @@ final class LiveMirror {
         return "text changed (\(change))"
     }
 
+    /// The display macOS leaves undimmed: the one holding the frontmost app's
+    /// front window. `NSScreen.main` is no use for this, it answers for our
+    /// own key window and an agent has none (measured 2026-11-06: it never
+    /// left the built-in while the focus crossed displays). Cached for a poll
+    /// tick, so three sides asking cost one window list.
+    nonisolated(unsafe) private static var activeDisplayAnswer: (id: CGDirectDisplayID?, at: Date) = (nil, .distantPast)
+    private static func activeDisplayID() -> CGDirectDisplayID? {
+        if Date().timeIntervalSince(activeDisplayAnswer.at) < 0.2 { return activeDisplayAnswer.id }
+        var found: CGDirectDisplayID?
+        // The list runs front to back, so the frontmost app's first layer-0
+        // window is its front one. Its bounds are top-left, screens are not.
+        if let front = NSWorkspace.shared.frontmostApplication,
+           let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+           let top = NSScreen.screens.first?.frame.maxY {
+            for window in list where (window[kCGWindowLayer as String] as? Int) == 0 {
+                guard (window[kCGWindowOwnerPID as String] as? pid_t) == front.processIdentifier,
+                      let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
+                      let x = bounds["X"], let y = bounds["Y"],
+                      let width = bounds["Width"], let height = bounds["Height"]
+                else { continue }
+                let rect = CGRect(x: x, y: y, width: width, height: height)
+                var best: (id: CGDirectDisplayID, area: CGFloat)?
+                for screen in NSScreen.screens {
+                    guard let id = screen.directDisplayID else { continue }
+                    let frame = screen.frame
+                    let flipped = CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height)
+                    let overlap = rect.intersection(flipped)
+                    let area = overlap.isNull ? 0 : overlap.width * overlap.height
+                    if area > (best?.area ?? 0) { best = (id, area) }
+                }
+                found = best?.id
+                break
+            }
+        }
+        activeDisplayAnswer = (found, Date())
+        return found
+    }
+
     /// One still of all the pills on a display (their union, one capture, so
     /// two pills do not double the capture indicator), cropped per pill with
     /// that pill's texts blanked out.
@@ -2340,6 +2394,7 @@ final class LiveMirror {
         }
         side.snapshots += 1
         side.lastSnapshotAt = Date()
+        side.activeAtSnapshot = Self.activeDisplayID() == side.id
         let scale = side.scale
         textSnapAt[side.id] = Date()
         for (mirror, tree) in shown {
