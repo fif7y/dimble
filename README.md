@@ -117,6 +117,20 @@ stays on your Mac. New in 0.3.1.
   <sub>⌥⌘K, "bt", Return. Bluetooth's menu drops from its own icon.</sub>
 </p>
 
+## Keep your Live Activities
+
+A game's score, a Shortcut running: macOS shows those in a pill beside the
+clock, and it takes the pill off the bar while your icons are hidden. Dimble
+keeps it there. The pill sits next to the chevron for as long as the activity
+runs, a click opens its card, and the system icons come back alongside it.
+It's on by default, and it needs Screen Recording.
+Settings › Menu Bar › "Show Live Activities" turns it off. New in 0.3.4.
+
+<p align="center">
+  <img src="https://dimble.fif7y.com/assets/live-bar.gif" alt="A hockey game's Live Activity next to the chevron while Dimble hides the rest of the icons: the pill comes out of the bar, a click opens its card, the score rolls from 2 to 3, a second click closes the card, and the pill goes away at the final buzzer" width="640"><br>
+  <sub>The game's pill stays on the bar. A click opens its card.</sub>
+</p>
+
 ## And the rest
 
 - **Per-display behavior.** Set a display to always show everything or to
