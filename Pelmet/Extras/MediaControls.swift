@@ -126,6 +126,11 @@ final class ExtrasManager {
     private var lastCameraIndicatorVisible = false
     /// Debounces the activation edge before queuing the placement walk.
     private var cameraPlacementDebounce: Task<Void, Never>?
+    /// Apple's pill has had its grace this session, so the replica shows on
+    /// the next answer whatever it is. Cleared when the hardware goes quiet.
+    private var cameraGracePassed = false
+    /// Re-decides the replica once the grace is out.
+    private var cameraShowGrace: Task<Void, Never>?
     /// App launchers with the "while running" rule: the running edge (not the
     /// section reveal edge) is what re-enters layout and needs a placement.
     private var lastRunning: [UUID: Bool] = [:]
@@ -428,6 +433,41 @@ final class ExtrasManager {
                 // or Apple's SharePlay icon, when that one is on screen.
                 let active = (cameraMicMonitor?.isActive ?? false) || (sharePlayStatus?.isLive ?? false)
                 visible = active && !systemCameraPillVisible && !(appState?.systemSharePlayVisible ?? false)
+                if !active {
+                    cameraShowGrace?.cancel()
+                    cameraShowGrace = nil
+                    cameraGracePassed = false
+                }
+                // Apple's pill is coming, it just isn't in AX yet. macOS 27.3
+                // builds it, destroys it and builds it again under a new UUID
+                // ~260ms later, so `AudioVideoPill.onBar()` reads false in
+                // that gap and this replica would show, leave and show again
+                // — ~650ms of flapping, the bar shifting 38pt each way —
+                // before live mode's mirror settles it for good (measured
+                // 2026-11-07, three runs). While the trait says the pill
+                // survives an assertion, hold the FIRST show until the grace
+                // is out: by then either the pill has landed and the replica
+                // stays out, which is 27.3's end state, or it is genuinely
+                // absent and the replica shows. Up to 27.2 an assertion takes
+                // Apple's pill off the bar, nothing is coming, and the
+                // replica shows at once.
+                if visible, !cameraGracePassed, !lastCameraIndicatorVisible,
+                   appState?.osTraits.value(.systemPillSurvivesAssertion) ?? true {
+                    visible = false
+                    if cameraShowGrace == nil {
+                        cameraShowGrace = Task { [weak self] in
+                            try? await Task.sleep(for: AppTiming.cameraIndicatorPillGrace)
+                            guard let self, !Task.isCancelled else { return }
+                            self.cameraGracePassed = true
+                            self.cameraShowGrace = nil
+                            // Ask AX again: a false taken inside the rebuild
+                            // gap would otherwise sit in onBar()'s cache for
+                            // the rest of its half second.
+                            AudioVideoPill.invalidateOnBar()
+                            self.applyCurrent()
+                        }
+                    }
+                }
                 updateCameraSymbol(item, spec: spec)
                 // Re-entering layout (isVisible flip) parks the item wherever
                 // the agent decides, not at its model slot. Never drag here:

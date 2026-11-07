@@ -255,6 +255,15 @@ enum AppTiming {
     /// camera pill often takes over within ~50ms and the indicator defers to
     /// it again — queuing before the flap settles queues a dead walk.
     static let cameraIndicatorPlaceDebounce: Duration = .milliseconds(500)
+    /// Camera or mic goes live → the earliest Dimble's own replica may show,
+    /// while `systemPillSurvivesAssertion` says Apple's pill is coming.
+    /// macOS 27.3 builds that pill, destroys it and builds it again under a
+    /// new UUID ~260ms later (measured 2026-11-07), so the AX read is false
+    /// in the gap and the replica would show, leave and show again before
+    /// live mode's mirror settles it. Past the longest settle seen (665ms),
+    /// and short enough that a session Apple never marks still gets an
+    /// indicator.
+    static let cameraIndicatorPillGrace: Duration = .milliseconds(700)
     /// Relaunched app → adoption window: first wait lets the app construct
     /// its status item; the retry covers slow bootstraps (Electron vault
     /// apps build their tray ~20s in).
