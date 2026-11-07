@@ -37,7 +37,11 @@ final class LiveActivityStatus {
     /// are newer than it, so they fold in on top of it.
     private var recovering = false
     private var pending: [Entry] = []
-    private var restarts = 0
+    /// The growing wait between reopening the stream, reset by a stream
+    /// that stayed up (`StreamRestartBackoff`).
+    private var backoff = StreamRestartBackoff()
+    /// When the running child opened, for that reset.
+    private var streamOpenedAt: Date?
     /// When the stream last ended, until a new one is running: a restart
     /// replays the log only from then (`recover(since:)`).
     private var gapStart: Date?
@@ -236,6 +240,7 @@ final class LiveActivityStatus {
         do {
             try process.run()
             stream = process
+            streamOpenedAt = Date()
             gapStart = nil
         } catch {
             // Retried like a stream that ended.
@@ -260,8 +265,12 @@ final class LiveActivityStatus {
         // Where the replay on the way back starts: the first end of a run
         // of failures, until a stream is running again.
         if gapStart == nil { gapStart = Date() }
-        restarts += 1
-        let delay = min(60, 2 << min(restarts, 5))
+        // A child that ran a while ended for a reason of its own (logd
+        // restarted, the Mac slept), not because `log stream` is refused
+        // here, so its uptime starts the wait over.
+        let uptime = streamOpenedAt.map { Date().timeIntervalSince($0) }
+        streamOpenedAt = nil
+        let delay = backoff.delay(afterUptime: uptime)
         PelmetLog.log("liveactivity: log stream ended\(why.isEmpty ? "" : " (\(why.prefix(120)))"), retry in \(delay)s")
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))

@@ -29,7 +29,11 @@ final class ClockTimerStatus {
     /// are newer than it, so they fold in on top of it, not under it.
     private var recovering = false
     private var pending: [(message: String, date: Date)] = []
-    private var restarts = 0
+    /// The growing wait between reopening the stream, reset by a stream
+    /// that stayed up (`StreamRestartBackoff`).
+    private var backoff = StreamRestartBackoff()
+    /// When the running child opened, for that reset.
+    private var streamOpenedAt: Date?
     /// Pelmet quitting takes the child with it (see FocusStatus).
     private var termination: NSObjectProtocol?
     /// Wakes when a timer is past its bound (`ClockTimers.expire`).
@@ -117,6 +121,7 @@ final class ClockTimerStatus {
         do {
             try process.run()
             stream = process
+            streamOpenedAt = Date()
         } catch {
             PelmetLog.log("clocktimer: log stream failed — \(error.localizedDescription)")
         }
@@ -126,8 +131,12 @@ final class ClockTimerStatus {
     private func streamEnded() {
         stream = nil
         guard !stopped else { return }
-        restarts += 1
-        let delay = min(60, 2 << min(restarts, 5))
+        // A child that ran a while ended for a reason of its own (logd
+        // restarted, the Mac slept), not because `log stream` is refused
+        // here, so its uptime starts the wait over.
+        let uptime = streamOpenedAt.map { Date().timeIntervalSince($0) }
+        streamOpenedAt = nil
+        let delay = backoff.delay(afterUptime: uptime)
         PelmetLog.log("clocktimer: log stream ended, retry in \(delay)s")
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
