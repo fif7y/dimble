@@ -1716,7 +1716,7 @@ final class AppState {
         extras?.apply(
             model: settings.sectionModel,
             revealed: currentRevealedSections,
-            systemCameraPillVisible: systemCameraPillVisible
+            systemCameraPillVisible: freshSystemCameraPillVisible
         )
         separators?.apply(model: settings.sectionModel, revealed: currentRevealedSections)
     }
@@ -2149,12 +2149,55 @@ final class AppState {
     /// Live mode is mirroring macOS's own camera and mic pill right now.
     private(set) var liveMirrorsSystemPill = false
 
+    /// What this launch has learned about the running macOS by trying it.
+    /// Read it instead of a version number — `OSTraits` says why.
+    ///
+    /// A trait can be pinned at launch, which is how an older macOS's path
+    /// gets run without an older macOS:
+    /// `defaults write app.fif7y.Pelmet pelmet.debug.osTrait.systemPillSurvivesAssertion -bool NO`.
+    /// There is no second Mac here held at 27.2, and those branches are the
+    /// ones no test on this machine can reach, so every trait is forceable
+    /// on purpose. Nothing in the app writes one.
+    private(set) var osTraits: OSTraits = {
+        var traits = OSTraits()
+        for trait in OSTraits.Trait.allCases {
+            let key = "pelmet.debug.osTrait.\(trait.rawValue)"
+            guard UserDefaults.standard.object(forKey: key) != nil else { continue }
+            let forced = UserDefaults.standard.bool(forKey: key)
+            traits.pin(trait, forced)
+            PelmetLog.log("ostraits: \(trait.rawValue) pinned to \(forced) by \(key)")
+        }
+        return traits
+    }()
+
+    /// Records an observation about the running macOS, and logs the ones
+    /// that move a trait. Safe to call from a tick: a repeat is silent.
+    func learn(_ trait: OSTraits.Trait, _ answer: Bool, why: String) {
+        if let line = osTraits.learn(trait, answer, why: why) { PelmetLog.log(line) }
+    }
+
     /// Live mode picked that pill up or let it go: the Camera & mic item
     /// has to be re-decided, and nothing else would ask.
     func systemPillMirrorChanged(_ on: Bool) {
         guard on != liveMirrorsSystemPill else { return }
         liveMirrorsSystemPill = on
+        // Having a mirror of it is proof this macOS leaves Apple's pill on
+        // the bar under an assertion (27.3 and up). Losing the mirror
+        // proves nothing: the camera may simply have stopped.
+        if on { learn(.systemPillSurvivesAssertion, true, why: "live mode is mirroring it") }
         extras?.systemPillChanged()
+    }
+
+    /// Live mode held the bar for its whole grace and no pill came at all.
+    /// With the camera or mic live that is the 27.2 behaviour: the
+    /// assertion takes Apple's pill off the bar, so there was never going
+    /// to be anything to mirror. Learning it here stops the next camera
+    /// session from sending live mode after that pill, which costs a screen
+    /// capture and lights the recording indicator each time.
+    func noPillFoundWhileLiveModeHeldTheBar() {
+        guard extras?.cameraOrMicIsLive == true else { return }
+        learn(.systemPillSurvivesAssertion, false,
+              why: "the assertion was down with the camera or mic live and no pill came")
     }
 
     func liveActivityNamesChanged(_ names: [String]) {
@@ -2168,7 +2211,22 @@ final class AppState {
     func liftSettled() {
         overflowHoldEnded()
         guard !isTransitioning else { return }
-        extras?.apply(model: settings.sectionModel, revealed: currentRevealedSections, systemCameraPillVisible: systemCameraPillVisible)
+        extras?.apply(model: settings.sectionModel, revealed: currentRevealedSections, systemCameraPillVisible: freshSystemCameraPillVisible)
+    }
+
+    /// `systemCameraPillVisible`, with Apple's pill looked at again rather
+    /// than read out of its half-second cache.
+    ///
+    /// Both callers run right after the bar changed under them, and up to
+    /// macOS 27.2 an assertion takes Apple's pill off the bar — so a cached
+    /// answer from the apply on the other side of the conceal could say the
+    /// pill is there when it has just gone, and Dimble's own camera
+    /// indicator would stand aside for nothing. No privacy indicator at
+    /// all, until the next edge asked again. On 27.3 the pill stays through
+    /// the conceal, so the fresh read says what the cache said.
+    private var freshSystemCameraPillVisible: Bool {
+        AudioVideoPill.invalidateOnBar()
+        return systemCameraPillVisible
     }
 
     /// Set while the Camera & mic relay has the assertion down: Apple's

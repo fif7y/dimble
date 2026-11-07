@@ -1240,12 +1240,23 @@ final class ExtrasManager {
         liveActivityStatus?.noPillFound()
     }
 
+    /// The camera or mic is in use, SharePlay included. Read from the
+    /// hardware, never from the bar: Apple's pill lingers in AX after the
+    /// camera stops, so the bar reports a session that ended minutes ago.
+    var cameraOrMicIsLive: Bool {
+        (cameraMicMonitor?.isActive ?? false) || (sharePlayStatus?.isLive ?? false)
+    }
+
     private func liveActivityChanged() {
         // macOS's own camera and mic pill is a pill like the rest on 27.3:
         // live mode has to be running for it, or the held cover paints over
-        // the privacy indicator. Read from the hardware, not from the bar —
-        // the pill lingers in AX after the camera stops.
-        let system = (cameraMicMonitor?.isActive ?? false) || (sharePlayStatus?.isLive ?? false)
+        // the privacy indicator. Up to 27.2 the assertion took that pill
+        // off the bar, so there would be nothing to mirror and entering
+        // live mode would cost a screen capture for nothing. Which macOS
+        // this is comes from `OSTraits`, learned from the first session
+        // that tries, not from a version number.
+        let system = cameraOrMicIsLive
+            && (appState?.osTraits.value(.systemPillSurvivesAssertion) ?? true)
         let count = (liveActivityStatus?.active.count ?? 0) + (system ? 1 : 0)
         appState?.liveActivitiesChanged(running: count > 0, count: count)
         guard let spec = specs.values.first(where: { $0.kind == .liveActivity }),

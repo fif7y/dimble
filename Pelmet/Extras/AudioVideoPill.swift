@@ -50,6 +50,16 @@ enum AudioVideoPill {
     private static var onBarAt = Date.distantPast
     private static var onBarWas = false
 
+    /// Drops the cache so the next `onBar()` walks AX again.
+    ///
+    /// The cache exists because `extras.apply` can ask several times a
+    /// second while the bar settles, but whether Apple's pill is on the bar
+    /// is exactly what an assertion changes up to macOS 27.2 — so an answer
+    /// taken on the other side of a conceal is not an answer. A stale
+    /// `true` there would hide Dimble's own camera indicator while Apple's
+    /// was gone too, leaving no privacy indicator at all.
+    static func invalidateOnBar() { onBarAt = .distantPast }
+
     /// Apple's pill is on the bar right now. From 27.3 it is a pill, which
     /// the engine's status-item walk never sees, and no assertion takes it
     /// off the bar any more — so this is the only way to know, and Pelmet's

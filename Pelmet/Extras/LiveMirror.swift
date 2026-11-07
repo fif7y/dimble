@@ -3458,6 +3458,11 @@ final class LiveMirror {
                 retryNotBefore = Date().addingTimeInterval(hold)
                 holdOffWhy = "no pill was found last time — holding off (a new activity ends the hold-off)"
                 PelmetLog.log("livemirror: no pill to mirror for \(Int(Self.noPillGrace))s — leaving live mode, not trying again for \(Int(hold))s")
+                // Nothing came while the camera or mic was live: on 27.3
+                // Apple's pill would have been here, so this macOS is one
+                // that takes it off the bar under an assertion. AppState
+                // checks the hardware and learns it.
+                appState.noPillFoundWhileLiveModeHeldTheBar()
                 await exit("no pill to mirror")
                 if noPillStrikesAwake >= Self.noPillStrikes { appState.liveActivityPillsMissing() }
                 return
