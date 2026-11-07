@@ -471,9 +471,11 @@ final class AppState {
         let clockRelay = ClockClickRelay { [weak self] point, pointer, option in
             self?.clockClicked(at: point, pointer: pointer, option: option)
         }
-        // The tap always runs (it is also the active-display observer);
-        // the setting only decides whether a clock click is relayed.
-        clockRelay.setEnabled(settings.clockClickOpensNotificationCenter)
+        // The tap always runs (it is also the active-display observer).
+        // Relaying is no longer a choice: without it the clock is dead while
+        // icons are hidden, which is never what anyone wants. Screen
+        // Recording is what decides whether the blink is covered.
+        clockRelay.setEnabled(true)
         self.clockRelay = clockRelay
 
         let hotkey = HotkeyManager { [weak self] slot in
@@ -1762,7 +1764,7 @@ final class AppState {
         PelmetLog.log("ax: trusted=\(granted)")
         statusItem?.updateAccessibilityWarning(granted: granted)
         guard granted else { return }
-        clockRelay?.setEnabled(settings.clockClickOpensNotificationCenter)
+        clockRelay?.setEnabled(true)
         bandMonitor?.accessibilityGranted()
         Task {
             updateSnapshot(await engine.snapshot())
@@ -1777,9 +1779,8 @@ final class AppState {
     private var registeredAlwaysHiddenHotkey: HotkeySpec?
     private var registeredNotificationCenterHotkey: HotkeySpec?
     private var registeredSearchHotkey: HotkeySpec?
-    /// The shortcut rides on the clock relay: off with it, not on its own.
     private var activeNotificationCenterHotkey: HotkeySpec? {
-        settings.clockClickOpensNotificationCenter ? settings.notificationCenterHotkey : nil
+        settings.notificationCenterHotkey
     }
 
     /// Persist + apply a changed settings store. Cheap, latency-sensitive
@@ -2437,7 +2438,6 @@ final class AppState {
         let ownIDs = Set((extras?.managedItemIDs ?? []) + (separators?.managedItemIDs ?? []))
         // Separators are drawings: they move at Apply, never on their own.
         for id in ownIDs.subtracting(previousOwnIDs) where !id.isPelmetSeparator { placeOwnItemSoon(id) }
-        clockRelay?.setEnabled(settings.clockClickOpensNotificationCenter)
         settingsApplyWork?.cancel()
         settingsApplyWork = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))

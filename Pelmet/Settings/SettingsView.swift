@@ -928,6 +928,34 @@ struct SettingNote: View {
     }
 }
 
+/// A SettingNote's text with the box taken away: the ⓘ alone in a row, the
+/// sentence in a popover on click and in the tooltip on hover. For a note
+/// that explains rather than warns — the row it belongs to keeps its line,
+/// and nobody has to read a paragraph to use the control beside it.
+struct SettingInfoButton: View {
+    let text: LocalizedStringKey
+    @State private var showing = false
+
+    init(_ text: LocalizedStringKey) { self.text = text }
+
+    var body: some View {
+        Button { showing.toggle() } label: {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help(text)
+        .popover(isPresented: $showing, arrowEdge: .bottom) {
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 240, alignment: .leading)
+                .padding(12)
+        }
+    }
+}
+
 // MARK: - General
 
 private struct GeneralPane: View {
@@ -1000,12 +1028,9 @@ private struct GeneralPane: View {
             // The same setting Search's own recorder edits.
             shortcutRow("Search the menu bar", binding(\.searchHotkey), fallback: .searchDefault,
                         conflict: appState.searchHotkeyConflict)
-            // Registered only while the clock click is on (Behavior).
-            if appState.settings.clockClickOpensNotificationCenter {
-                shortcutRow("Open Notification Center", binding(\.notificationCenterHotkey),
-                            fallback: .notificationCenterDefault,
-                            conflict: appState.notificationCenterHotkeyConflict)
-            }
+            shortcutRow("Open Notification Center", binding(\.notificationCenterHotkey),
+                        fallback: .notificationCenterDefault,
+                        conflict: appState.notificationCenterHotkeyConflict)
             shortcutRow("Open Settings", binding(\.settingsHotkey), fallback: .settingsDefault,
                         conflict: appState.settingsHotkeyConflict)
                 .settingAnchor("settingsHotkey")
@@ -1088,7 +1113,9 @@ private struct GeneralPane: View {
             if !recording {
                 SettingRow(
                     title: "Screen Recording",
-                    caption: "Off. Turn it on for smoother show and hide animations and for Live Activities."
+                    // Three concrete reasons beat two, and the clock is the
+                    // one everybody already clicks.
+                    caption: "Off. Turn it on for smoother show and hide animations, Live Activities, and a clean click on the clock."
                 ) {
                     Button("Grant access") { ScreenRecordingAccess.request() }
                         .buttonStyle(.bordered)
@@ -1183,8 +1210,10 @@ private struct BehaviorPane: View {
 
         SettingsCard(title: "Reveal") {
             SettingRow(
+                // Short enough that the delay picker and the switch keep the
+                // row to two lines in every language.
                 title: "Reveal on hover",
-                caption: "Rest the pointer on the right half of the menu bar."
+                caption: "Right half of the menu bar."
             ) {
                 HStack(spacing: 10) {
                     // The delay belongs to the switch: it shows only while
@@ -1206,7 +1235,6 @@ private struct BehaviorPane: View {
                     : "On the chevron.",
                 isOn: binding(\.revealTriggers.doubleClickForAlwaysHidden)
             )
-            .padding(.leading, 20)
             .settingAnchor("doubleClickReveal")
         }
 
@@ -1219,16 +1247,26 @@ private struct BehaviorPane: View {
                 .settingAnchor("rehideElsewhere")
         }
 
-        SettingsCard(title: "Notification Center") {
-            SettingToggleRow(
-                title: "Clicking the clock opens Notification Center",
-                caption: appState.screenRecordingGranted
-                    ? "Works with icons hidden. Dimble handles the click."
-                    : "Works with icons hidden. Without Screen Recording, they flash by.",
-                isOn: binding(\.clockClickOpensNotificationCenter)
-            )
-            .settingAnchor("clockClick")
+        // No switch: with Screen Recording on there is nothing to choose,
+        // the clock opens Notification Center the way it does without
+        // Dimble. The card only shows up to explain the flash and offer the
+        // grant, so a granted Mac never sees it.
+        if !appState.screenRecordingGranted {
+            SettingsCard(title: "Notification Center") {
+                SettingRow(title: "Clicking the clock opens Notification Center") {
+                    EmptyView()
+                }
+                .detail {
+                    ScreenRecordingNeeded(
+                        reason: "Dimble lets the click through, so the clock works with your icons hidden. Without Screen Recording your hidden icons flash in and out for about half a second each time."
+                    )
+                }
+                .settingAnchor("clockClick")
+            }
         }
+
+        ChevronMenuCard()
+            .settingAnchor("chevronMenu")
     }
 
     /// The stored delay as the nearest of the five the picker offers (an
@@ -1341,41 +1379,54 @@ private struct IconSpacingRow: View {
         // The reading sits under the title, not beside the slider: a word
         // plus a number in nine languages never fits a fixed lane next to
         // the knob (it slid under it twice, 2026-09-22).
+        // One line: slider, the note's ⓘ, the undo and Apply all ride with
+        // the control. The sentence used to sit in a box of its own under
+        // the row and cost the card a second line for something nobody
+        // needs twice. Group so the row and the stale-apps note share the
+        // one set of lifecycle modifiers.
+        Group {
         SettingRow(title: "Space between icons", caption: "\(Text(label)) · \(spacing) pt") {
-            Slider(value: $draft, in: 0...Double(IconSpacing.steps.count - 1), step: 1)
-            .frame(width: 200)
-        }
-        if !staleApps.isEmpty {
-            SettingNote("Still on the old spacing until relaunched: \(ListFormatter.localizedString(byJoining: staleApps))")
-        }
-        HStack(spacing: 10) {
-            SettingNote("macOS's own spacing, so it stays after Dimble. Other apps catch up when they next open.")
-            Spacer(minLength: 0)
-            if !atDefault || applied != IconSpacing.macOSDefault {
-                // The shortcut recorder's ↺: tertiary, only while there is
-                // something to undo.
+            HStack(spacing: 10) {
+                Slider(value: $draft, in: 0...Double(IconSpacing.steps.count - 1), step: 1)
+                    .frame(width: 150)
+                SettingInfoButton("macOS's own spacing, so it stays after Dimble. Other apps catch up when they next open.")
+                // Both of these only mean something once the slider has
+                // moved, but neither may come and go: the control cluster is
+                // right-aligned, so anything appearing to the right of the
+                // slider slides the slider out from under the pointer
+                // mid-drag. They hold their place at all times instead, the
+                // ↺ invisible and the chip dimmed.
                 Button {
                     draft = Double(IconSpacing.index(of: IconSpacing.macOSDefault))
                 } label: {
-                    Image(systemName: "arrow.counterclockwise.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                    // The ⓘ's recipe exactly: same glyph family, unfilled,
+                    // the row's own size, secondary. Two circled glyphs side
+                    // by side have to be one pair, not two near-misses.
+                    Image(systemName: "arrow.counterclockwise.circle")
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()
-                .disabled(atDefault)
+                .opacity(atDefault && applied == IconSpacing.macOSDefault ? 0 : 1)
+                .allowsHitTesting(!atDefault)
                 .help("Reset to default")
+                TintChipButton(
+                    text: Text("Apply"),
+                    icon: Image(systemName: "wand.and.stars"),
+                    tint: pending ? .green : .secondary
+                ) {
+                    IconSpacingApplier.apply(spacing, appState: appState)
+                }
+                .disabled(!pending)
+                .help("Relaunches Dimble and the system icons with the new spacing")
             }
-            TintChipButton(
-                text: Text("Apply"),
-                icon: Image(systemName: "wand.and.stars"),
-                tint: pending ? .green : .secondary
-            ) {
-                IconSpacingApplier.apply(spacing, appState: appState)
-            }
-            .disabled(!pending)
             .animation(.easeOut(duration: 0.2), value: pending)
-            .help("Relaunches Dimble and the system icons with the new spacing")
+        }
+        // The one note that is news rather than background: which apps are
+        // still drawing the old gap. It keeps its box.
+        if !staleApps.isEmpty {
+            SettingNote("Still on the old spacing until relaunched: \(ListFormatter.localizedString(byJoining: staleApps))")
+        }
         }
         .onAppear {
             draft = Double(IconSpacing.index(of: applied))
@@ -1878,6 +1929,12 @@ struct ChipLabel<Icon: View>: View {
             icon
                 .frame(width: 13, height: 13)
             text
+                // Never let the label compress: squeezed to nothing it wraps
+                // one letter per line and the capsule grows to five lines
+                // tall. It also keeps ViewThatFits honest, which measures a
+                // Text by what it CAN shrink to.
+                .lineLimit(1)
+                .fixedSize()
         }
         .font(.callout.weight(.medium))
         .foregroundStyle(tint)

@@ -296,9 +296,30 @@ final class PelmetStatusItem {
         // adds a gear to a "Settings…" item on its own. Only the update and
         // Accessibility rows below keep theirs, they carry a state.
         settings.preferredImageVisibility = .hidden
-        // Search and Settings lead, they're what a right-click is for: a left
-        // click already shows and hides.
-        var items: [NSMenuItem] = [search, settings, .separator(), toggle, showAll, .separator(), animation, shownIn, .separator(), quit]
+        let checkForUpdates = NSMenuItem(
+            title: String(localized: "Check for Updates…"),
+            action: #selector(AppMenuTarget.checkForUpdates), keyEquivalent: ""
+        )
+        let editMenuBar = NSMenuItem(
+            title: String(localized: "Edit Menu Bar…"),
+            action: #selector(AppMenuTarget.editMenuBar), keyEquivalent: ""
+        )
+        editMenuBar.preferredImageVisibility = .hidden
+        // Search and Settings lead by default, they're what a right-click is
+        // for: a left click already shows and hides. The order and the picks
+        // are the user's from here (Settings › Behavior); `drawn` has already
+        // dropped the separators that would lead, trail or double up.
+        let built: [ChevronMenuEntry: NSMenuItem] = [
+            .search: search, .settings: settings, .toggle: toggle, .showAll: showAll,
+            .animation: animation, .revealTarget: shownIn,
+            .checkForUpdates: checkForUpdates, .editMenuBar: editMenuBar, .quit: quit,
+        ]
+        var items: [NSMenuItem] = appState.settings.chevronMenu.drawn.compactMap { slot in
+            switch slot {
+            case .entry(let entry): built[entry]
+            case .separator: NSMenuItem.separator()
+            }
+        }
         // Same line in every right-click (chevron, separators, empty bar),
         // right under Settings: the About chip is the only other trace once
         // the banner is gone.
@@ -311,7 +332,9 @@ final class PelmetStatusItem {
                 .withSymbolConfiguration(.init(paletteColors: [.systemGreen]))
             // macOS 27 hides menu images unless the item asks.
             update.preferredImageVisibility = .visible
-            items.insert(update, at: items.firstIndex(of: settings)! + 1)
+            // Settings is always drawn, so this normally lands under it;
+            // `?? -1` only covers a future where that stops being true.
+            items.insert(update, at: (items.firstIndex(of: settings) ?? -1) + 1)
         }
         if !appState.accessibilityGranted {
             // Lead with the fix: nothing else in this menu works without it.
@@ -409,6 +432,11 @@ final class AppMenuTarget: NSObject {
     /// The About pane is the update hub (chip, notes, toggles) — land there
     /// rather than straight in Sparkle's window.
     @objc func installUpdate() { SparkleController.shared.openUpdateHub() }
+    /// The menu's own check, for people who put the row there: Sparkle's
+    /// own flow, which says "you're up to date" when there's nothing. The
+    /// `installUpdate` row above is the one a found update inserts.
+    @objc func checkForUpdates() { SparkleController.shared.checkForUpdates() }
+    @objc func editMenuBar() { appState?.openSettings(tab: .menuBar) }
     @objc func quit() { NSApp.terminate(nil) }
 }
 

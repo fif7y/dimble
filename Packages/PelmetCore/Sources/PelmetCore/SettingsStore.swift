@@ -469,16 +469,10 @@ public struct SettingsStore: Codable, Equatable, Sendable {
     /// stored value does not apply.
     public var barRightClickMenu: Bool = true
 
-    /// Clicking the clock opens Notification Center — except that macOS
-    /// refuses the click while any icon is hidden, so Pelmet lets go of the
-    /// hide for an instant and replays the click (ClockClickRelay). Under a
-    /// picture of the bar that instant is invisible; without Screen
-    /// Recording the hidden icons flash by (#37). Off, the clock click is
-    /// left to macOS (dead while icons are hidden; the two-finger swipe from
-    /// the trackpad's right edge still opens Notification Center).
-    public var clockClickOpensNotificationCenter: Bool = true
-    /// Registered only while `clockClickOpensNotificationCenter` is on; the
-    /// row lives under that toggle. Never off there (⌫ restores the default).
+    /// What that menu shows and in which order, wherever it opens.
+    public var chevronMenu: ChevronMenu = ChevronMenu()
+
+    /// Never off (⌫ restores the default).
     public var notificationCenterHotkey: HotkeySpec? = .notificationCenterDefault
 
     /// Live mode: while a Live Activity runs, its pill shows next to the «
@@ -592,7 +586,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         case displayTemplate, displayOverrides, displayRevealTargets
         case notifyOnUpdates, barRightClickMenu, betaUpdates
         case statusIconStyle
-        case clockClickOpensNotificationCenter, notificationCenterHotkey
+        case chevronMenu, notificationCenterHotkey
         case showLiveActivities, hiddenLiveActivities
         case orderEdits
         case hiddenIconsIn, panel
@@ -630,7 +624,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         betaUpdates = c.field(Bool.self, .betaUpdates, defaults.betaUpdates)
         barRightClickMenu = c.field(Bool.self, .barRightClickMenu, defaults.barRightClickMenu)
         statusIconStyle = c.field(StatusIconStyle.self, .statusIconStyle, defaults.statusIconStyle)
-        clockClickOpensNotificationCenter = c.field(Bool.self, .clockClickOpensNotificationCenter, defaults.clockClickOpensNotificationCenter)
+        chevronMenu = c.field(ChevronMenu.self, .chevronMenu, defaults.chevronMenu).normalized()
         notificationCenterHotkey = c.field(HotkeySpec?.self, .notificationCenterHotkey, defaults.notificationCenterHotkey) ?? defaults.notificationCenterHotkey
         showLiveActivities = c.field(Bool.self, .showLiveActivities, defaults.showLiveActivities)
         hiddenLiveActivities = c.field(Set<String>.self, .hiddenLiveActivities, defaults.hiddenLiveActivities)

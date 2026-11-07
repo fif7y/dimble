@@ -3829,6 +3829,64 @@
         }
       }
     },
+    "Always in the menu": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Immer im Menü"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Siempre en el menú"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toujours dans le menu"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sempre nel menu"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "常にメニューに表示"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "항상 메뉴에 표시"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sempre no menu"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Всегда в меню"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "始终在菜单中"
+          }
+        }
+      }
+    },
     "Always shows": {
       "localizations": {
         "de": {
@@ -6265,6 +6323,64 @@
         }
       }
     },
+    "Check for Updates…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nach Updates suchen…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar actualizaciones…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rechercher les mises à jour…"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cerca aggiornamenti…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アップデートを確認…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "업데이트 확인…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar atualizações…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверить обновления…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查更新…"
+          }
+        }
+      }
+    },
     "Check for updates": {
       "localizations": {
         "de": {
@@ -8179,6 +8295,64 @@
         }
       }
     },
+    "Dimble lets the click through, so the clock works with your icons hidden. Without Screen Recording your hidden icons flash in and out for about half a second each time.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimble lässt den Klick durch, damit die Uhr auch bei verborgenen Symbolen funktioniert. Ohne Bildschirmaufnahme blitzen deine verborgenen Symbole dabei jedes Mal etwa eine halbe Sekunde auf."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimble deja pasar el clic, así que el reloj funciona con tus iconos ocultos. Sin Grabación de pantalla, tus iconos ocultos aparecen y desaparecen durante medio segundo cada vez."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimble laisse passer le clic, donc l’horloge fonctionne même avec vos icônes masquées. Sans l’enregistrement de l’écran, vos icônes masquées apparaissent et disparaissent pendant environ une demi-seconde à chaque fois."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimble lascia passare il clic, così l’orologio funziona con le icone nascoste. Senza Registrazione schermo le icone nascoste lampeggiano per circa mezzo secondo ogni volta."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimbleがクリックを通すので、アイコンを隠したままでも時計が使えます。画面収録の許可がないと、そのたびに隠れたアイコンが0.5秒ほど出入りします。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimble가 클릭을 통과시켜 아이콘을 숨긴 채로도 시계가 작동합니다. 화면 기록 권한이 없으면 숨긴 아이콘이 매번 0.5초쯤 나타났다 사라집니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Dimble deixa o clique passar, então o relógio funciona com seus ícones ocultos. Sem a Gravação de Tela, seus ícones ocultos piscam por cerca de meio segundo a cada vez."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimble пропускает клик, поэтому часы работают и со скрытыми значками. Без Записи экрана скрытые значки каждый раз мелькают примерно полсекунды."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimble 会放行这次点击，因此隐藏图标时时钟依然可用。没有“屏幕录制”权限时，隐藏的图标每次都会闪现约半秒。"
+          }
+        }
+      }
+    },
     "Dimble needs Screen Recording to show the pill.": {
       "localizations": {
         "de": {
@@ -9277,6 +9451,64 @@
           "stringUnit": {
             "state": "translated",
             "value": "编辑布局"
+          }
+        }
+      }
+    },
+    "Edit Menu Bar…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Menüleiste bearbeiten…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editar la barra de menús…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modifier la barre des menus…"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modifica la barra dei menu…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メニューバーを編集…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메뉴 막대 편집…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editar a barra de menus…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить строку меню…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑菜单栏…"
           }
         }
       }
@@ -15197,60 +15429,60 @@
         }
       }
     },
-    "Off. Turn it on for smoother show and hide animations and for Live Activities.": {
+    "Off. Turn it on for smoother show and hide animations, Live Activities, and a clean click on the clock.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aus. Schalte sie ein für weichere Ein- und Ausblendanimationen und für Live-Aktivitäten."
+            "value": "Aus. Schalte sie ein für weichere Ein- und Ausblendungen, Live-Aktivitäten und einen sauberen Klick auf die Uhr."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Desactivada. Actívala para animaciones más suaves al mostrar y ocultar y para las Actividades en directo."
+            "value": "Desactivado. Actívalo para animaciones más suaves, actividades en vivo y un clic limpio en el reloj."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Désactivé. Activez-le pour des animations d’affichage et de masquage plus fluides et pour les Activités en direct."
+            "value": "Désactivé. Activez-le pour des animations plus douces, les activités en direct et un clic net sur l’horloge."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Disattivata. Attivala per animazioni più fluide quando mostri e nascondi e per le Attività in tempo reale."
+            "value": "Disattivato. Attivala per animazioni più morbide, le attività in tempo reale e un clic pulito sull’orologio."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "オフです。オンにすると、表示・非表示のアニメーションがより滑らかになり、ライブアクティビティも表示できます。"
+            "value": "オフ。表示と非表示をなめらかにし、ライブアクティビティと時計のクリックをきれいに動かすにはオンにしてください。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "꺼짐. 켜면 표시·숨김 애니메이션이 더 부드러워지고 실시간 현황도 표시됩니다."
+            "value": "끄기. 더 부드러운 표시·숨기기 애니메이션, 라이브 액티비티, 깔끔한 시계 클릭을 위해 켜세요."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Desativada. Ative para animações mais suaves ao mostrar e ocultar e para as Atividades ao Vivo."
+            "value": "Desativado. Ative para animações mais suaves, atividades ao vivo e um clique limpo no relógio."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Выключено. Включите для более плавных анимаций показа и скрытия и для активностей Live."
+            "value": "Выключено. Включите для плавных показа и скрытия, Live-активностей и чистого клика по часам."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已关闭。开启后，显示和隐藏动画更流畅，也能显示实时活动。"
+            "value": "已关闭。开启后显示和隐藏更顺滑，并支持实时活动和干净的时钟点击。"
           }
         }
       }
@@ -18503,64 +18735,6 @@
         }
       }
     },
-    "Rest the pointer on the right half of the menu bar.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zeiger auf der rechten Hälfte der Menüleiste ruhen lassen."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Deja el puntero sobre la mitad derecha de la barra de menús."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Laissez le pointeur sur la moitié droite de la barre des menus."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lascia il puntatore sulla metà destra della barra dei menu."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "メニューバーの右半分にポインタを置いたままにします。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "메뉴 막대 오른쪽 절반에 포인터를 올려 두세요."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Deixe o ponteiro sobre a metade direita da barra de menus."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Задержите указатель на правой половине строки меню."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "把指针停在菜单栏右半部分。"
-          }
-        }
-      }
-    },
     "Restore %@": {
       "localizations": {
         "de": {
@@ -19021,6 +19195,64 @@
           "stringUnit": {
             "state": "translated",
             "value": "立即"
+          }
+        }
+      }
+    },
+    "Right half of the menu bar.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rechte Hälfte der Menüleiste."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mitad derecha de la barra de menús."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moitié droite de la barre des menus."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metà destra della barra dei menu."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メニューバーの右半分。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메뉴 막대의 오른쪽 절반."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metade direita da barra de menus."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Правая половина строки меню."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "菜单栏右半边。"
           }
         }
       }
@@ -23607,6 +23839,64 @@
         }
       }
     },
+    "The same menu opens on a separator and on the empty bar.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dasselbe Menü öffnet sich auf einem Trenner und auf der leeren Leiste."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El mismo menú se abre en un separador y en la barra vacía."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le même menu s’ouvre sur un séparateur et sur la barre vide."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lo stesso menu si apre su un separatore e sulla barra vuota."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同じメニューが区切り線と空のバーでも開きます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "구분선과 빈 막대에서도 같은 메뉴가 열립니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O mesmo menu abre em um separador e na barra vazia."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "То же меню открывается на разделителе и на пустой строке."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在分隔符和空白菜单栏上打开的是同一个菜单。"
+          }
+        }
+      }
+    },
     "Their icon isn't in the bar yet. Return opens the app.": {
       "localizations": {
         "de": {
@@ -23835,6 +24125,64 @@
           "stringUnit": {
             "state": "translated",
             "value": "它们会在箭头旁滑出。"
+          }
+        }
+      }
+    },
+    "Tick what appears, drag to reorder. Settings and Quit always stay.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hake an, was erscheinen soll, und ziehe zum Umsortieren. Einstellungen und Beenden bleiben immer."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Marca lo que aparece y arrastra para reordenar. Ajustes y Salir siempre se quedan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cochez ce qui apparaît, glissez pour réordonner. Réglages et Quitter restent toujours."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spunta cosa appare, trascina per riordinare. Impostazioni ed Esci restano sempre."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表示する項目にチェックを入れ、ドラッグで並べ替えます。設定と終了は常に残ります。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "표시할 항목을 선택하고 끌어서 순서를 바꾸세요. 설정과 종료는 항상 남습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Marque o que aparece e arraste para reordenar. Ajustes e Encerrar ficam sempre."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отметьте, что показывать, перетащите для порядка. «Настройки» и «Завершить» остаются всегда."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "勾选要显示的项目，拖动可调整顺序。设置和退出始终保留。"
           }
         }
       }
@@ -25927,6 +26275,64 @@
         }
       }
     },
+    "What the chevron's menu shows": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Was das Menü des Pfeils zeigt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lo que muestra el menú del chevrón"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que le menu du chevron affiche"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cosa mostra il menu della freccia"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "シェブロンのメニューに表示する項目"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "화살표 메뉴에 표시할 항목"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O que o menu da seta mostra"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Что показывает меню стрелки"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "箭头菜单显示的内容"
+          }
+        }
+      }
+    },
     "What's new": {
       "localizations": {
         "de": {
@@ -27083,122 +27489,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "隐藏后：可通过 Spotlight 重新打开 Dimble，或右键点击分隔符或菜单栏的空白处。"
-          }
-        }
-      }
-    },
-    "Works with icons hidden. Dimble handles the click.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Funktioniert auch bei ausgeblendeten Symbolen. Dimble übernimmt den Klick."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Funciona con los iconos ocultos. Dimble se encarga del clic."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fonctionne même icônes masquées. Dimble se charge du clic."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Funziona anche con le icone nascoste. Dimble gestisce il clic."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "アイコンが隠れていても使えます。クリックはDimbleが処理します。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "아이콘이 숨겨져 있어도 작동합니다. 클릭은 Dimble가 처리합니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Funciona com os ícones ocultos. O Dimble cuida do clique."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Работает и при скрытых значках. Dimble берёт щелчок на себя."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "图标隐藏时也能用。Dimble 会处理这次点击。"
-          }
-        }
-      }
-    },
-    "Works with icons hidden. Without Screen Recording, they flash by.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Funktioniert auch bei ausgeblendeten Symbolen. Ohne Bildschirmaufnahme blitzen sie kurz auf."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Funciona con los iconos ocultos. Sin la grabación de pantalla, aparecen un instante."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fonctionne même icônes masquées. Sans l’enregistrement de l’écran, elles apparaissent brièvement."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Funziona anche con le icone nascoste. Senza la registrazione schermo, compaiono per un istante."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "アイコンが隠れていても使えます。画面収録がないと、一瞬だけ表示されます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "아이콘이 숨겨져 있어도 작동합니다. 화면 기록이 없으면 잠깐 나타났다 사라집니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Funciona com os ícones ocultos. Sem a gravação de tela, eles aparecem rapidamente."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Работает и при скрытых значках. Без записи экрана они на миг мелькают."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "图标隐藏时也能用。没有录屏权限时，它们会一闪而过。"
           }
         }
       }
