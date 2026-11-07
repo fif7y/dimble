@@ -202,4 +202,33 @@ struct SettingsStoreTests {
         #expect(settings.barExtraItems(screenRecording: true).map(\.kind) == [.liveActivity, .timer])
         #expect(settings.barExtraItems(screenRecording: false).map(\.kind) == [.liveActivity, .timer])
     }
+
+    // A pill turned off has to have a way back, and the item is it: it brings
+    // every pill out live, so it keeps its place while live mode draws.
+    @Test func aPillTurnedOffKeepsTheLiveActivitiesItemOnTheBar() {
+        var settings = SettingsStore()
+        settings.extraItems = [ExtraItemSpec(kind: .liveActivity)]
+        settings.showLiveActivities = true
+        #expect(settings.barExtraItems(screenRecording: true).isEmpty)
+        settings.hiddenLiveActivities = ["Now Playing"]
+        #expect(settings.barExtraItems(screenRecording: true).map(\.kind) == [.liveActivity])
+        settings.hiddenLiveActivities = []
+        #expect(settings.barExtraItems(screenRecording: true).isEmpty)
+    }
+
+    // Nothing is turned off until the user says so, and the list survives a
+    // save. A blob from before the field, or one with it unreadable, leaves
+    // every pill drawn rather than hiding one nobody chose.
+    @Test func hiddenLiveActivitiesStartEmptyAndRoundTrip() throws {
+        #expect(SettingsStore().hiddenLiveActivities.isEmpty)
+        let legacy = try JSONDecoder().decode(SettingsStore.self, from: Data("{}".utf8))
+        #expect(legacy.hiddenLiveActivities.isEmpty)
+        let broken = try JSONDecoder().decode(SettingsStore.self, from: Data(#"{"hiddenLiveActivities":"Sports"}"#.utf8))
+        #expect(broken.hiddenLiveActivities.isEmpty)
+        var settings = SettingsStore()
+        settings.hiddenLiveActivities = ["Now Playing", "Sports"]
+        let back = try JSONDecoder().decode(SettingsStore.self, from: JSONEncoder().encode(settings))
+        #expect(back.hiddenLiveActivities == ["Now Playing", "Sports"])
+        #expect(back == settings)
+    }
 }

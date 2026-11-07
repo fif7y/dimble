@@ -443,9 +443,11 @@ public struct SettingsStore: Codable, Equatable, Sendable {
 
     /// The Live Activities item stands in for the pills, so it's only there
     /// when live mode isn't drawing them: switched off, or without Screen
-    /// Recording.
+    /// Recording. With a pill turned off it is there too — it brings every
+    /// pill back for a look, which is the only way back to one live mode
+    /// doesn't draw.
     public func offersLiveActivityItem(screenRecording: Bool) -> Bool {
-        !(screenRecording && showLiveActivities)
+        !(screenRecording && showLiveActivities) || !hiddenLiveActivities.isEmpty
     }
 
     /// The extras that get a place on the bar.
@@ -484,6 +486,14 @@ public struct SettingsStore: Codable, Equatable, Sendable {
     /// under a picture. Needs Screen Recording for that picture. Independent
     /// of the Live Activities item, which only follows what runs.
     public var showLiveActivities: Bool = true
+
+    /// Live Activities whose pill live mode doesn't draw, by the name macOS
+    /// gives it ("Now Playing", "Sports"). The real pill stays concealed
+    /// under the cover, so one turned off is gone from the bar rather than
+    /// ended — only the iPhone app that started it can end it. Keyed by the
+    /// name, not the activity's id: the choice is about that kind of pill and
+    /// outlives the activity that ran.
+    public var hiddenLiveActivities: Set<String> = []
 
     /// A found update posts a user notification instead of Sparkle's window
     /// interrupting whatever the user is doing. Off: only the About pane
@@ -583,7 +593,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         case notifyOnUpdates, barRightClickMenu, betaUpdates
         case statusIconStyle
         case clockClickOpensNotificationCenter, notificationCenterHotkey
-        case showLiveActivities
+        case showLiveActivities, hiddenLiveActivities
         case orderEdits
         case hiddenIconsIn, panel
         case showRules
@@ -623,6 +633,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         clockClickOpensNotificationCenter = c.field(Bool.self, .clockClickOpensNotificationCenter, defaults.clockClickOpensNotificationCenter)
         notificationCenterHotkey = c.field(HotkeySpec?.self, .notificationCenterHotkey, defaults.notificationCenterHotkey) ?? defaults.notificationCenterHotkey
         showLiveActivities = c.field(Bool.self, .showLiveActivities, defaults.showLiveActivities)
+        hiddenLiveActivities = c.field(Set<String>.self, .hiddenLiveActivities, defaults.hiddenLiveActivities)
         orderEdits = c.field(OrderEdits.self, .orderEdits, defaults.orderEdits)
         hiddenIconsIn = c.field(RevealTarget.self, .hiddenIconsIn, defaults.hiddenIconsIn)
         panel = c.field(PanelOptions.self, .panel, defaults.panel)

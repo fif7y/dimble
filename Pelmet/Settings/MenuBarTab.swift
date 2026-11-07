@@ -215,6 +215,8 @@ struct MenuBarTab: View {
                 PelmetItemsStrip()
 
                 ShowWhenCard()
+
+                LiveActivitiesCard()
         }
         .animation(.spring(duration: 0.3), value: appState.settings.sectionModel)
         .environment(dragSession)
@@ -1157,38 +1159,7 @@ private struct PelmetItemsStrip: View {
             .pelmetCardSurface()
 
             systemExtras
-
-            liveActivities
         }
-    }
-
-    /// Live mode (`LiveMirror`). It needs Screen Recording for the picture
-    /// it holds the bar under: without it the switch shows off and can't be
-    /// turned, the row says why, and the stored choice waits. While it's off
-    /// or can't run, the Live Activities item above is offered instead.
-    private var liveActivities: some View {
-        let recording = appState.screenRecordingGranted
-        return SettingRow(
-            title: "Show Live Activities",
-            caption: "Their pills show next to the «, and hidden system icons come back."
-        ) {
-            SettingSwitch(isOn: Binding(
-                get: { recording && appState.settings.showLiveActivities },
-                set: {
-                    appState.settings.showLiveActivities = $0
-                    appState.settingsChanged()
-                }
-            ))
-            .disabled(!recording)
-        }
-        .detail {
-            if !recording {
-                ScreenRecordingNeeded(reason: "Dimble needs Screen Recording to show the pill.")
-            }
-        }
-        .screenRecordingHelp("Needs Screen Recording. Dimble draws the pill from a picture of the menu bar.", when: !recording)
-        .pelmetCardSurface()
-        .settingAnchor("liveActivities")
     }
 
     /// Apple's Now Playing, camera controls, AirDrop, Focus and Timer hide
@@ -1818,5 +1789,106 @@ extension ExtraKind {
             (.userSwitching, String(localized: "Fast user switching")),
             (.shortcutsMenu, String(localized: "Shortcuts")),
         ]
+    }
+}
+
+// MARK: - Live Activities
+
+/// Live mode (`LiveMirror`) and the pills it draws. Its own section rather
+/// than a row under Dimble items: those are icons Dimble makes, these are
+/// Apple's pills it mirrors. It needs Screen Recording for the picture it
+/// holds the bar under: without it the switch shows off and can't be turned,
+/// the row says why, and the stored choice waits. While it's off or can't
+/// run, the Live Activities item in Dimble items is offered instead.
+struct LiveActivitiesCard: View {
+    @Environment(AppState.self) private var appState
+
+    /// Running now, plus any turned off — so the list prunes itself as
+    /// activities end and every row is still one to act on. The running ones
+    /// keep the bar's order; a turned-off one that isn't running follows.
+    private var names: [String] {
+        var list = appState.liveActivityNames
+        for name in appState.settings.hiddenLiveActivities.sorted() where !list.contains(name) {
+            list.append(name)
+        }
+        return list
+    }
+
+    /// On means live mode draws this pill. Off leaves the real one concealed
+    /// under the cover — macOS has no way to end another app's activity, and
+    /// the Live Activities item brings them all back for a look.
+    private func shown(_ name: String) -> Binding<Bool> {
+        Binding(
+            get: { !appState.settings.hiddenLiveActivities.contains(name) },
+            set: { on in
+                if on {
+                    appState.settings.hiddenLiveActivities.remove(name)
+                } else {
+                    appState.settings.hiddenLiveActivities.insert(name)
+                }
+                appState.settingsChanged()
+            }
+        )
+    }
+
+    var body: some View {
+        let recording = appState.screenRecordingGranted
+        let drawing = recording && appState.settings.showLiveActivities
+        return VStack(alignment: .leading, spacing: 8) {
+            CardHeader(
+                symbol: ExtrasManager.liveActivitySymbol, title: "Live Activities",
+                caption: "Pills your iPhone sends to the menu bar"
+            ) { EmptyView() }
+
+            VStack(alignment: .leading, spacing: 14) {
+                SettingRow(
+                    title: "Show Live Activities",
+                    caption: "Their pills show next to the «, and hidden system icons come back."
+                ) {
+                    SettingSwitch(isOn: Binding(
+                        get: { drawing },
+                        set: {
+                            appState.settings.showLiveActivities = $0
+                            appState.settingsChanged()
+                        }
+                    ))
+                    .disabled(!recording)
+                }
+                .detail {
+                    if !recording {
+                        ScreenRecordingNeeded(reason: "Dimble needs Screen Recording to show the pill.")
+                    }
+                }
+
+                // No glyph on these rows: the same platter mark on every one
+                // of them says nothing the name doesn't, and macOS gives no
+                // per-activity icon. The indent carries the nesting instead.
+                // The line stays when nothing is running: a section that
+                // disappears reads as a feature that was never built.
+                if drawing {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(names.isEmpty
+                             ? "Nothing running right now."
+                             : "Running now, plus any you've turned off.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        ForEach(names, id: \.self) { name in
+                            HStack(spacing: 8) {
+                                Text(verbatim: name)
+                                    .font(.callout)
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                SettingSwitch(isOn: shown(name))
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                    .padding(.leading, 10)
+                }
+            }
+            .pelmetCardSurface()
+            .screenRecordingHelp("Needs Screen Recording. Dimble draws the pill from a picture of the menu bar.", when: !recording)
+            .settingAnchor("liveActivities")
+        }
     }
 }

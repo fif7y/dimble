@@ -380,13 +380,20 @@ final class ExtrasManager {
             status.stop()
             sharePlayStatus = nil
         }
+        // Live mode mirrors macOS's camera and mic pill too, so it needs the
+        // same edge even when neither item is on the bar.
         let needsCameraMonitor = newSpecs.contains {
             $0.kind == .cameraMicIndicator || $0.kind == .mediaControls
-        }
+        } || (appState?.settings.showLiveActivities == true && ScreenRecordingAccess.isGranted)
         if needsCameraMonitor, cameraMicMonitor == nil {
             cameraMicMonitor = CameraMicMonitor { [weak self] in
                 self?.applyCurrent()
+                self?.liveActivityChanged()
             }
+            // `poll()` runs inside that init, before the property it is
+            // assigned to exists: a camera already live at launch reads as
+            // off there, so live mode is told here instead.
+            liveActivityChanged()
         } else if !needsCameraMonitor {
             cameraMicMonitor?.stop()
             cameraMicMonitor = nil
@@ -1222,13 +1229,25 @@ final class ExtrasManager {
         syncLiveActivityWatcher()
     }
 
+    /// Live mode started or stopped mirroring macOS's own pill. The Camera
+    /// & mic item steps aside for that pill, and no other edge re-reads it:
+    /// the pill lands a moment after the device opens, long after the edge
+    /// that showed the item.
+    func systemPillChanged() { applyCurrent() }
+
     /// The assertion was down and no pill came (`LiveActivityStatus.noPillFound`).
     func liveActivityPillsMissing() {
         liveActivityStatus?.noPillFound()
     }
 
     private func liveActivityChanged() {
-        appState?.liveActivitiesChanged(running: !(liveActivityStatus?.active.isEmpty ?? true), count: liveActivityStatus?.active.count ?? 0)
+        // macOS's own camera and mic pill is a pill like the rest on 27.3:
+        // live mode has to be running for it, or the held cover paints over
+        // the privacy indicator. Read from the hardware, not from the bar —
+        // the pill lingers in AX after the camera stops.
+        let system = (cameraMicMonitor?.isActive ?? false) || (sharePlayStatus?.isLive ?? false)
+        let count = (liveActivityStatus?.active.count ?? 0) + (system ? 1 : 0)
+        appState?.liveActivitiesChanged(running: count > 0, count: count)
         guard let spec = specs.values.first(where: { $0.kind == .liveActivity }),
               let item = items[spec.id] else { return }
         let active = !(liveActivityStatus?.active.isEmpty ?? true)
@@ -1465,8 +1484,8 @@ final class ExtrasManager {
             let point = Self.barPoint(of: button)
             // A SharePlay session with no call: Apple's SharePlay icon first.
             let ids = (sharePlayStatus?.isLive ?? false)
-                ? [AudioVideoPill.sharePlayIdentifier, AudioVideoPill.identifier]
-                : [AudioVideoPill.identifier]
+                ? [AudioVideoPill.sharePlayIdentifier] + AudioVideoPill.cameraIdentifiers
+                : AudioVideoPill.cameraIdentifiers
             Task { @MainActor in
                 if !(await appState.openAudioVideoPill(near: point, identifiers: ids)) { NSWorkspace.shared.open(privacy) }
             }

@@ -2141,6 +2141,27 @@ final class AppState {
         liveMirror.activitiesChanged(running: running, count: count)
     }
 
+    /// The pills live mode has mirrors for, by the name macOS gives each one
+    /// (bar order, leftmost first) — what Settings lists a switch for. Live
+    /// mode's own reading, so it's empty while live mode isn't running.
+    private(set) var liveActivityNames: [String] = []
+
+    /// Live mode is mirroring macOS's own camera and mic pill right now.
+    private(set) var liveMirrorsSystemPill = false
+
+    /// Live mode picked that pill up or let it go: the Camera & mic item
+    /// has to be re-decided, and nothing else would ask.
+    func systemPillMirrorChanged(_ on: Bool) {
+        guard on != liveMirrorsSystemPill else { return }
+        liveMirrorsSystemPill = on
+        extras?.systemPillChanged()
+    }
+
+    func liveActivityNamesChanged(_ names: [String]) {
+        guard names != liveActivityNames else { return }
+        liveActivityNames = names
+    }
+
     /// A lift's re-hide has come to rest (`TransitionCoordinator.endLift`):
     /// the reads it held look at the bar again, and Camera & mic, kept on
     /// the bar beside Apple's pill, goes back to its own rule.
@@ -2162,7 +2183,7 @@ final class AppState {
     /// under a picture of the bar and back once the panel is up. A SharePlay
     /// session passes Apple's SharePlay icon ahead of the pill. False when
     /// no pill or panel showed, for the caller's fallback.
-    func openAudioVideoPill(near point: CGPoint, identifiers: [String] = [AudioVideoPill.identifier]) async -> Bool {
+    func openAudioVideoPill(near point: CGPoint, identifiers: [String] = AudioVideoPill.cameraIdentifiers) async -> Bool {
         guard !clockBlinkInFlight else {
             PelmetLog.log("audiovideo: blink in flight — press ignored")
             return true
@@ -3723,7 +3744,24 @@ final class AppState {
     /// assertion held (a full reveal); Pelmet's indicator defers to it to
     /// avoid duplication. Not while the relay has it up for a click.
     var systemCameraPillVisible: Bool {
-        guard !audioVideoRelayActive, !transitions.liftKeepsCameraItem else { return false }
+        // The relay presses Pelmet's own item to open Apple's panel, so that
+        // item has to stay put until the press is done.
+        guard !audioVideoRelayActive else { return false }
+        // Live mode found the pill and is drawing it: that is the one answer
+        // with no AX walk, no half-second cache and no ghost behind it — a
+        // mirror exists only while the pill does. It also outranks
+        // `liftKeepsCameraItem`, whose `liveModeActive` term is from 27.2,
+        // when the assertion took Apple's pill off the bar and Pelmet's
+        // replica was the only camera indicator left. On 27.3 the pill stays
+        // and live mode draws it, so keeping the replica too is the two
+        // camera icons at once (Gab, 2026-11-06).
+        if liveMirrorsSystemPill { return true }
+        guard !transitions.liftKeepsCameraItem else { return false }
+        // macOS 27.3 hosts Apple's pill as a pill, which the engine's walk
+        // never reports, AND stopped taking it off the bar under an
+        // assertion — so the snapshot said "not there" while it stood right
+        // next to Pelmet's own, two camera icons at once (Gab, 2026-11-06).
+        if AudioVideoPill.onBar() { return true }
         return (snapshot?.items ?? []).contains {
             $0.id.rawValue.contains("menuextra.audiovideo") && $0.frame != nil
         }
