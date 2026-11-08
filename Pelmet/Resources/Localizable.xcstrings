@@ -871,6 +871,64 @@
         }
       }
     },
+    "%lld more than macOS fits on the bar": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein Platz in der Leiste: %lld"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld más de lo que macOS muestra en la barra"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld de plus que macOS affiche dans la barre"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld in più di quelle che macOS mostra nella barra"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バーに収まらないカプセル: %lld"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "막대에 들어가지 않는 캡슐 %lld개"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld além do que o macOS mostra na barra"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не помещается в строке: %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "菜单栏放不下 %lld 个胶囊"
+          }
+        }
+      }
+    },
     "%lld not moved": {
       "localizations": {
         "de": {
@@ -28533,64 +28591,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "macOS 移除了 Dimble 的无障碍权限，这在某些更新和重新安装后会发生。重新授予后，一切会从上次的状态继续。"
-          }
-        }
-      }
-    },
-    "macOS fits two on the bar": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS zeigt nur zwei Kapseln"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS solo muestra dos cápsulas"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS n’affiche que deux capsules"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS mostra solo due capsule"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOSはカプセルを2つまで表示"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS는 캡슐을 두 개까지 표시"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O macOS só mostra duas cápsulas"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS показывает только две капсулы"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS 最多显示两个胶囊"
           }
         }
       }

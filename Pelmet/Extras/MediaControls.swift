@@ -1185,31 +1185,24 @@ final class ExtrasManager {
     /// launcher's, when the Mac has the app; the platter when it doesn't (an
     /// iPhone app) or the log hasn't named it. While the pills are on the bar
     /// the item is for the ones macOS left off them, so it leads with the
-    /// newest of those and counts them; with no pill showing it stands in for
-    /// all of them, and the count is how many.
+    /// newest of those; with no pill showing it stands in for all of them.
+    /// No count rides on the glyph: a number in the bar costs the width this
+    /// app exists to save, and it is a 1 nearly every time, since macOS fits
+    /// two pills and few Macs run more than three activities. How many there
+    /// are is in the menu, which is where it can say what it is counting.
     private func updateLiveActivityGlyph(_ item: NSStatusItem, spec: ExtraItemSpec) {
         guard let button = item.button else { return }
         let active = liveActivityStatus?.active ?? []
         let split = (liveActivityStatus?.activities ?? LiveActivities()).slotted(avPill: systemPillTakesASlot)
         let showing = appState?.liveActivityPillsShowing ?? false
         let lead = showing ? (split.hidden.first ?? active.last) : active.last
-        let badge = showing ? split.hidden.count : (active.count > 1 ? active.count : 0)
         let bundleID = lead?.bundleID
         setGlyph(item, id: spec.id, key: "liveActivity:\(bundleID ?? "")") {
             lead.flatMap { self.liveActivityIcon($0, size: 18) }
                 ?? NSImage(systemSymbolName: Self.liveActivitySymbol, accessibilityDescription: spec.itemTitle)
         }
-        if badge > 0 {
-            let size = NSFont.menuBarFont(ofSize: 0).pointSize
-            button.attributedTitle = NSAttributedString(
-                string: " \(badge)",
-                attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)]
-            )
-            button.imagePosition = .imageLeading
-        } else {
-            button.title = ""
-            button.imagePosition = .imageOnly
-        }
+        button.title = ""
+        button.imagePosition = .imageOnly
     }
 
     /// The watcher lives for the item, or for live mode alone while it can
@@ -1789,7 +1782,7 @@ final class ExtrasManager {
         for activity in split.onBar { row(activity, onBar: true) }
         if !split.hidden.isEmpty {
             if !split.onBar.isEmpty { menu.addItem(.separator()) }
-            let header = NSMenuItem(title: String(localized: "macOS fits two on the bar"), action: nil, keyEquivalent: "")
+            let header = NSMenuItem(title: String(localized: "\(split.hidden.count) more than macOS fits on the bar"), action: nil, keyEquivalent: "")
             header.isEnabled = false
             menu.addItem(header)
             for activity in split.hidden { row(activity, onBar: false) }
