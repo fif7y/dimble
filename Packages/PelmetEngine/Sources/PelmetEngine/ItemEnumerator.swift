@@ -303,15 +303,39 @@ public actor ItemEnumerator {
         guard pid > 0 else { return nil }
         let app = NSRunningApplication(processIdentifier: pid)
         if let id = app?.bundleIdentifier { return HostBundle(id: id, bundleless: false) }
-        var url = app?.executableURL ?? executableURL(ofPID: pid)
-        while let current = url, current.path != "/" {
+        let start = app?.executableURL ?? executableURL(ofPID: pid)
+        for current in start.map(Self.ancestors(of:)) ?? [] {
             if current.pathExtension == "app", let id = Bundle(url: current)?.bundleIdentifier {
                 logOnce("enumerate: bundle-less host → \(id) (\(app?.executableURL?.lastPathComponent ?? "?"))", pid: pid)
                 return HostBundle(id: id, bundleless: true)
             }
-            url = current.deletingLastPathComponent()
         }
         return nil
+    }
+
+    /// `url` and every folder above it, nearest first, stopping below "/".
+    ///
+    /// `NSRunningApplication.executableURL` is a bridged NSURL, and on a path
+    /// holding a doubled slash its `deletingLastPathComponent()` appends
+    /// "../" instead of climbing: "…/T//winetemp-…/steam.exe" walks to
+    /// "…/T//..", then "…/T//../..", and never reaches "/". Wine writes
+    /// exactly that path, so the enumerate walk spun on a live bar, growing
+    /// the string three bytes a turn and taking the hide down with it
+    /// (fif7y/dimble#133: 10.5 GB to 13.1 GB in 11 s, one core pinned).
+    /// Standardizing collapses the slash; the component count caps the climb
+    /// whatever else a URL does.
+    static func ancestors(of url: URL) -> [URL] {
+        var out: [URL] = []
+        var current = url.standardizedFileURL
+        var left = current.pathComponents.count
+        while current.path != "/", left > 0 {
+            out.append(current)
+            left -= 1
+            let next = current.deletingLastPathComponent()
+            if next == current { break }
+            current = next
+        }
+        return out
     }
 
     private func executableURL(ofPID pid: pid_t) -> URL? {
