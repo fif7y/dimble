@@ -303,11 +303,18 @@ public actor ItemEnumerator {
         guard pid > 0 else { return nil }
         let app = NSRunningApplication(processIdentifier: pid)
         if let id = app?.bundleIdentifier { return HostBundle(id: id, bundleless: false) }
-        var url = app?.executableURL ?? executableURL(ofPID: pid)
+        guard let executable = app?.executableURL ?? executableURL(ofPID: pid),
+              let id = Self.enclosingBundleID(for: executable) else { return nil }
+        logOnce("enumerate: bundle-less host → \(id) (\(app?.executableURL?.lastPathComponent ?? "?"))", pid: pid)
+        return HostBundle(id: id, bundleless: true)
+    }
+
+    static func enclosingBundleID(for executableURL: URL) -> String? {
+        // Wine's bridged URLs can append ".." forever when deleting past a double slash.
+        var url: URL? = executableURL.standardizedFileURL
         while let current = url, current.path != "/" {
             if current.pathExtension == "app", let id = Bundle(url: current)?.bundleIdentifier {
-                logOnce("enumerate: bundle-less host → \(id) (\(app?.executableURL?.lastPathComponent ?? "?"))", pid: pid)
-                return HostBundle(id: id, bundleless: true)
+                return id
             }
             url = current.deletingLastPathComponent()
         }
