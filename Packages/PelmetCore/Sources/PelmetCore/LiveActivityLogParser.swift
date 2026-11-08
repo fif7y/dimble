@@ -297,3 +297,30 @@ public struct LiveActivities: Equatable, Sendable {
         return found
     }
 }
+
+/// Telling same-named pills apart.
+///
+/// A pill's identity in AX is its description ("Sports", "myVW") and nothing
+/// else. Two activities of one app share it, so a lookup by description alone
+/// always lands on the leftmost of them: clicking the right-hand Sports pill
+/// opened the left one's card (fif7y/dimble, 2026-11-08). The keys add " #2",
+/// " #3" in bar order, which is what the menu bar's mirrors already carry.
+public enum PillKeys {
+    /// One key per name, in the order given (bar order, leftmost first).
+    public static func keys(for names: [String]) -> [String] {
+        var counts: [String: Int] = [:]
+        return names.map { name in
+            counts[name, default: 0] += 1
+            return counts[name]! == 1 ? name : "\(name) #\(counts[name]!)"
+        }
+    }
+
+    /// Where `wanted` sits in `names`. A key ("Sports #2") wins; a bare
+    /// description ("Sports") falls back to the first pill of that name, so a
+    /// caller holding only what AX reports — an open card's owner — still
+    /// finds its pill. nil when nothing matches.
+    public static func index(of wanted: String, in names: [String]) -> Int? {
+        if let exact = keys(for: names).firstIndex(of: wanted) { return exact }
+        return names.firstIndex(of: wanted)
+    }
+}

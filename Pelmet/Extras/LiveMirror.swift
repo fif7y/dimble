@@ -200,13 +200,9 @@ nonisolated enum PillProbe {
 
     /// A pill's identity is its AXDescription ("Sports", "myVW"), the one
     /// thing that names the activity in AX; a second pill with the same
-    /// description gets " #2".
+    /// description gets " #2" (`PillKeys`, in bar order).
     static func keys(of pills: [PillCopy]) -> [String] {
-        var counts: [String: Int] = [:]
-        return pills.map { pill in
-            counts[pill.name, default: 0] += 1
-            return counts[pill.name]! == 1 ? pill.name : "\(pill.name) #\(counts[pill.name]!)"
-        }
+        PillKeys.keys(for: pills.map(\.name))
     }
 
     /// Every element read gets its own short messaging timeout: the one set on
@@ -377,7 +373,12 @@ nonisolated enum PillProbe {
     /// in hand may be a copy the agent has since replaced); the one in hand
     /// is the fallback. Returns what happened, for the log, and the fresh copy.
     static func press(in bounds: CGRect, named: String?, kept: AXUIElement?) -> (result: String, fresh: PillCopy?) {
-        let fresh = pills(in: bounds).first { named == nil || $0.name == named }
+        let all = pills(in: bounds)
+        // `named` is a mirror's key, so two activities of one app each press
+        // their own pill; a bare description (an open card's owner is one)
+        // still finds the first pill of that name.
+        let fresh = named.flatMap { want in PillKeys.index(of: want, in: all.map(\.name)).map { all[$0] } }
+            ?? (named == nil ? all.first : nil)
         var notes: [String] = []
         if let fresh {
             AXUIElementSetMessagingTimeout(fresh.element, axTimeout)
@@ -1142,14 +1143,18 @@ final class LiveMirror {
     /// actions are unsupported on the card, the pill and its window (error
     /// -25206) and an Escape posted to MenuBarAgent's pid does nothing.
     /// Presses the real pill `name` (a mirror's own) on `side`, looked up
-    /// fresh; no name presses the first mirror's.
+    /// fresh; no name presses the first mirror's. `name` is a mirror's key
+    /// ("Sports #2"), which tells two activities of one app apart, or the
+    /// bare AX description an open card reports as its owner, which cannot.
     @discardableResult
     private func pressPill(_ why: String, side: Side? = nil, name: String? = nil) async -> String {
         guard let side = side ?? sides.first(where: { !$0.mirrors.isEmpty }) ?? sides.first else { return "no display" }
         let bounds = side.bounds
-        let mirror = side.mirrors.first { name == nil || $0.copy.name == name } ?? side.mirrors.first
+        let mirror = side.mirrors.first { name == nil || $0.key == name }
+            ?? side.mirrors.first { name == nil || $0.copy.name == name }
+            ?? side.mirrors.first
         let kept = ElementBox(list: mirror.map { [$0.copy.element] } ?? [])
-        let wanted = name ?? mirror?.copy.name
+        let wanted = name ?? mirror?.key
         let started = Date()
         let (result, fresh) = await Task.detached(priority: .userInitiated) { PillProbe.press(in: bounds, named: wanted, kept: kept.list.first) }.value
         if let fresh, let mirror { mirror.copy = fresh }
@@ -3044,6 +3049,10 @@ final class LiveMirror {
             return
         }
         let id = side.id
+        // The key is what presses THIS pill rather than another of the same
+        // name; the card reports the bare description as its owner, so the
+        // "is it already open" comparisons keep using that.
+        let key = mirror.key
         let name = mirror.copy.name
         Task { @MainActor in
             let at = Date()
@@ -3056,7 +3065,7 @@ final class LiveMirror {
                     // The click is already an outside interaction for the card
                     // and collapses it; a press on top interrupts that.
                     PelmetLog.log("livemirror: click — \"\(mirror.key)\" card open=true action=close result=the click closes it, no press (display \(id); \(probe.detail))")
-                    await self.confirmCardClosed(from: at, side: side, name: name)
+                    await self.confirmCardClosed(from: at, side: side, key: key, name: name)
                     return
                 }
                 // Another pill's card is open: the click collapses it, then this one opens.
@@ -3068,7 +3077,7 @@ final class LiveMirror {
                 }
                 if !closed { PelmetLog.log("livemirror: card \(probe.owners) still open 1.4s after — pressing \"\(mirror.key)\" anyway") }
             }
-            let result = await self.pressPill("mirror click", side: side, name: name)
+            let result = await self.pressPill("mirror click", side: side, name: key)
             PelmetLog.log("livemirror: click — \"\(mirror.key)\" card open=false action=press result=\(result) (display \(id); \(probe.detail))")
             var last = probe
             for _ in 0..<12 {
@@ -3083,7 +3092,7 @@ final class LiveMirror {
         }
     }
 
-    private func confirmCardClosed(from start: Date, side: Side, name: String) async {
+    private func confirmCardClosed(from start: Date, side: Side, key: String, name: String) async {
         var last = ""
         for _ in 0..<14 {
             try? await Task.sleep(for: .milliseconds(100))
@@ -3095,7 +3104,7 @@ final class LiveMirror {
             }
         }
         PelmetLog.log("livemirror: card still open 1.4s after the click — pressing the pill (\(last))")
-        let result = await pressPill("click fallback", side: side, name: name)
+        let result = await pressPill("click fallback", side: side, name: key)
         PelmetLog.log("livemirror: click — card open=true action=press (fallback) result=\(result)")
     }
 

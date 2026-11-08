@@ -311,3 +311,32 @@ struct LiveActivityLogParserTests {
         #expect(try JSONDecoder().decode(LiveActivities.Saved.self, from: data) == saved)
     }
 }
+
+/// Two activities of one app share an AX description, and the press used to
+/// take the first of them whichever pill was clicked (fif7y/dimble).
+@Suite struct PillKeysTests {
+    @Test func secondPillOfOneAppGetsASuffix() {
+        #expect(PillKeys.keys(for: ["Sports", "Sports"]) == ["Sports", "Sports #2"])
+        #expect(PillKeys.keys(for: ["Sports", "myVW", "Sports"]) == ["Sports", "myVW", "Sports #2"])
+        #expect(PillKeys.keys(for: ["Sports", "Sports", "Sports"]) == ["Sports", "Sports #2", "Sports #3"])
+    }
+
+    @Test func aKeyFindsItsOwnPillNotTheFirstOfThatName() {
+        let names = ["Sports", "Sports"]
+        #expect(PillKeys.index(of: "Sports #2", in: names) == 1)
+        #expect(PillKeys.index(of: "Sports", in: names) == 0)
+    }
+
+    @Test func aBareDescriptionStillFindsTheFirstOfThatName() {
+        // What an open card reports as its owner is the description alone.
+        #expect(PillKeys.index(of: "myVW", in: ["Sports", "myVW", "Sports"]) == 1)
+        #expect(PillKeys.index(of: "Sports #3", in: ["Sports", "myVW", "Sports"]) == nil)
+        #expect(PillKeys.index(of: "Timer", in: ["Sports", "Sports"]) == nil)
+    }
+
+    @Test func oneNameIsItsOwnKey() {
+        #expect(PillKeys.keys(for: ["Sports"]) == ["Sports"])
+        #expect(PillKeys.index(of: "Sports", in: ["Sports"]) == 0)
+        #expect(PillKeys.keys(for: []) == [])
+    }
+}
