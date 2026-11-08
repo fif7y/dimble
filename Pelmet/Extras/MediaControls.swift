@@ -1181,21 +1181,28 @@ final class ExtrasManager {
         }
     }
 
-    /// The latest activity's app icon, in colour like a launcher's, when
-    /// the Mac has the app; the platter when it doesn't (an iPhone app) or
-    /// the log hasn't named it. More than one: how many, beside it.
+    /// The app icon of the activity the item stands in for, in colour like a
+    /// launcher's, when the Mac has the app; the platter when it doesn't (an
+    /// iPhone app) or the log hasn't named it. While the pills are on the bar
+    /// the item is for the ones macOS left off them, so it leads with the
+    /// newest of those and counts them; with no pill showing it stands in for
+    /// all of them, and the count is how many.
     private func updateLiveActivityGlyph(_ item: NSStatusItem, spec: ExtraItemSpec) {
         guard let button = item.button else { return }
         let active = liveActivityStatus?.active ?? []
-        let bundleID = active.last?.bundleID
+        let split = (liveActivityStatus?.activities ?? LiveActivities()).slotted(avPill: systemPillTakesASlot)
+        let showing = appState?.liveActivityPillsShowing ?? false
+        let lead = showing ? (split.hidden.first ?? active.last) : active.last
+        let badge = showing ? split.hidden.count : (active.count > 1 ? active.count : 0)
+        let bundleID = lead?.bundleID
         setGlyph(item, id: spec.id, key: "liveActivity:\(bundleID ?? "")") {
-            bundleID.flatMap { Self.appIcon(for: ExtraItemSpec(kind: .liveActivity, bundleID: $0), size: 18) }
+            lead.flatMap { self.liveActivityIcon($0, size: 18) }
                 ?? NSImage(systemSymbolName: Self.liveActivitySymbol, accessibilityDescription: spec.itemTitle)
         }
-        if active.count > 1 {
+        if badge > 0 {
             let size = NSFont.menuBarFont(ofSize: 0).pointSize
             button.attributedTitle = NSAttributedString(
-                string: " \(active.count)",
+                string: " \(badge)",
                 attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)]
             )
             button.imagePosition = .imageLeading
@@ -1287,16 +1294,20 @@ final class ExtrasManager {
         (cameraMicMonitor?.isActive ?? false) || (sharePlayStatus?.isLive ?? false)
     }
 
+    /// macOS's own camera and mic pill is a pill like the rest on 27.3: live
+    /// mode has to be running for it, or the held cover paints over the
+    /// privacy indicator, and it takes one of the bar's two pill slots ahead
+    /// of every activity. Up to 27.2 the assertion took that pill off the
+    /// bar, so there would be nothing to mirror and entering live mode would
+    /// cost a screen capture for nothing. Which macOS this is comes from
+    /// `OSTraits`, learned from the first session that tries, not from a
+    /// version number.
+    private var systemPillTakesASlot: Bool {
+        cameraOrMicIsLive && (appState?.osTraits.value(.systemPillSurvivesAssertion) ?? true)
+    }
+
     private func liveActivityChanged() {
-        // macOS's own camera and mic pill is a pill like the rest on 27.3:
-        // live mode has to be running for it, or the held cover paints over
-        // the privacy indicator. Up to 27.2 the assertion took that pill
-        // off the bar, so there would be nothing to mirror and entering
-        // live mode would cost a screen capture for nothing. Which macOS
-        // this is comes from `OSTraits`, learned from the first session
-        // that tries, not from a version number.
-        let system = cameraOrMicIsLive
-            && (appState?.osTraits.value(.systemPillSurvivesAssertion) ?? true)
+        let system = systemPillTakesASlot
         let count = (liveActivityStatus?.active.count ?? 0) + (system ? 1 : 0)
         appState?.liveActivitiesChanged(running: count > 0, count: count)
         guard let spec = specs.values.first(where: { $0.kind == .liveActivity }),
@@ -1487,8 +1498,10 @@ final class ExtrasManager {
             return rightClick ? .onBar : .nothing
         case .cameraMicIndicator:
             return rightClick ? .nothing : .live
-        case .airdrop, .shortcut, .quickNote, .liveActivity:
+        case .airdrop, .shortcut, .quickNote:
             return .nothing
+        case .liveActivity:
+            return .onBar
         case .timer:
             guard let timer = pelmetTimer, !rightClick else { return .onBar }
             return timer.state == .done || timer.showsClock ? .nothing : .onBar
@@ -1545,9 +1558,9 @@ final class ExtrasManager {
         case .quickNote:
             QuickNote.open()
         case .liveActivity:
-            // The real pills, live and clickable: only the bar with no
-            // assertion held shows them (#106).
-            appState?.liftHideForLiveActivities()
+            // What is running, including what macOS evicted: the bar holds
+            // two pills and no more (#106). The lift is the menu's last row.
+            popUp(liveActivityMenu(), on: statusItem.value)
         case .shortcut:
             if let name = spec.shortcutName {
                 runShortcut(named: name)
@@ -1696,6 +1709,122 @@ final class ExtrasManager {
     @objc private func addTimerMinute() { pelmetTimer?.addMinute() }
     @objc private func cancelTimer() { pelmetTimer?.cancel() }
     @objc private func dismissTimer() { pelmetTimer?.dismiss() }
+
+    // MARK: Live Activities menu
+
+    /// What to call an activity: the app this Mac has, then the app its
+    /// widget lives in (a service's activity names it — the Shortcuts run
+    /// indicator asks as a ViewService and names Shortcuts), then what one
+    /// of its pills taught us while macOS was drawing it. Nil when all three
+    /// come up empty, which is an app only the phone has and whose pill this
+    /// Mac has never had on the bar.
+    private func liveActivityName(_ activity: LiveActivity) -> String? {
+        activity.bundleID.flatMap { ItemNaming.appName(forBundle: $0) }
+            ?? activity.hostBundleID.flatMap { ItemNaming.appName(forBundle: $0) }
+            ?? activity.bundleID.flatMap { LiveActivityNames.name(for: $0) }
+    }
+
+    /// Its icon, by the same order; the platter where the Mac has no app.
+    private func liveActivityIcon(_ activity: LiveActivity, size: CGFloat) -> NSImage? {
+        func icon(_ bundle: String?) -> NSImage? {
+            bundle.flatMap { Self.appIcon(for: ExtraItemSpec(kind: .liveActivity, bundleID: $0), size: size) }
+        }
+        return icon(activity.bundleID) ?? icon(activity.hostBundleID)
+    }
+
+    /// The pills macOS is drawing, by name: live mode's mirror reads them off
+    /// the bar, and a lift's probe does when live mode is off. What a pill is
+    /// called is the only name a mirrored iPhone app has here, so it is kept
+    /// against the activity it belongs to (`LiveActivities.pairNames` only
+    /// pairs what can't be anything else).
+    func learnLiveActivityNames(from pills: [String]) {
+        guard !pills.isEmpty, let status = liveActivityStatus else { return }
+        let onBar = status.activities.slotted(avPill: systemPillTakesASlot).onBar
+        let pairs = LiveActivities.pairNames(
+            pills: pills,
+            onBar: onBar.compactMap { activity in
+                activity.bundleID.map { (bundle: $0, known: liveActivityName(activity)) }
+            })
+        var learned = false
+        for pair in pairs where LiveActivityNames.learn(pair.bundle, as: pair.name) {
+            PelmetLog.log("liveactivity: \(pair.bundle) is \"\(pair.name)\" — learned from its pill")
+            learned = true
+        }
+        guard learned, let spec = specs.values.first(where: { $0.kind == .liveActivity }), let item = items[spec.id] else { return }
+        updateLiveActivityGlyph(item, spec: spec)
+    }
+
+    /// Every Live Activity running, newest first (#106). The bar holds two
+    /// pills and no more — Apple's camera and mic pill takes one of the two
+    /// when it runs — so the rest are running with no pill at all: their rows
+    /// are there to be read, since macOS never drew an element to press. The
+    /// two it does draw press their own pill, which opens Apple's card, and
+    /// the lift that brings every pill back is the last row.
+    private func liveActivityMenu() -> NSMenu {
+        let menu = NSMenu()
+        let split = (liveActivityStatus?.activities ?? LiveActivities()).slotted(avPill: systemPillTakesASlot)
+        func row(_ activity: LiveActivity, onBar: Bool) {
+            // No name means no app of that id on this Mac and no pill of it
+            // ever read, which is what an activity mirrored from the phone
+            // looks like until macOS draws it once.
+            let name = liveActivityName(activity)
+            let item = NSMenuItem(title: "\(name ?? String(localized: "From your iPhone")) · \(Self.liveActivityAge(activity.startedAt))",
+                                  action: onBar ? #selector(openLiveActivity(_:)) : nil, keyEquivalent: "")
+            // The app's own icon tells the rows apart at a glance, and macOS 27
+            // draws a menu item's image only when it is asked to. Every row
+            // takes the slot, the platter standing in where the Mac has no
+            // app to draw: one row without it would hang its text out past
+            // the others.
+            item.image = liveActivityIcon(activity, size: 16)
+                ?? NSImage(systemSymbolName: Self.liveActivitySymbol, accessibilityDescription: nil)
+            item.preferredImageVisibility = .visible
+            if onBar {
+                item.target = self
+                // Empty when the Mac has no app of that id: the press then
+                // goes by the only pill there is, since nothing names it.
+                item.representedObject = name ?? ""
+            }
+            menu.addItem(item)
+        }
+        for activity in split.onBar { row(activity, onBar: true) }
+        if !split.hidden.isEmpty {
+            if !split.onBar.isEmpty { menu.addItem(.separator()) }
+            let header = NSMenuItem(title: String(localized: "macOS fits two on the bar"), action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            for activity in split.hidden { row(activity, onBar: false) }
+        }
+        if menu.items.isEmpty {
+            let none = NSMenuItem(title: String(localized: "Nothing running"), action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        }
+        // Only worth offering while they are off the bar: live mode already
+        // has them out under its covers, and a lift that is up would be
+        // taken back by this same click.
+        if appState?.liveActivityPillsShowing != true {
+            menu.addItem(.separator())
+            let lift = NSMenuItem(title: String(localized: "Show the pills on the bar"), action: #selector(liftLiveActivityPills), keyEquivalent: "")
+            lift.target = self
+            menu.addItem(lift)
+        }
+        return menu
+    }
+
+    /// How long it has run, in the bar's own shorthand.
+    private static func liveActivityAge(_ start: Date) -> String {
+        let minutes = max(0, Int(Date().timeIntervalSince(start)) / 60)
+        return minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h \(minutes % 60)m"
+    }
+
+    @objc private func openLiveActivity(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        appState?.openLiveActivityPill(named: name.isEmpty ? nil : name)
+    }
+
+    @objc private func liftLiveActivityPills() {
+        appState?.liftHideForLiveActivities()
+    }
 
     // MARK: Users menu
 

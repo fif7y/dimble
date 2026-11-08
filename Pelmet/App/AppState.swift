@@ -2069,7 +2069,34 @@ final class AppState {
     /// moves the way a ⌥-click does. A click while it is up, or on its way,
     /// puts it back at once: the lift's state is read here, not asked of the
     /// engine, which is mid-converge for the whole reveal.
-    func liftHideForLiveActivities() {
+    /// Whether the real pills are on the bar as things stand: live mode keeps
+    /// them there under its covers, and a lift has let the assertion go for
+    /// them. The item's own glyph reads it, to count what macOS is NOT
+    /// showing rather than what it is.
+    var liveActivityPillsShowing: Bool { liveMirror.isActive || transitions.liftUp }
+
+    /// A row of the item's menu, for one of the pills macOS is drawing:
+    /// under live mode, or a lift already up, the pill is on the bar (the
+    /// cover is a window of ours, which an AX press goes straight past), so
+    /// it is pressed where it is. Off the bar, the assertion has to go first
+    /// and the press waits for the lift to bring it back.
+    func openLiveActivityPill(named: String?) {
+        guard liveActivityPillsShowing else {
+            liftHideForLiveActivities(then: .press(named))
+            return
+        }
+        Task { @MainActor in
+            let result = await Task.detached(priority: .userInitiated) { Self.pressLiveActivityPill(named: named) }.value
+            PelmetLog.log("liveactivity: press \(named ?? "the only pill") on the bar — \(result)")
+        }
+    }
+
+    /// What the lift is for: the pills themselves, or one of them opened.
+    /// `.press(nil)` is a row of an app this Mac doesn't have, which nothing
+    /// in AX ties to its pill (`pressLiveActivityPill`).
+    enum LiveActivityLift { case justShow, press(String?) }
+
+    func liftHideForLiveActivities(then: LiveActivityLift = .justShow) {
         if liveMirror.interceptsItemClick() { return }
         let all: Set<PelmetCore.Section> = [.hidden, .alwaysHidden]
         if transitions.liftUp {
@@ -2090,14 +2117,14 @@ final class AppState {
                 // Out already: no reveal is coming to carry the lift.
                 PelmetLog.log("liveactivity: lift — the bar is out, the assertion goes")
                 await transitions.liftOutBar()
-                checkLiftBroughtPills()
+                checkLiftBroughtPills(then: then)
                 return
             }
             PelmetLog.log("liveactivity: lift — everything out with the assertion down")
             reveal(all, reason: .itemInBar)
             // After the request: the reveal's task, which runs later, takes it.
             transitions.liftRequestedAt = Date()
-            checkLiftBroughtPills()
+            checkLiftBroughtPills(then: then)
         }
     }
 
@@ -2105,7 +2132,7 @@ final class AppState {
     /// gives them or until the re-hide. A lift that brings none back was for
     /// an activity that's over. `liftUp` also covers a request no reveal took,
     /// where the assertion never went, so the wait starts at `lifted`.
-    private func checkLiftBroughtPills() {
+    private func checkLiftBroughtPills(then: LiveActivityLift = .justShow) {
         Task { @MainActor [weak self] in
             var liftedAt: Date?
             while liftedAt.map({ Date().timeIntervalSince($0) < LiveMirror.noPillGrace }) ?? true {
@@ -2113,9 +2140,20 @@ final class AppState {
                 guard let self, self.transitions.liftUp else { break }
                 guard self.transitions.lifted else { continue }
                 if liftedAt == nil { liftedAt = Date() }
-                let found = await Task.detached(priority: .userInitiated) { !PillProbe.copies().isEmpty }.value
+                // The names come back with the pills: live mode isn't running
+                // here (its mirror would have handed them over), so this is
+                // the one read that can learn what they are called.
+                let pills = await Task.detached(priority: .userInitiated) {
+                    PillProbe.copies().filter { !$0.system }.map(\.name)
+                }.value
+                let found = !pills.isEmpty
                 if found {
+                    extras?.learnLiveActivityNames(from: pills.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } })
                     PelmetLog.log("liveactivity: the lift brought a pill back")
+                    if case .press(let name) = then {
+                        let result = await Task.detached(priority: .userInitiated) { Self.pressLiveActivityPill(named: name) }.value
+                        PelmetLog.log("liveactivity: press \(name ?? "the only pill") — \(result)")
+                    }
                     return
                 }
             }
@@ -2123,6 +2161,18 @@ final class AppState {
             PelmetLog.log("liveactivity: the lift brought no pill back")
             self?.liveActivityPillsMissing()
         }
+    }
+
+    /// Opens the card of the pill a menu row named, through the bar's own
+    /// copy of it looked up fresh (`PillProbe.press`): the window copies can
+    /// press without drawing a card.
+    nonisolated private static func pressLiveActivityPill(named: String?) -> String {
+        let bounds = CGDisplayBounds(CGMainDisplayID())
+        // No name means no app of that id on this Mac, so nothing in AX ties
+        // the activity to its pill: press the pill only when there is one to
+        // mean, rather than open the wrong app's card.
+        if named == nil, PillProbe.pills(in: bounds).count != 1 { return "nothing names this one, and more than one pill is up" }
+        return PillProbe.press(in: bounds, named: named, kept: nil).result
     }
 
     /// The assertion was down and no pill came: what only came from before
@@ -2204,6 +2254,7 @@ final class AppState {
     func liveActivityNamesChanged(_ names: [String]) {
         guard names != liveActivityNames else { return }
         liveActivityNames = names
+        extras?.learnLiveActivityNames(from: names)
     }
 
     /// A lift's re-hide has come to rest (`TransitionCoordinator.endLift`):

@@ -32,6 +32,11 @@ public struct LiveActivity: Equatable, Sendable, Codable {
     /// the phone, rarely installed on the Mac). Nil until a descriptor line
     /// names it: a second activity can fall past the line's 1 KB cut.
     public var bundleID: String?
+    /// The process the activity's widget lives in (`containingProcess`),
+    /// which for a service's activity is the app itself: the Shortcuts run
+    /// indicator asks as com.apple.WorkflowKit.ShortcutsViewService, which
+    /// no Mac has, and names com.apple.shortcuts here, which every Mac has.
+    public var hostBundleID: String?
     /// When the start line was logged.
     public let startedAt: Date
     /// The MenuBarAgent process that announced it.
@@ -40,9 +45,10 @@ public struct LiveActivity: Equatable, Sendable, Codable {
     /// vouches for it, and it can be over without anything having said so.
     public var fromBefore = false
 
-    public init(id: String, bundleID: String?, startedAt: Date, agent: Int32) {
+    public init(id: String, bundleID: String?, hostBundleID: String? = nil, startedAt: Date, agent: Int32) {
         self.id = id
         self.bundleID = bundleID
+        self.hostBundleID = hostBundleID
         self.startedAt = startedAt
         self.agent = agent
     }
@@ -55,6 +61,8 @@ public struct LiveActivities: Equatable, Sendable {
     /// Requesters the descriptor lines named, by short id, kept for the
     /// start line a millisecond behind them.
     private var requesters: [String: String] = [:]
+    /// Their `containingProcess`, the same way.
+    private var hosts: [String: String] = [:]
     /// When each activity last ended, by short id. The replay can't be
     /// trusted to know: macOS quarantines a process that logs too much
     /// ("QUARANTINED DUE TO HIGH LOGGING VOLUME", MenuBarAgent 2026-11-05
@@ -107,6 +115,34 @@ public struct LiveActivities: Equatable, Sendable {
         return active != before
     }
 
+    /// Which activity each pill on the bar belongs to, as far as the names
+    /// allow. A pill whose name is one an activity already has is claimed by
+    /// it; when exactly one pill and one activity are left over, they can
+    /// only be each other, so the pill's name is that activity's. Anything
+    /// less certain is left alone — a wrong name here would be kept and
+    /// shown for weeks. `pills` are AX descriptions left to right, `onBar`
+    /// the activities macOS is drawing with the name this Mac can give them
+    /// (nil when it has no app of that id).
+    public static func pairNames(pills: [String],
+                                 onBar: [(bundle: String, known: String?)]) -> [(bundle: String, name: String)] {
+        var unclaimed = pills
+        for activity in onBar {
+            guard let known = activity.known else { continue }
+            if let index = unclaimed.firstIndex(where: { Self.sameName($0, known) }) { unclaimed.remove(at: index) }
+        }
+        let unnamed = onBar.filter { $0.known == nil }
+        guard unclaimed.count == 1, unnamed.count == 1 else { return [] }
+        return [(unnamed[0].bundle, unclaimed[0])]
+    }
+
+    /// A pill's description against an app's name: macOS writes "Sports" for
+    /// the Sports app, and a service's pill takes its app's name, so one
+    /// being the start of the other counts.
+    static func sameName(_ pill: String, _ app: String) -> Bool {
+        let pill = pill.lowercased(), app = app.lowercased()
+        return pill == app || pill.hasPrefix(app) || app.hasPrefix(pill)
+    }
+
     /// The longest an activity can run: the system ends one at eight hours
     /// and takes it off the Dynamic Island at once (ActivityKit's rule).
     /// Only an end line the log never delivered leaves one here that long.
@@ -114,6 +150,25 @@ public struct LiveActivities: Equatable, Sendable {
 
     /// The activity the item shows: the latest to start.
     public var latest: LiveActivity? { active.last }
+
+    /// How many pills macOS draws at once. Two, whatever the room: with four
+    /// activities running it drew two 116pt pills into a 541pt free span and
+    /// evicted the rest (measured 2026-11-07, macOS 27.3), so "Menu bar full"
+    /// in its log means both slots are taken, not that the bar ran out of
+    /// width. Apple's own camera and mic pill sits in the same pool and
+    /// outranks every activity.
+    public static let slots = 2
+
+    /// What the bar can show and what it can't, newest first: the newest
+    /// activity wins a slot and the oldest is the one evicted (every
+    /// "Menu bar full: evicting liveActivity(…) for better-ranked …" line
+    /// named the oldest). `avPill` is Apple's camera and mic pill, running
+    /// or not; it takes a slot before any activity does.
+    public func slotted(avPill: Bool) -> (onBar: [LiveActivity], hidden: [LiveActivity]) {
+        let newestFirst = Array(active.reversed())
+        let room = max(0, Self.slots - (avPill ? 1 : 0))
+        return (Array(newestFirst.prefix(room)), Array(newestFirst.dropFirst(room)))
+    }
 
     /// When the oldest one runs out of `lifetime`; nil while none runs.
     public var nextExpiry: Date? {
@@ -131,27 +186,32 @@ public struct LiveActivities: Equatable, Sendable {
             active.removeAll { $0.agent != agent }
         }
         if message.hasPrefix(Self.descriptorPrefix) {
-            for (id, bundle) in Self.requesters(in: message) {
+            for (id, bundle, host) in Self.requesters(in: message) {
                 requesters[id] = bundle
-                if let index = active.firstIndex(where: { $0.id == id }), active[index].bundleID == nil {
-                    active[index].bundleID = bundle
+                hosts[id] = host
+                if let index = active.firstIndex(where: { $0.id == id }) {
+                    if active[index].bundleID == nil { active[index].bundleID = bundle }
+                    if active[index].hostBundleID == nil { active[index].hostBundleID = host }
                 }
             }
             // Only the ids still in play are worth keeping.
             if requesters.count > 32 {
                 let live = Set(active.map(\.id))
                 requesters = requesters.filter { live.contains($0.key) }
+                hosts = hosts.filter { live.contains($0.key) }
             }
         } else if let id = Self.id(after: Self.createdPrefix, in: message) {
             if let index = active.firstIndex(where: { $0.id == id }) {
                 active[index].fromBefore = false  // the agent just announced it
             } else {
-                active.append(LiveActivity(id: id, bundleID: requesters[id], startedAt: date, agent: agent))
+                active.append(LiveActivity(id: id, bundleID: requesters[id], hostBundleID: hosts[id],
+                                           startedAt: date, agent: agent))
             }
         } else if let id = Self.id(after: Self.departedPrefix, in: message)
                     ?? Self.id(after: Self.releasedPrefix, in: message) {
             active.removeAll { $0.id == id }
             requesters[id] = nil
+            hosts[id] = nil
             ended[id] = date
         } else if message.hasPrefix(Self.notShownPrefix) {
             // A dismissal is followed by the per-id lines above; any other
@@ -213,12 +273,12 @@ public struct LiveActivities: Equatable, Sendable {
         return id.count >= 8 ? id.prefix(8).uppercased() : nil
     }
 
-    /// Every `ActivityDescriptor(id: "…"` with the `requester:` that
-    /// follows it inside the same descriptor; one cut off before its
-    /// requester names none.
-    static func requesters(in message: String) -> [(id: String, bundle: String)] {
+    /// Every `ActivityDescriptor(id: "…"` with the `requester:` and the
+    /// `containingProcess:` that follow it inside the same descriptor; one
+    /// cut off before its requester names none.
+    static func requesters(in message: String) -> [(id: String, bundle: String, host: String?)] {
         let marker = "ActivityDescriptor(id: \""
-        var found: [(id: String, bundle: String)] = []
+        var found: [(id: String, bundle: String, host: String?)] = []
         var rest = Substring(message)
         while let start = rest.range(of: marker) {
             let afterID = rest[start.upperBound...]
@@ -227,7 +287,10 @@ public struct LiveActivities: Equatable, Sendable {
             let descriptor = afterID[..<next]
             if id.count >= 8, let requester = descriptor.range(of: "requester: ") {
                 let bundle = descriptor[requester.upperBound...].prefix { $0 != "," && $0 != ")" && !$0.isWhitespace }
-                if !bundle.isEmpty { found.append((id.prefix(8).uppercased(), String(bundle))) }
+                let host = descriptor.range(of: "containingProcess: ").map {
+                    String(descriptor[$0.upperBound...].prefix { $0 != "," && $0 != ")" && !$0.isWhitespace })
+                }
+                if !bundle.isEmpty { found.append((id.prefix(8).uppercased(), String(bundle), host?.isEmpty == false ? host : nil)) }
             }
             rest = afterID[next...]
         }

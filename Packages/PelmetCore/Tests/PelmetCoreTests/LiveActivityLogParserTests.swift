@@ -29,7 +29,9 @@ struct LiveActivityLogParserTests {
         var activities = LiveActivities()
         let changed = Self.read([Self.descriptor, Self.created], into: &activities)
         #expect(changed == [false, true])
-        #expect(activities.active == [LiveActivity(id: "A1B2C3D4", bundleID: "com.example.orders", startedAt: Self.t0, agent: Self.agent)])
+        // The real line's sceneTargets name the widget's process too.
+        #expect(activities.active == [LiveActivity(id: "A1B2C3D4", bundleID: "com.example.orders",
+                                                  hostBundleID: "com.example.orders", startedAt: Self.t0, agent: Self.agent)])
     }
 
     @Test func theEndLinesTakeItAwayByID() {
@@ -233,6 +235,74 @@ struct LiveActivityLogParserTests {
         _ = Self.read([Self.created, Self.departed], into: &activities)
         activities.prune(now: Self.t0.addingTimeInterval(LiveActivities.lifetime), agent: Self.agent)
         #expect(activities.ended.isEmpty)
+    }
+
+    /// Two slots, newest first (the live run of 2026-11-07: a Sports
+    /// activity and three Shortcuts runs, Sports evicted every time).
+    @Test func theNewestTwoAreTheOnesTheBarShows() {
+        var activities = LiveActivities()
+        for (index, id) in ["AAAA1111", "BBBB2222", "CCCC3333", "DDDD4444"].enumerated() {
+            _ = Self.read(["Create client element for Live Activity: \(id)"],
+                          into: &activities, at: Self.t0.addingTimeInterval(Double(index)))
+        }
+        let split = activities.slotted(avPill: false)
+        #expect(split.onBar.map(\.id) == ["DDDD4444", "CCCC3333"])
+        #expect(split.hidden.map(\.id) == ["BBBB2222", "AAAA1111"])
+    }
+
+    /// Apple's camera and mic pill takes one of the two
+    /// ("evicting liveActivity(D52BA810) for better-ranked avModule(…)").
+    @Test func theCameraPillTakesASlotFromTheActivities() {
+        var activities = LiveActivities()
+        for (index, id) in ["AAAA1111", "BBBB2222"].enumerated() {
+            _ = Self.read(["Create client element for Live Activity: \(id)"],
+                          into: &activities, at: Self.t0.addingTimeInterval(Double(index)))
+        }
+        let split = activities.slotted(avPill: true)
+        #expect(split.onBar.map(\.id) == ["BBBB2222"])
+        #expect(split.hidden.map(\.id) == ["AAAA1111"])
+    }
+
+    @Test func nothingRunningSplitsIntoNothing() {
+        let split = LiveActivities().slotted(avPill: false)
+        #expect(split.onBar.isEmpty && split.hidden.isEmpty)
+    }
+
+    /// The Shortcuts run indicator asks as a service no Mac has an app for,
+    /// and names the app it belongs to in the same descriptor (27.3,
+    /// 2026-11-07).
+    @Test func theDescriptorNamesTheProcessTheWidgetLivesIn() {
+        var activities = LiveActivities()
+        let descriptor = #"Received live activity descriptor states: [ActivityKit.ActivityDescriptor(id: "A1B2C3D4-5E6F-4A1B-8C2D-3E4F5A6B7C8D", attributesType: Attributes type: ShortcutLiveActivityAttributes, requester: com.example.orders.ViewService, sceneTargets: [lockscreen: widget(containingProcess: com.example.orders)], isEphemeral: false)]"#
+        _ = Self.read([descriptor, Self.created], into: &activities)
+        #expect(activities.active.first?.bundleID == "com.example.orders.ViewService")
+        #expect(activities.active.first?.hostBundleID == "com.example.orders")
+    }
+
+    /// One pill, one activity nothing names: they can only be each other.
+    @Test func theOnlyPillNamesTheOnlyActivityWithoutAName() {
+        let learned = LiveActivities.pairNames(pills: ["Sports"], onBar: [(bundle: "com.example.sports", known: nil)])
+        #expect(learned.map(\.name) == ["Sports"])
+        #expect(learned.map(\.bundle) == ["com.example.sports"])
+    }
+
+    /// A pill the Mac can already name is claimed by its own activity, and
+    /// what is left over is the pair.
+    @Test func aKnownPillIsClaimedBeforeTheLeftoverIsPaired() {
+        let learned = LiveActivities.pairNames(
+            pills: ["Shortcuts", "myVW"],
+            onBar: [(bundle: "com.example.shortcuts", known: "Shortcuts"), (bundle: "com.example.car", known: nil)])
+        #expect(learned.map(\.name) == ["myVW"])
+        #expect(learned.map(\.bundle) == ["com.example.car"])
+    }
+
+    /// Two that nothing names: either pill could be either activity, so
+    /// neither is learned.
+    @Test func twoUnnamedActivitiesLearnNothing() {
+        let learned = LiveActivities.pairNames(
+            pills: ["Sports", "myVW"],
+            onBar: [(bundle: "com.example.sports", known: nil), (bundle: "com.example.car", known: nil)])
+        #expect(learned.isEmpty)
     }
 
     @Test func savedStateSurvivesCoding() throws {
