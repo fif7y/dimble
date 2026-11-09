@@ -303,12 +303,18 @@ public actor ItemEnumerator {
         guard pid > 0 else { return nil }
         let app = NSRunningApplication(processIdentifier: pid)
         if let id = app?.bundleIdentifier { return HostBundle(id: id, bundleless: false) }
-        let start = app?.executableURL ?? executableURL(ofPID: pid)
-        for current in start.map(Self.ancestors(of:)) ?? [] {
-            if current.pathExtension == "app", let id = Bundle(url: current)?.bundleIdentifier {
-                logOnce("enumerate: bundle-less host → \(id) (\(app?.executableURL?.lastPathComponent ?? "?"))", pid: pid)
-                return HostBundle(id: id, bundleless: true)
-            }
+        guard let start = app?.executableURL ?? executableURL(ofPID: pid),
+              let id = Self.enclosingBundleID(for: start) else { return nil }
+        logOnce("enumerate: bundle-less host → \(id) (\(app?.executableURL?.lastPathComponent ?? "?"))", pid: pid)
+        return HostBundle(id: id, bundleless: true)
+    }
+
+    /// The bundle id of the nearest .app enclosing `url`, nearest first — a
+    /// login item under Contents/Library/LoginItems/ is filed under itself,
+    /// not under the app shipping it.
+    static func enclosingBundleID(for url: URL) -> String? {
+        for current in ancestors(of: url) where current.pathExtension == "app" {
+            if let id = Bundle(url: current)?.bundleIdentifier { return id }
         }
         return nil
     }

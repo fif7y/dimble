@@ -42,3 +42,37 @@ import Testing
         #expect(ItemEnumerator.ancestors(of: URL(fileURLWithPath: "/")).isEmpty)
     }
 }
+
+/// The bundle id read off that walk. Ported from ZeLebo's fif7y/dimble#134,
+/// which built the nested bundles on disk rather than trusting the path shape.
+@Suite struct EnclosingBundleIDTests {
+    /// A login item nested in another app is filed under itself: the walk has
+    /// to stop at the nearest .app, not climb on to the one shipping it.
+    @Test func theNearestAppWins() throws {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("host-bundle-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let outer = scratch.appendingPathComponent("Outer.app")
+        let inner = outer.appendingPathComponent("Contents/Library/LoginItems/Inner.app")
+        for (app, id) in [(outer, "test.outer"), (inner, "test.inner")] {
+            let contents = app.appendingPathComponent("Contents")
+            try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+            let plist = try PropertyListSerialization.data(
+                fromPropertyList: ["CFBundleIdentifier": id, "CFBundlePackageType": "APPL"],
+                format: .xml, options: 0
+            )
+            try plist.write(to: contents.appendingPathComponent("Info.plist"))
+        }
+
+        #expect(ItemEnumerator.enclosingBundleID(for: outer.appendingPathComponent("Contents/MacOS/Main")) == "test.outer")
+        #expect(ItemEnumerator.enclosingBundleID(for: inner.appendingPathComponent("Contents/MacOS/Helper")) == "test.inner")
+    }
+
+    /// A doubled slash used to spin here forever; a literal ".." is the same
+    /// shape, and standardizing collapses both before the climb starts.
+    @Test(arguments: ["/tmp//wine/steam.exe", "/private/var/../executable", "/usr/bin/executable", "/"])
+    func aPathWithoutAnAppHasNoBundleID(_ path: String) {
+        let bridged = NSURL(fileURLWithPath: path) as URL
+        #expect(ItemEnumerator.enclosingBundleID(for: bridged) == nil)
+    }
+}
