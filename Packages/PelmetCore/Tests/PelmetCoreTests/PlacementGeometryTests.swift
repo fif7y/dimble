@@ -13,6 +13,18 @@ struct PlacementGeometryTests {
         CGRect(x: x, y: 0, width: width, height: 24)
     }
 
+    @Test func centeredPanelStaysCenteredAwayFromEdges() {
+        #expect(PlacementGeometry.centeredPanelX(pointerX: 800, width: 400,
+                                                  screenMinX: 0, screenMaxX: 1728, margin: 20) == 600)
+    }
+
+    @Test func centeredPanelClampsToBothScreenEdges() {
+        #expect(PlacementGeometry.centeredPanelX(pointerX: 10, width: 400,
+                                                  screenMinX: 0, screenMaxX: 1728, margin: 20) == 20)
+        #expect(PlacementGeometry.centeredPanelX(pointerX: 1718, width: 400,
+                                                  screenMinX: 0, screenMaxX: 1728, margin: 20) == 1308)
+    }
+
     @Test func inSlotChecksOrderAgainstPresentNeighborsOnly() {
         #expect(PlacementGeometry.inSlot(x: 450, leftMidX: 400, rightMidX: 500))
         #expect(!PlacementGeometry.inSlot(x: 390, leftMidX: 400, rightMidX: 500))

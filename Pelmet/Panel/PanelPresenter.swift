@@ -84,6 +84,10 @@ final class PanelPresenter: RevealPresenter {
     /// Opened by the pointer on a bar (a hover, a click, a ⌘-drag), not by
     /// a key or Settings: the pointer's display is the one (`targetScreen`).
     private var openedAtBar = false
+    /// A deliberate bar click centers the panel on the click's screen point.
+    /// Hover keeps the stable right-aligned placement so moving into the
+    /// panel does not make it jump under the pointer.
+    private var clickAnchor: NSPoint?
     /// A display unplugged or rearranged while it is open.
     private var screenObserver: NSObjectProtocol?
     /// Windows built again because the window server had the panel off the
@@ -271,6 +275,9 @@ final class PanelPresenter: RevealPresenter {
             opens += 1
             if let appState { loadCorpus(appState) }
         }
+        if Self.usesClickAnchor(reason) {
+            clickAnchor = NSEvent.mouseLocation
+        }
         isOpen = true
         generation += 1
         let shown = refresh()
@@ -312,6 +319,14 @@ final class PanelPresenter: RevealPresenter {
     func makeDeliberate() {
         guard isOpen, openedByHover else { return }
         openedByHover = false
+        // A hover reveal becomes deliberate on the chevron click; capture
+        // that click before the pointer moves into the panel. A tile click
+        // below the bar keeps the panel where it already is.
+        if let screen = NSScreen.underPointer,
+           Self.barBand(of: screen).contains(NSEvent.mouseLocation) {
+            clickAnchor = NSEvent.mouseLocation
+            refresh()
+        }
         disarmTyping()
         window?.makeKey()
         installKeyMonitor()
@@ -525,6 +540,7 @@ final class PanelPresenter: RevealPresenter {
         if tileDrag != nil { finishDrag(cancel: true, closing: true) }
         isOpen = false
         pointerOnPanel = false
+        clickAnchor = nil
         askedThisOpen = []
         askedAgainLogged = false
         // A column drag cut short saves where it got to; its tip goes with
@@ -775,7 +791,16 @@ final class PanelPresenter: RevealPresenter {
         let width = min(size.width, target.frame.width - 2 * margin)
         let top = Self.top(on: target)
         // The glass's frame, then the window's: wider by the grip's margin.
-        let glassX = max(right - width, target.frame.minX + margin).rounded()
+        let glassX: CGFloat
+        if let clickAnchor, target.frame.contains(clickAnchor) {
+            glassX = PlacementGeometry.centeredPanelX(
+                pointerX: clickAnchor.x, width: width,
+                screenMinX: target.frame.minX, screenMaxX: target.frame.maxX,
+                margin: margin
+            ).rounded()
+        } else {
+            glassX = max(right - width, target.frame.minX + margin).rounded()
+        }
         let frame = NSRect(
             x: glassX - window.leadingMargin,
             y: (top - size.height).rounded(),
@@ -816,6 +841,16 @@ final class PanelPresenter: RevealPresenter {
             PelmetLog.log("panel: on display \(openScreen.map(String.init) ?? "?") (\(from)), bar \(Int(GlassPanel.barHeight(of: target)))pt")
         }
         return target
+    }
+
+    private static func usesClickAnchor(_ reason: RevealReason?) -> Bool {
+        guard let reason else { return false }
+        switch reason {
+        case .click, .doubleClick, .statusItem:
+            return true
+        case .hover, .displayPolicy, .hotkey, .settingsPreview, .barDrag, .itemInBar:
+            return false
+        }
     }
 
     /// Panel or Row, as the display it opened on picked it (kept until it

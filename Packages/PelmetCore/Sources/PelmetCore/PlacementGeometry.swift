@@ -5,6 +5,15 @@
 import CoreGraphics
 
 public enum PlacementGeometry {
+    /// 以点击点为中心放置面板；点击靠近屏幕边缘时，把面板夹在屏幕内。
+    public static func centeredPanelX(pointerX: CGFloat, width: CGFloat,
+                                      screenMinX: CGFloat, screenMaxX: CGFloat,
+                                      margin: CGFloat) -> CGFloat {
+        let minX = screenMinX + margin
+        let maxX = screenMaxX - margin - width
+        return min(max(pointerX - width / 2, minX), maxX)
+    }
+
     /// Post-drag order check: the item must sit right of its left neighbor
     /// and left of its right one (mids pre-filtered to the item's band;
     /// a missing neighbor imposes no bound).
