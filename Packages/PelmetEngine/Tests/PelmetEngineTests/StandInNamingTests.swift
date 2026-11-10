@@ -111,4 +111,58 @@ import Testing
     @Test func aNameNamesEveryGroup() {
         #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1, 2]), naming: .named("T"), items: []) == ["T", "T"])
     }
+
+    // MARK: A stand-in on its app's real button
+
+    static func entry(_ pid: pid_t, x: CGFloat, width: CGFloat = 38, y: CGFloat = 0, standIn: Bool) -> (pid: pid_t, frame: CGRect, standIn: Bool) {
+        (pid, CGRect(x: x, y: y, width: width, height: 33), standIn)
+    }
+
+    /// Live log 2026-11-10: Status Trio's button and its `Item-0` stand-in
+    /// at one x on the one display, read as two icons behind the «.
+    @Test func aStandInOnItsAppsButtonIsTheSameIcon() {
+        let walk = [
+            Self.entry(10, x: 1362, standIn: false),
+            Self.entry(20, x: 1300, standIn: false),
+            Self.entry(10, x: 1362, standIn: true),
+        ]
+        #expect(ItemEnumerator.echoedStandIns(walk) == [2])
+    }
+
+    /// The button can come after its stand-in in the walk (another bar's
+    /// window first).
+    @Test func theOrderOfTheWalkDoesNotMatter() {
+        let walk = [Self.entry(10, x: 1362, standIn: true), Self.entry(10, x: 1362.5, standIn: false)]
+        #expect(ItemEnumerator.echoedStandIns(walk) == [0])
+    }
+
+    /// Another display's bar has its own origin: its stand-ins are the
+    /// item's copies there, and stay.
+    @Test func aStandInOnAnotherDisplaysBarStays() {
+        let walk = [Self.entry(10, x: 1362, standIn: false), Self.entry(10, x: 4802, standIn: true)]
+        #expect(ItemEnumerator.echoedStandIns(walk).isEmpty)
+    }
+
+    @Test func anotherAppsButtonAtThatPlaceIsNotItsOwn() {
+        let walk = [Self.entry(10, x: 1362, standIn: false), Self.entry(20, x: 1362, standIn: true)]
+        #expect(ItemEnumerator.echoedStandIns(walk).isEmpty)
+    }
+
+    /// Icons behind the « are buttons at one x: still two icons, for
+    /// `PlacementGeometry.overflowTrapped` to find.
+    @Test func twoButtonsAtOnePlaceAreLeftAlone() {
+        let walk = [Self.entry(10, x: 1044, standIn: false), Self.entry(10, x: 1044, standIn: false)]
+        #expect(ItemEnumerator.echoedStandIns(walk).isEmpty)
+    }
+
+    @Test func twoStandInsAtOnePlaceAreLeftAlone() {
+        let walk = [Self.entry(10, x: 4802, standIn: true), Self.entry(10, x: 4802, standIn: true)]
+        #expect(ItemEnumerator.echoedStandIns(walk).isEmpty)
+    }
+
+    /// An app's second icon next to its first is a neighbour, not an echo.
+    @Test func aNeighbourOfTheSameAppIsNotAnEcho() {
+        let walk = [Self.entry(10, x: 1362, standIn: false), Self.entry(10, x: 1324, standIn: true)]
+        #expect(ItemEnumerator.echoedStandIns(walk).isEmpty)
+    }
 }

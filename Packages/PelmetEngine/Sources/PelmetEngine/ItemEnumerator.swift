@@ -53,9 +53,9 @@ public actor ItemEnumerator {
             noteEmpty("agent tree unreadable (AXError \(error.rawValue))")
             return []
         }
-        var byID: [ItemID: RawItem] = [:]
-        var order: [ItemID] = []
-        var copies: [ItemID: [CGRect]] = [:]
+        // Every bar's groups first: a stand-in is weighed against the real
+        // buttons of the whole walk (`echoedStandIns`).
+        var listed: [(item: RawItem, standIn: Bool)] = []
         // An app's extras bar is the same under every group of it, on every
         // display: read once per walk.
         var extrasByPID: [pid_t: StatusExtras] = [:]
@@ -64,12 +64,14 @@ public actor ItemEnumerator {
             guard let groups = copyAttribute(window, kAXChildrenAttribute) as? [AXUIElement] else {
                 continue
             }
-            var described: [RawItem?] = []
+            var described: [(item: RawItem, standIn: Bool)?] = []
             var standIns: [pid_t: [(slot: Int, group: StandIn)]] = [:]
             for group in groups {
                 switch describeGroup(group, extras: &extrasByPID) {
                 case .item(let item):
-                    described.append(item)
+                    described.append((item, false))
+                case .namedStandIn(let item):
+                    described.append((item, true))
                 case .standIn(let standIn):
                     standIns[standIn.pid, default: []].append((described.count, standIn))
                     described.append(nil)
@@ -94,7 +96,7 @@ public actor ItemEnumerator {
                 )
                 for (entry, title) in zip(groupsOfApp, titles) {
                     guard let title else { continue }
-                    described[entry.slot] = entry.group.item(titled: title)
+                    described[entry.slot] = (entry.group.item(titled: title), true)
                 }
                 let unnamed = titles.filter { $0 == nil }.count
                 let unread = extras.naming == .unread
@@ -105,25 +107,34 @@ public actor ItemEnumerator {
                         + (!unread && unnamed == groupsOfApp.count && groupsOfApp.count == extras.items.count ? ", places or width gaps disagree" : ""),
                     pid: nil)
             }
-            for case let item? in described {
-                copies[item.id, default: []].append(item.frame)
-                if let existing = byID[item.id] {
-                    // The same item appears once per display. Prefer the
-                    // main-display occurrence so every frame lives in one
-                    // coordinate space — boundary comparisons break across
-                    // mixed display spaces. The band test alone is not
-                    // enough: a display parked beside the main one, tops
-                    // aligned, puts its bar at y ≈ 0 too, and its copies
-                    // can come first in the walk (#27: every system item
-                    // read past the main display's right edge, so the
-                    // clock relay and the adopt pass measured nothing).
-                    if !isMainDisplayFrame(existing.frame), isMainDisplayFrame(item.frame) {
-                        byID[item.id] = item
-                    }
-                } else {
+            listed.append(contentsOf: described.compactMap { $0 })
+        }
+        let echoes = Self.echoedStandIns(listed.map { (pid: $0.item.pid, frame: $0.item.frame, standIn: $0.standIn) })
+        for index in echoes.sorted() {
+            logOnce("enumerate: stand-in \(listed[index].item.id.rawValue) sits on its app's real button — one icon, the button's name stands", pid: nil)
+        }
+        var byID: [ItemID: RawItem] = [:]
+        var order: [ItemID] = []
+        var copies: [ItemID: [CGRect]] = [:]
+        for (index, entry) in listed.enumerated() where !echoes.contains(index) {
+            let item = entry.item
+            copies[item.id, default: []].append(item.frame)
+            if let existing = byID[item.id] {
+                // The same item appears once per display. Prefer the
+                // main-display occurrence so every frame lives in one
+                // coordinate space — boundary comparisons break across
+                // mixed display spaces. The band test alone is not
+                // enough: a display parked beside the main one, tops
+                // aligned, puts its bar at y ≈ 0 too, and its copies
+                // can come first in the walk (#27: every system item
+                // read past the main display's right edge, so the
+                // clock relay and the adopt pass measured nothing).
+                if !isMainDisplayFrame(existing.frame), isMainDisplayFrame(item.frame) {
                     byID[item.id] = item
-                    order.append(item.id)
                 }
+            } else {
+                byID[item.id] = item
+                order.append(item.id)
             }
         }
         let items = order.compactMap { byID[$0] }
@@ -178,7 +189,36 @@ public actor ItemEnumerator {
     /// app's other groups on the same bar can name (`StandInMatch`).
     private enum Described {
         case item(RawItem)
+        /// A stand-in its app's extras bar names on its own.
+        case namedStandIn(RawItem)
         case standIn(StandIn)
+    }
+
+    /// The stand-ins of a walk that are a second listing of an icon the walk
+    /// also read as its app's real button: same app, same place on the bar.
+    /// The agent lists both on one display (two bars over each other), and
+    /// the two take different names whenever the app's extras bar gives the
+    /// stand-in another title than the button carries (Status Trio's button
+    /// against `Item-0`, the input menu's `Canadian` against `Item-0`). Two
+    /// ids at one x is how the icons behind the « read
+    /// (`PlacementGeometry.overflowTrapped`): an icon in plain sight sat in
+    /// "Didn't fit" for hours, grouping waited on a bar that "overflows" and
+    /// the chevron's drawing on a « it was never behind (live log,
+    /// 2026-11-10). The button names the icon; the stand-in is dropped.
+    /// Two icons of one app behind the « are two buttons, or two stand-ins
+    /// on another display's bar: neither is touched.
+    static func echoedStandIns(_ entries: [(pid: pid_t, frame: CGRect, standIn: Bool)]) -> Set<Int> {
+        let tolerance: CGFloat = 2
+        let buttons = entries.filter { !$0.standIn }
+        return Set(entries.indices.filter { index in
+            let entry = entries[index]
+            return entry.standIn && buttons.contains { button in
+                button.pid == entry.pid
+                    && abs(button.frame.minX - entry.frame.minX) <= tolerance
+                    && abs(button.frame.maxX - entry.frame.maxX) <= tolerance
+                    && abs(button.frame.midY - entry.frame.midY) <= tolerance
+            }
+        })
     }
 
     /// A stand-in group its app's extras bar does not name on its own.
@@ -221,7 +261,7 @@ public actor ItemEnumerator {
                 cache[appPID] = extras
                 let standIn = StandIn(frame: frame, appName: appName, host: host, pid: appPID)
                 guard let name = extras.name else { return .standIn(standIn) }
-                return .item(standIn.item(titled: name))
+                return .namedStandIn(standIn.item(titled: name))
             case "AXGroup":
                 // System item: AXGroup wrapping an AXMenuBarItem.
                 for leaf in children(of: child) where role(of: leaf) == "AXMenuBarItem" {
