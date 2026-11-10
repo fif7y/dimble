@@ -11,7 +11,7 @@ packages:
     path: Packages/PelmetEngine
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
-    from: 2.9.0
+    from: 2.10.1
 schemes:
   Pelmet:
     build:
