@@ -75,31 +75,48 @@ final class FocusStatus {
 
     // MARK: Boot
 
-    /// The last transition on record. An hour covers a mode switched
-    /// moments before a relaunch; a day catches the ones that outlive it
-    /// (a Sleep schedule, a Do Not Disturb left on). Nothing in a day
-    /// reads as off — Focus is off far more often than not — unless a
-    /// snapshot in it still holds an assertion: a Focus on for days (the
-    /// reboot in #70 logged snapshots only) is named a week back.
+    /// What was on when Pelmet started, from the log (`FocusLogParser.bootRead`
+    /// weighs the lines). An hour covers a mode switched moments before a
+    /// relaunch; a day catches the ones that outlive it (a Sleep schedule, a
+    /// Do Not Disturb left on). A boot into a Focus that was already on
+    /// writes no state update at all, so only the week's replay can name it
+    /// — the reboot in #70 and the 09:00 schedule in #92 both logged held
+    /// snapshots and nothing else.
     private func recover() {
         let seen = streamed
         Task.detached(priority: .utility) { [weak self] in
-            var found: String?
-            var held = false
-            for window in ["1h", "24h", "7d"] where found == nil {
-                if window == "7d", !held { break }
+            var read = FocusBootRead.nothing
+            search: for window in ["1h", "24h", "7d"] {
                 let messages = Self.run(["show", "--last", window, "--style", "ndjson", "--predicate", Self.predicate])
                     .compactMap(Self.message(in:))
-                found = messages.last(where: Self.isDecisive)
-                held = messages.contains { $0.hasPrefix(FocusLogParser.snapshotPrefix) }
+                read = FocusLogParser.bootRead(messages)
+                switch read {
+                case .settled: break search
+                // A Focus is on and this window never named it: read back.
+                case .unnamed: continue
+                // Not a line in a day: a week's replay costs more than it
+                // can find, and nothing holds an assertion to go looking for.
+                case .nothing where window != "1h": break search
+                case .nothing: continue
+                }
             }
-            let mode = found.flatMap(FocusLogParser.activeMode(in:))
             await MainActor.run { [weak self] in
                 guard let self, !self.stopped else { return }
                 // A transition the stream caught while `log show` ran is newer.
                 guard self.streamed == seen else { return }
-                PelmetLog.log("focus: boot \(mode.map { "\($0.name) (\($0.symbol))" } ?? "off")\(found == nil ? ", no transition on record" : "")")
-                self.active = mode
+                switch read {
+                case .settled(let mode):
+                    PelmetLog.log("focus: boot \(mode.map { "\($0.name) (\($0.symbol))" } ?? "off")")
+                    self.active = mode
+                case .unnamed:
+                    // A week of snapshots holding an assertion no update ever
+                    // named. Nothing to draw, but the log says why.
+                    PelmetLog.log("focus: boot on but unnamed — no state update in a week")
+                    self.active = nil
+                case .nothing:
+                    PelmetLog.log("focus: boot off, no transition on record")
+                    self.active = nil
+                }
             }
         }
     }
@@ -119,7 +136,7 @@ final class FocusStatus {
             let chunk = handle.availableData
             guard !chunk.isEmpty else { handle.readabilityHandler = nil; return }
             for text in lines.split(appending: chunk) {
-                guard let message = Self.message(in: text), Self.isDecisive(message) else { continue }
+                guard let message = Self.message(in: text), FocusLogParser.isDecisive(message) else { continue }
                 let mode = FocusLogParser.activeMode(in: message)
                 Task { @MainActor [weak self] in
                     guard let self, !self.stopped else { return }
@@ -167,12 +184,6 @@ final class FocusStatus {
     }
 
     // MARK: Plumbing
-
-    /// A state update, or a snapshot that says no Focus is on. A snapshot
-    /// still naming an assertion leaves the mode to the state update beside it.
-    nonisolated private static func isDecisive(_ message: String) -> Bool {
-        !message.hasPrefix(FocusLogParser.snapshotPrefix) || FocusLogParser.snapshotSaysOff(message)
-    }
 
     /// The `eventMessage` of one ndjson line; nil for the header line the
     /// stream prints first, the trailing count `log show` appends, and

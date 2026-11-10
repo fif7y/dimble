@@ -50,4 +50,66 @@ struct FocusLogParserTests {
         let cut = String(Self.on.prefix(upTo: Self.on.range(of: "; activeModeIdentifier:")!.lowerBound))
         #expect(FocusLogParser.activeMode(in: cut)?.identifier == "com.apple.donotdisturb.mode.default")
     }
+
+    // MARK: The boot read (#92)
+    //
+    // Real lines from Gab's 2026-11-05 boot into an already-active Sleep
+    // schedule: donotdisturbd wrote three held snapshots at daemon start and
+    // no state update at all. The first update came at 00:00:15, when the
+    // schedule rolled to a new assertion.
+
+    static let sleep = "Did receive state update, will handle; stateUpdate=<DNDStateUpdate: 0x7a7bbce3d0; reason: automation; source: cloud; options: <none>; state: <DNDState: 0x7a79338080; suppressionState: while UI locked; startDate: 2026-11-06 05:00:02 +0000; userVisibleTransitionDate: 2026-11-06 12:00:00 +0000; userVisibleTransitionLifetimeType: none; activeModeConfiguration: <DNDMutableModeConfiguration: 0x7a7b0fff00; mode: <DNDMode: 0x7a7c0a3750; name: Sleep; modeIdentifier: com.apple.sleep.sleep-mode; symbolImageName: bed.double.fill; tintColorName: systemIndigoColor; symbolDescriptor: (null); semanticType: 1; visibility: 0; identifier: 8FDC4FE2-BE0A-43E8-A498-A5F1B45C20AF; isPlaceHolder: NO>; impactsAvailability: disabled; dimsLockScreen: enabled>; activeModeIdentifier: com.apple.sleep.sleep-mode>; previousState: <DNDState: 0x7a793a9bc0; suppressionState: while UI locked; startDate: 2026-11-06 04:30:00 +0000; userVisibleTransitionDate: 2026-11-06 12:00:00 +0000; userVisibleTransitionLifetimeType: none; activeModeConfiguration: <DNDMutableModeConfiguration: 0x7a7c9df"
+    static let heldSnapshot = "Calculate DND state for snapshot: activeAssertionUUIDs=(\n    \"9266B307-4D53-4C7C-B812-D6F1F6A248CE\"\n)"
+
+    static let doNotDisturb = FocusMode(
+        identifier: "com.apple.donotdisturb.mode.default",
+        name: "Do Not Disturb",
+        symbol: "moon.fill"
+    )
+
+    /// #92: the Mac starts at 09:01 into a 09:00 Do Not Disturb schedule.
+    /// The newest state update in the hour is the one from before the
+    /// shutdown, and it says off — the held snapshots the boot wrote after
+    /// it are what say a Focus is on.
+    @Test func aBootIntoAScheduledFocusTakesTheModeFromHistory() {
+        let window = [Self.on, Self.off, Self.heldSnapshot, Self.heldSnapshot]
+        #expect(FocusLogParser.bootRead(window) == .settled(Self.doNotDisturb))
+    }
+
+    /// The boot's own hour, on its own: a Focus is on, nothing names it, so
+    /// the caller reads further back.
+    @Test func heldSnapshotsAloneAreUnnamed() {
+        #expect(FocusLogParser.bootRead([Self.heldSnapshot, Self.heldSnapshot, Self.heldSnapshot]) == .unnamed)
+    }
+
+    /// The wider window around that same boot, which does name it.
+    @Test func theWiderWindowNamesTheHeldFocus() {
+        let window = [Self.sleep, Self.heldSnapshot, Self.heldSnapshot, Self.heldSnapshot]
+        #expect(FocusLogParser.bootRead(window) == .settled(FocusMode(
+            identifier: "com.apple.sleep.sleep-mode",
+            name: "Sleep",
+            symbol: "bed.double.fill"
+        )))
+    }
+
+    /// Turning a Focus off writes the update after the last held snapshot,
+    /// so the update stays in charge — the snapshot must not revive it.
+    @Test func aHeldSnapshotOlderThanTheUpdateDoesNotRevive() {
+        #expect(FocusLogParser.bootRead([Self.on, Self.heldSnapshot, Self.off]) == .settled(nil))
+    }
+
+    /// Turning one on writes a held snapshot right after the update; the
+    /// answer is the mode either way.
+    @Test func turningAFocusOnReadsItThoughASnapshotFollows() {
+        #expect(FocusLogParser.bootRead([Self.off, Self.on, Self.heldSnapshot]) == .settled(Self.doNotDisturb))
+    }
+
+    /// An empty snapshot is decisive on its own (#70).
+    @Test func anEmptySnapshotAfterAHeldOneReadsOff() {
+        #expect(FocusLogParser.bootRead([Self.on, Self.heldSnapshot, Self.snapshotOff]) == .settled(nil))
+    }
+
+    @Test func noLinesAtAllIsNothingOnRecord() {
+        #expect(FocusLogParser.bootRead([]) == .nothing)
+    }
 }
