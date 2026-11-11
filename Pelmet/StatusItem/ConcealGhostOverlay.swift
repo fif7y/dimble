@@ -874,22 +874,62 @@ final class ConcealGhostOverlay {
     /// indicator gone, the « back at its resting place) and must show bar,
     /// not those. Pixel-exact left of `x`: drawn in the picture's own colour
     /// space, no conversion.
+    ///
+    /// The column it repeats has to BE background. `x` comes from a read of
+    /// the live bar taken before the shutter, and the capture indicator
+    /// lights during the capture and slides the cluster at the bar's right
+    /// end left (chevron 1599 → 1569, measured 2026-11-10) — so by the time
+    /// the picture exists, that column can sit inside macOS's own pill.
+    /// Repeated, the pill's black then runs to the picture's right edge and
+    /// shows past the pill's own mirror as a flat tail, cut square by the
+    /// cover's edge. So the column is checked and walked left off any ink.
     static func smeared(_ snap: BarSnapshot, from x: CGFloat) -> BarSnapshot {
         let w = snap.image.width, h = snap.image.height
         let scale = CGFloat(w) / snap.windowFrame.width
         let x0 = Int(((x - snap.windowFrame.minX) * scale).rounded(.down))
-        guard x0 > 1, x0 < w,
-              let ctx = CGContext(
+        guard x0 > 1, x0 < w else { return snap }
+        let source = backgroundColumn(in: snap.image, at: x0 - 1, limit: Int(24 * scale))
+        if source != x0 - 1 {
+            PelmetLog.log("ghost: smear column \(x0 - 1 - source)px further left — the one at the edge held ink, not bar")
+        }
+        guard let ctx = CGContext(
                 data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                 space: snap.image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
                 bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
-              let column = snap.image.cropping(to: CGRect(x: x0 - 1, y: 0, width: 1, height: h))
+              let column = snap.image.cropping(to: CGRect(x: source, y: 0, width: 1, height: h))
         else { return snap }
         ctx.draw(snap.image, in: CGRect(x: 0, y: 0, width: w, height: h))
         ctx.interpolationQuality = .none
         ctx.draw(column, in: CGRect(x: x0, y: 0, width: w - x0, height: h))
         guard let out = ctx.makeImage() else { return snap }
         return BarSnapshot(image: out, windowFrame: snap.windowFrame, takenAt: snap.takenAt)
+    }
+
+    /// The nearest column at or left of `x` that is bar background, within
+    /// `limit` pixels. The bar's top rows are background wherever a cover
+    /// reaches — a pill's capsule is inset a few points from the bar's top
+    /// edge, an icon more — so a column whose middle departs from its own
+    /// top holds ink. With nothing clean in reach `x` stands and the smear
+    /// repeats what it always did, which is the old behaviour, not a worse
+    /// one. Only the column the smear COPIES moves; where it starts does not,
+    /// so this never erases a point more of the picture.
+    private static func backgroundColumn(in image: CGImage, at x: Int, limit: Int) -> Int {
+        let w = image.width, h = image.height
+        guard h >= 8, x >= 0, x < w, let a = rgba(image, width: w, height: h) else { return x }
+        func luma(_ cx: Int, _ cy: Int) -> Int {
+            let p = a.pointer + cy * a.stride + cx * 4
+            return (Int(p[2]) * 299 + Int(p[1]) * 587 + Int(p[0]) * 114) / 1000
+        }
+        // The pill's black reads ~30 below the bar under it; a wallpaper's
+        // own gradient across 40pt of bar reads a few (measured 2026-11-10).
+        func isBackground(_ cx: Int) -> Bool {
+            let top = (luma(cx, 0) + luma(cx, 1) + luma(cx, 2)) / 3
+            for cy in (h / 4)..<(h * 3 / 4) where abs(luma(cx, cy) - top) > 24 { return false }
+            return true
+        }
+        var cx = x, walked = 0
+        while cx > 0, walked < limit, !isBackground(cx) { cx -= 1; walked += 1 }
+        return isBackground(cx) ? cx : x
     }
 
     /// Capture now and float immediately. Call `fadeOut()`/`dismiss()` once
