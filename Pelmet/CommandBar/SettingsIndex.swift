@@ -88,6 +88,8 @@ enum SettingsIndex {
                   ["fold", "always hidden", "panel"]),
             panel("panelFold", String(localized: "Opens from"),
                   ["always hidden fold", "fold", "tile", "chip", "count", "handle", "grabber", "always hidden", "panel"]),
+            panel("panelSettingsButton", String(localized: "Settings button"),
+                  ["cog", "gear", "settings", "preferences", "shortcut", "panel"]),
 
             search("searchHotkey", String(localized: "Search the menu bar"),
                    ["command bar", "find", "shortcut", "hotkey"]),

@@ -113,6 +113,10 @@ struct PanelContent {
     /// A tile drag makes room as it goes (and a moment after it ends): tiles
     /// that change place ease there instead of jumping.
     var animatesTiles = false
+    /// The cog under the tiles that opens Settings (#95). Settings › Panel
+    /// turns it on; it is part of the body, so the measuring pass counts its
+    /// height like any other row.
+    var showsSettingsButton = false
     /// Nothing is hidden, or nothing matches: the panel says so instead of
     /// showing nothing.
     var isEmpty: Bool { blocks.allSatisfy { $0.count == 0 } }
@@ -130,6 +134,8 @@ struct PanelView: View {
     let content: PanelContent
     let onPress: (PanelTile) -> Void
     let onFold: () -> Void
+    /// The cog's action, when `content.showsSettingsButton` draws one.
+    var onSettings: () -> Void = {}
     var tileMenu: (PanelTile) -> [PanelMenuRow] = { _ in [] }
     var panelMenu: () -> [PanelMenuRow] = { [] }
     /// The left edge sets the columns: dragged (the pointer's x in the
@@ -162,6 +168,13 @@ struct PanelView: View {
             // The padding scrolls with the tiles: they run to the glass's
             // edge, not to a line inside it.
             scrolling(tiles.padding(content.query.isEmpty ? .all : [.horizontal, .bottom], padding))
+            // Under the scroll view, so it stays put while the tiles move,
+            // and inside the VStack, so it is never over a tile. The gap
+            // above it is the tiles' own bottom padding.
+            if content.showsSettingsButton, !content.isEmpty {
+                settingsCog
+                    .padding([.horizontal, .bottom], padding)
+            }
         }
         .fixedSize()
         .overlay(alignment: .leading) {
@@ -346,6 +359,24 @@ struct PanelView: View {
         .accessibilityValue(Text(block.count, format: .number))
         .frame(width: content.width)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(PanelHost.space)) } action: { onFrame(.fold, $0) }
+    }
+
+    /// The cog in the bottom-right corner (#95). Borderless like every other
+    /// control in the panel: the glyph alone at rest, a well only under the
+    /// pointer. It sits at the trailing edge because the VStack is trailing
+    /// and the tiles' right edge is the one the eye follows down.
+    private var settingsCog: some View {
+        Button(action: onSettings) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(ink.tertiary)
+                .frame(width: 20, height: 20)
+                .contentShape(Circle())
+        }
+        .buttonStyle(FoldFillStyle(ink: ink, shape: Circle(), resting: .clear))
+        .focusEffectDisabled()
+        .help(Text("Dimble Settings"))
+        .accessibilityLabel(Text("Dimble Settings"))
     }
 
     /// The handle fold: a grabber on the bottom edge while folded. It stays

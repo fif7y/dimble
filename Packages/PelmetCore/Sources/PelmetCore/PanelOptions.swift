@@ -47,6 +47,11 @@ public struct PanelOptions: Codable, Equatable, Sendable {
     /// Where the fold was left; read only for `.asLeft`.
     public var alwaysHiddenOpen: Bool = false
     public var alwaysHiddenFold: AlwaysHiddenFold = .tile
+    /// A cog under the tiles, in the panel's bottom-right corner, that opens
+    /// Settings (#95). Off by default: the panel's own right-click menu
+    /// already carries the row, and a control drawn at rest costs a line of
+    /// the panel's height whether or not anyone reaches for it.
+    public var showsSettingsButton: Bool = false
 
     /// What Auto means: the widest a row grows. The grid is never wider than
     /// its icons need, so a panel with three icons is three columns.
@@ -66,7 +71,7 @@ public struct PanelOptions: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case showsNames, columnsWithNames, columnsCompact, separatorsBreakRows, alwaysHidden, alwaysHiddenOpen
-        case alwaysHiddenFold, showsClosedApps
+        case alwaysHiddenFold, showsClosedApps, showsSettingsButton
     }
 
     public init(from decoder: Decoder) throws {
@@ -87,5 +92,6 @@ public struct PanelOptions: Codable, Equatable, Sendable {
         alwaysHiddenOpen = c.field(Bool.self, .alwaysHiddenOpen, defaults.alwaysHiddenOpen)
         alwaysHiddenFold = c.field(AlwaysHiddenFold.self, .alwaysHiddenFold, defaults.alwaysHiddenFold)
         showsClosedApps = c.field(Bool.self, .showsClosedApps, defaults.showsClosedApps)
+        showsSettingsButton = c.field(Bool.self, .showsSettingsButton, defaults.showsSettingsButton)
     }
 }

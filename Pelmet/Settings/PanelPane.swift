@@ -142,6 +142,13 @@ struct PanelPane: View {
                     : "Keeps the groups you made in the menu bar together, one row each.",
                 isOn: binding(\.separatorsBreakRows))
                 .settingAnchor("panelGroups")
+            if inUse.contains(.panel) {
+                SettingToggleRow(
+                    title: "Settings button",
+                    caption: "A cog under the icons, bottom right.",
+                    isOn: binding(\.showsSettingsButton))
+                    .settingAnchor("panelSettingsButton")
+            }
         }
     }
 

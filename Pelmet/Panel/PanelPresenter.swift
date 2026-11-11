@@ -938,6 +938,12 @@ final class PanelPresenter: RevealPresenter {
                 self.press(tile)
             },
             onFold: { [weak self] in self?.toggleFold() },
+            // Same two steps as the menu's own row: the panel goes away
+            // before Settings takes the focus.
+            onSettings: { [weak self] in
+                self?.appState?.concealNow()
+                self?.appState?.openSettings(tab: .panel)
+            },
             tileMenu: { [weak self] tile in self?.menu(for: tile) ?? [] },
             panelMenu: { [weak self] in
                 self?.panelMenu(shown: self?.lastContent, onPanel: true) { [weak self] in self?.toggleFold() } ?? []
@@ -1119,6 +1125,9 @@ final class PanelPresenter: RevealPresenter {
         content.showsAlwaysHidden = alwaysShown
         content.motion = Self.foldStyle(appState.settings.revealAnimation)
         content.fold = options.alwaysHiddenFold
+        // Panel only (#95): the row is a strip along the bar, with no line
+        // under the tiles for a cog to sit on.
+        content.showsSettingsButton = options.showsSettingsButton && layout == .panel
         // The row's tiles are as wide as their pictures at bar size, so a
         // battery's "80%" isn't shrunk into a one-icon cell (#102). The
         // panel's tiles are one size, whatever they hold.
