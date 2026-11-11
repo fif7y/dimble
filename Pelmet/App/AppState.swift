@@ -1632,6 +1632,14 @@ final class AppState {
     }
 
     func rehideTriggered(_ trigger: RehideTrigger) {
+        // 显示全部的原生菜单栏只收回临时展开的始终隐藏图标，避免常显图标一起消失。
+        if trigger == .delayExpired, rehide.policy.autoRehide,
+           !transitions.anchored, pointerDisplayBehavior == .alwaysShowAll,
+           revealPresenter === barPresenter,
+           case .revealed(let sections, _) = rehide.state, sections.contains(.alwaysHidden) {
+            dispatch(rehide.handle(.narrowRequested([.hidden], .displayPolicy)))
+            return
+        }
         PelmetLog.log("rehideTrigger(\(trigger)) state=\(rehide.state)")
         dispatch(rehide.handle(.trigger(trigger)))
     }
@@ -4010,7 +4018,9 @@ final class AppState {
                 // pointer has been on it.
                 let panelHolds = self.panelShowsReveal && self.panelPresenter.holdsReveal
                 if self.editorHoldsBar
-                    || (!self.transitions.anchored && self.pointerDisplayBehavior == .alwaysShowAll)
+                    || RevealRouting.displayPolicyHoldsReveal(behavior: self.pointerDisplayBehavior,
+                        anchored: self.transitions.anchored, panelShowsReveal: self.panelShowsReveal,
+                        sections: self.currentRevealedSections)
                     || self.applying
                     || panelHolds
                     || bandReason != nil {

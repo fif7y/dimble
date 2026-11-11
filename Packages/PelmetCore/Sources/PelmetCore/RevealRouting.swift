@@ -43,6 +43,11 @@ public enum RevealRouting {
             && (reason == .click || reason == .doubleClick || reason == .statusItem)
     }
 
+    /// 显示全部只保持原生菜单栏展开，临时面板仍须在鼠标离开后自动收起。
+    public static func displayPolicyHoldsReveal(behavior: DisplayBehavior, anchored: Bool, panelShowsReveal: Bool, sections: Set<Section>) -> Bool {
+        behavior == .alwaysShowAll && !anchored && !panelShowsReveal && !sections.contains(.alwaysHidden)
+    }
+
     public enum Destination: Equatable, Sendable {
         case bar
         case panel

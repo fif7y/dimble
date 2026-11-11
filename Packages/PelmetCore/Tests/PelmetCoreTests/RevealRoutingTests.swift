@@ -3,6 +3,41 @@ import Testing
 @testable import PelmetCore
 
 @Suite struct RevealRoutingTests {
+    @Test func nativeShowAllBarCanRehideAlwaysHiddenWithoutConcealingHidden() {
+        var machine = RehideStateMachine(policy: RehidePolicy(autoRehide: true, delay: 1))
+        _ = machine.handle(.revealRequested([.hidden, .alwaysHidden], .doubleClick))
+        _ = machine.handle(.transitionSettled)
+        #expect(!RevealRouting.displayPolicyHoldsReveal(behavior: .alwaysShowAll,
+            anchored: false, panelShowsReveal: false, sections: [.hidden, .alwaysHidden]))
+        #expect(machine.handle(.narrowRequested([.hidden], .displayPolicy)).contains(.narrow([.hidden])))
+        _ = machine.handle(.transitionSettled)
+        #expect(machine.state == .revealed(sections: [.hidden], reason: .displayPolicy))
+        #expect(RevealRouting.displayPolicyHoldsReveal(behavior: .alwaysShowAll,
+            anchored: false, panelShowsReveal: false, sections: [.hidden]))
+    }
+
+    @Test func showAllPolicyKeepsOnlyTheUnanchoredNativeBarOpen() {
+        for behavior in [DisplayBehavior.alwaysShowAll, .collapse] {
+            for anchored in [false, true] {
+                #expect(!RevealRouting.displayPolicyHoldsReveal(behavior: behavior,
+                    anchored: anchored, panelShowsReveal: true, sections: [.hidden, .alwaysHidden]))
+                #expect(RevealRouting.displayPolicyHoldsReveal(behavior: behavior,
+                    anchored: anchored, panelShowsReveal: false, sections: [.hidden]) == (behavior == .alwaysShowAll && !anchored))
+            }
+        }
+    }
+
+    @Test func alwaysHiddenPanelCanConcealAfterItsDelayOnShowAllDisplay() {
+        var machine = RehideStateMachine(policy: RehidePolicy(autoRehide: true, delay: 1))
+        let now = Date()
+        _ = machine.handle(.revealRequested([.hidden, .alwaysHidden], .doubleClick), now: now)
+        #expect(machine.handle(.transitionSettled, now: now).contains(.armTimer(now.addingTimeInterval(1))))
+        let held = RevealRouting.displayPolicyHoldsReveal(behavior: .alwaysShowAll,
+            anchored: false, panelShowsReveal: true, sections: [.hidden, .alwaysHidden])
+        let effects = held ? [] : machine.handle(.trigger(.delayExpired), now: now.addingTimeInterval(1))
+        #expect(effects.contains(.conceal))
+    }
+
     @Test func explicitAlwaysHiddenRequestsBypassShowAllClickSuppression() {
         // 空白处双击用 doubleClick，箭头双击及 Option 点击用 statusItem。
         for reason in [RevealReason.doubleClick, .statusItem] {
