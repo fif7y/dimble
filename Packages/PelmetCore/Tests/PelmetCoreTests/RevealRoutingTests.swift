@@ -3,15 +3,27 @@ import Testing
 @testable import PelmetCore
 
 @Suite struct RevealRoutingTests {
+    @Test func explicitAlwaysHiddenRequestsBypassShowAllClickSuppression() {
+        // 空白处双击用 doubleClick，箭头双击及 Option 点击用 statusItem。
+        for reason in [RevealReason.doubleClick, .statusItem] {
+            for target in [RevealTarget.panel, .row] {
+                #expect(!RevealRouting.suppressesPanelClick(reason, sections: [.hidden, .alwaysHidden],
+                    behavior: .alwaysShowAll, target: target))
+                #expect(RevealRouting.suppressesPanelClick(reason, sections: [.hidden],
+                    behavior: .alwaysShowAll, target: target))
+            }
+        }
+    }
+
     @Test func showAllDisplaysIgnorePanelClicksOnly() {
         let reasons: [RevealReason] = [.click, .doubleClick, .statusItem, .hover,
                                       .hotkey, .barDrag, .displayPolicy, .settingsPreview, .itemInBar]
         for target in RevealTarget.allCases {
             for reason in reasons {
                 let isClick = reason == .click || reason == .doubleClick || reason == .statusItem
-                #expect(RevealRouting.suppressesPanelClick(reason, behavior: .alwaysShowAll, target: target)
+                #expect(RevealRouting.suppressesPanelClick(reason, sections: [.hidden], behavior: .alwaysShowAll, target: target)
                         == (target != .menuBar && isClick))
-                #expect(!RevealRouting.suppressesPanelClick(reason, behavior: .collapse, target: target))
+                #expect(!RevealRouting.suppressesPanelClick(reason, sections: [.hidden], behavior: .collapse, target: target))
             }
         }
     }
@@ -22,7 +34,7 @@ import Testing
         settings.displayOverrides["external"] = .alwaysShowAll
         settings.displayOverrides["builtin"] = .collapse
         func suppressed(_ uuid: String) -> Bool {
-            RevealRouting.suppressesPanelClick(.click,
+            RevealRouting.suppressesPanelClick(.click, sections: [.hidden],
                 behavior: settings.behavior(forDisplayUUID: uuid),
                 target: settings.revealTarget(forDisplayUUID: uuid))
         }

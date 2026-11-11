@@ -37,9 +37,9 @@ public enum RevealRouting {
         enabled && !isOpen && (reason == .click || reason == .doubleClick)
     }
 
-    /// 显示全部的屏幕不再响应点击弹窗；原生菜单栏展开和快捷键仍按原规则处理。
-    public static func suppressesPanelClick(_ reason: RevealReason, behavior: DisplayBehavior, target: RevealTarget) -> Bool {
-        behavior == .alwaysShowAll && target != .menuBar
+    /// 显示全部的屏幕屏蔽普通点击，但双击等明确请求始终隐藏图标的操作仍须生效。
+    public static func suppressesPanelClick(_ reason: RevealReason, sections: Set<Section>, behavior: DisplayBehavior, target: RevealTarget) -> Bool {
+        behavior == .alwaysShowAll && target != .menuBar && !sections.contains(.alwaysHidden)
             && (reason == .click || reason == .doubleClick || reason == .statusItem)
     }
 
