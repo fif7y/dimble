@@ -23,6 +23,13 @@ panel in Control Center. Media controls, Time Machine and Focus can sit in the
 bar only while active or all the time, the choice is beside each toggle. To
 turn any Pelmet item off from the bar, ⌘-drag it off.
 
+**Stage Manager is the one with no Pelmet twin.**
+Its menu bar icon is a Control Center control, and macOS takes every control
+off the bar while hiding is on, whatever Pelmet allows. Unlike the others it
+doesn't come back when Pelmet quits, so you have to add it again. Keep Stage
+Manager in Control Center instead and toggle it from there, where hiding can't
+reach it. Control Center → Edit Controls puts it in.
+
 **How does clicking the clock open Notification Center?**
 That's Pelmet working around macOS. While any icon is hidden, the system
 refuses the clock's click to open Notification Center (the same lockdown exam
