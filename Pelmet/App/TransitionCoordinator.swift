@@ -85,6 +85,10 @@ final class TransitionCoordinator {
     /// The cover was dropped for a changed backdrop and not retaken yet.
     private var revealCoverWanted = false
     private var precaptureInFlight = false
+    /// Whether the precapture in flight is the conceal's own — it waits for
+    /// the bar to go swap-quiet before it shoots, so a reveal cannot wait
+    /// for it (see `awaitCoverRetake`).
+    private var precaptureFollowsConceal = false
     /// Pictures of the last transition still on screen (cover lift, exit
     /// strip). See `awaitPreviousLift`.
     private var liftsInFlight = 0
@@ -305,6 +309,16 @@ final class TransitionCoordinator {
     }
 
     private func awaitCoverRetake(style: RevealAnimation) async {
+        // The conceal's own precapture waits half a second for the bar to go
+        // swap-quiet and another 300ms for the fade to clear before it even
+        // shoots — longer than the whole budget here. A reveal that arrives
+        // while it is in flight could only wait the budget out and still find
+        // it "not ready": half a second of dead bar under a pointer that is
+        // already back on it (#141). Leave it be and take the live capture.
+        if precaptureInFlight, precaptureFollowsConceal {
+            PelmetLog.log("cover: the conceal's picture is still settling — the reveal goes on without it")
+            return
+        }
         guard revealCoverSnapshot.isEmpty, precaptureInFlight || (revealCoverWanted && style != .smooth) else { return }
         if !precaptureInFlight {
             PelmetLog.log("cover: retaking at the reveal")
@@ -2089,6 +2103,7 @@ final class TransitionCoordinator {
         precaptureGeneration &+= 1
         let generation = precaptureGeneration
         precaptureInFlight = true
+        precaptureFollowsConceal = afterConceal
         precaptureTask = Task { @MainActor in
             // A replaced capture leaves the flag to its replacement.
             defer { if generation == precaptureGeneration { precaptureInFlight = false } }
