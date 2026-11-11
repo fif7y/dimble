@@ -1082,6 +1082,19 @@ final class ConcealGhostOverlay {
         }
     }
 
+    /// Every cover up, whatever raised it, for the length of a press. A
+    /// held picture carries the same catcher a live cover does, and
+    /// `unholdForPress` dismisses only the press display's own: the one
+    /// fading out, the other displays' and the strip all still take the
+    /// click, so the item never sees it (#142). Measured on 2026-11-11:
+    /// 7 of 9 presses that went through a held picture showed nothing,
+    /// against 0 of 11 on live mode's path, which already passes clicks.
+    static func everyCoverPassesClicks(_ through: Bool) {
+        for cover in registry.allObjects where !cover.finished {
+            cover.passClicks(through)
+        }
+    }
+
     // MARK: Live mode
 
     var windowNumber: Int { window.windowNumber }

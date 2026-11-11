@@ -75,11 +75,17 @@ final class ItemPress {
         let screenWidth: CGFloat
     }
 
+    /// The on-screen windows the oracles watch, by window number. Numbers,
+    /// not totals: another app's window leaving as the press's own arrives
+    /// keeps a total still, and the press read that as nothing shown and
+    /// put the item back under an open panel. Measured 2026-11-11, #142:
+    /// Control Center's panel was on screen from 10:21:46.150 to
+    /// 10:21:50.498 and the press logged "showed nothing" at 10:21:49.
     private nonisolated struct WindowCounts: Sendable {
         /// Elevated windows that are not Pelmet's (a menu, a popover).
-        var elevated = 0
+        var elevated: Set<Int> = []
         /// Windows of the item's own app.
-        var own = 0
+        var own: Set<Int> = []
     }
 
     private weak var appState: AppState?
@@ -270,6 +276,14 @@ final class ItemPress {
             defer { if unheld { transitions.reholdAfterPress() } }
             // Live mode's cover takes every click on the bar: this one goes through it.
             let passed = await appState.liveMirror.passClicksForPress()
+            // The held pictures carry the same catcher, and the one this
+            // press lifted is still fading while the others stay up, so a
+            // held bar ate the click and the item showed nothing (#142).
+            // Every cover passes clicks for the press. The window server
+            // commits the change a frame or two late, so a press that
+            // live mode has not already waited for waits here.
+            ConcealGhostOverlay.everyCoverPassesClicks(true)
+            if !passed { try? await Task.sleep(for: .milliseconds(40)) }
             let geometry = Self.geometry(at: frame)
             let before = await Self.counts(pid: target.pid, geometry: geometry)
             let wasFront = Self.isFrontmost(target.pid)
@@ -278,6 +292,7 @@ final class ItemPress {
                 button: button == .secondary ? .right : .left
             )
             if passed { appState.liveMirror.takeClicksAfterPress() }
+            ConcealGhostOverlay.everyCoverPassesClicks(false)
             let bar = aimDisplay.map {
                 clickedElsewhere ? ", on display \($0)'s bar" : ", on the main bar (display \($0)'s had no copy to click)"
             } ?? ""
@@ -399,8 +414,12 @@ final class ItemPress {
         while Date() < run.capped(cap) {
             let still: Bool
             switch sign {
-            case .window: still = await Self.counts(pid: pid, geometry: geometry).elevated > before.elevated
-            case .ownWindow: still = await Self.counts(pid: pid, geometry: geometry).own > before.own
+            case .window:
+                still = !(await Self.counts(pid: pid, geometry: geometry))
+                    .elevated.subtracting(before.elevated).isEmpty
+            case .ownWindow:
+                still = !(await Self.counts(pid: pid, geometry: geometry))
+                    .own.subtracting(before.own).isEmpty
             case .appInFront: still = Self.isFrontmost(pid)
             }
             if !still {
@@ -478,18 +497,18 @@ final class ItemPress {
 
     // MARK: - Oracles
 
-    /// Polls for an elevated window beyond `before`, a new window of the
-    /// item's own app, or that app coming to the front (a popover activates
-    /// it), within the menu wait. A yielded relay stops waiting after
-    /// `pressYieldWait`: the click is already out and the item must not be
-    /// put back under a menu that is still opening.
+    /// Polls for an elevated window that was not on screen in `before`, a
+    /// new window of the item's own app, or that app coming to the front (a
+    /// popover activates it), within the menu wait. A yielded relay stops
+    /// waiting after `pressYieldWait`: the click is already out and the
+    /// item must not be put back under a menu that is still opening.
     private func waitForSign(over before: WindowCounts, pid: pid_t, geometry: Geometry, frontCounts: Bool, run: Run) async -> Sign? {
         let showBy = Date().addingTimeInterval(AppTiming.pressMenuWait)
         while Date() < run.capped(showBy) {
             try? await Task.sleep(for: .milliseconds(30))
             let now = await Self.counts(pid: pid, geometry: geometry)
-            if now.elevated > before.elevated { return .window }
-            if now.own > before.own { return .ownWindow }
+            if !now.elevated.subtracting(before.elevated).isEmpty { return .window }
+            if !now.own.subtracting(before.own).isEmpty { return .ownWindow }
             if frontCounts, Self.isFrontmost(pid) { return .appInFront }
         }
         return nil
@@ -530,7 +549,7 @@ final class ItemPress {
     /// Own: every on-screen window of `pid` but a bar row, whatever its
     /// level or shape. A status item has no window of its own on macOS 27:
     /// anything taller than a bar row is a popover or panel, whatever level
-    /// it sits at, and a press that opens one raises the count by one.
+    /// it sits at, and a press that opens one adds its number.
     @concurrent
     private static func counts(pid: pid_t, geometry: Geometry) async -> WindowCounts {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
@@ -540,23 +559,24 @@ final class ItemPress {
         for info in list {
             guard let owner = info[kCGWindowOwnerPID as String] as? Int32,
                   let layer = info[kCGWindowLayer as String] as? Int,
+                  let number = info[kCGWindowNumber as String] as? Int,
                   let bounds = info[kCGWindowBounds as String] as? [String: CGFloat],
                   let y = bounds["Y"], let width = bounds["Width"], let height = bounds["Height"]
             else { continue }
-            if pid > 0, owner == pid, height > 40 { counts.own += 1 }
+            if pid > 0, owner == pid, height > 40 { counts.own.insert(number) }
             guard owner != me else { continue }
             // A system popover can sit at the bar's own level (layer 25,
             // 1131pt tall): the bar's level is excluded only at the bar's
             // height.
             if layer > 0, layer != 25 || height > 60 {
-                counts.elevated += 1
+                counts.elevated.insert(number)
             } else if layer == 0, height > 40, width < geometry.screenWidth * 0.6,
                       y >= geometry.barTop, y <= geometry.barTop + geometry.barBottom + 60 {
                 // A popover at the normal level: its top sits between the
                 // clicked bar's display top and 60pt below the bar (its
                 // bounds carry a margin), and it is nowhere near a document
                 // window's width.
-                counts.elevated += 1
+                counts.elevated.insert(number)
             }
         }
         return counts
