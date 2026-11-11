@@ -3,6 +3,37 @@ import Testing
 @testable import PelmetCore
 
 @Suite struct RevealRoutingTests {
+    @Test func showAllDisplaysIgnorePanelClicksOnly() {
+        let reasons: [RevealReason] = [.click, .doubleClick, .statusItem, .hover,
+                                      .hotkey, .barDrag, .displayPolicy, .settingsPreview, .itemInBar]
+        for target in RevealTarget.allCases {
+            for reason in reasons {
+                let isClick = reason == .click || reason == .doubleClick || reason == .statusItem
+                #expect(RevealRouting.suppressesPanelClick(reason, behavior: .alwaysShowAll, target: target)
+                        == (target != .menuBar && isClick))
+                #expect(!RevealRouting.suppressesPanelClick(reason, behavior: .collapse, target: target))
+            }
+        }
+    }
+
+    @Test func clickSuppressionFollowsTheDisplaysOwnBehaviorAndLayout() {
+        var settings = SettingsStore()
+        settings.hiddenIconsIn = .panel
+        settings.displayOverrides["external"] = .alwaysShowAll
+        settings.displayOverrides["builtin"] = .collapse
+        func suppressed(_ uuid: String) -> Bool {
+            RevealRouting.suppressesPanelClick(.click,
+                behavior: settings.behavior(forDisplayUUID: uuid),
+                target: settings.revealTarget(forDisplayUUID: uuid))
+        }
+        #expect(suppressed("external"))
+        #expect(!suppressed("builtin"))
+        settings.displayRevealTargets["external"] = .row
+        #expect(suppressed("external"))
+        settings.displayRevealTargets["external"] = .menuBar
+        #expect(!suppressed("external"))
+    }
+
     @Test func clickCenteringIsOptInAndNeverMovesAnOpenPanel() {
         let reasons: [RevealReason?] = [nil, .click, .doubleClick, .statusItem, .hover,
                                       .hotkey, .barDrag, .displayPolicy, .settingsPreview, .itemInBar]

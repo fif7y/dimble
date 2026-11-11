@@ -37,6 +37,12 @@ public enum RevealRouting {
         enabled && !isOpen && (reason == .click || reason == .doubleClick)
     }
 
+    /// 显示全部的屏幕不再响应点击弹窗；原生菜单栏展开和快捷键仍按原规则处理。
+    public static func suppressesPanelClick(_ reason: RevealReason, behavior: DisplayBehavior, target: RevealTarget) -> Bool {
+        behavior == .alwaysShowAll && target != .menuBar
+            && (reason == .click || reason == .doubleClick || reason == .statusItem)
+    }
+
     public enum Destination: Equatable, Sendable {
         case bar
         case panel

@@ -1120,12 +1120,18 @@ final class AppState {
 
     // MARK: - Intents (UI + monitors call these)
 
+    /// 在状态机及 Live Mirror 接手前检查鼠标所在屏幕，避免先隐藏图标再拒绝弹窗。
+    private func suppressesPanelClick(_ reason: RevealReason) -> Bool {
+        let uuid = NSScreen.underPointer?.displayUUIDString
+        return RevealRouting.suppressesPanelClick(reason,
+            behavior: settings.behavior(forDisplayUUID: uuid),
+            target: settings.revealTarget(forDisplayUUID: uuid))
+    }
+
     func toggle(reason: RevealReason, sections: Set<PelmetCore.Section> = [.hidden]) {
+        if suppressesPanelClick(reason) { return }
         if liveMirror.intercepts(reveal: reason, sections: sections, how: .toggle) { return }
-        // A chevron click on a display that shows all icons opens Always
-        // Hidden there, in that display's "Show hidden icons in" (#96). A plain toggle
-        // asked for nothing when anchored, and closed the icons that display
-        // shows when the pointer's display decided.
+        // 弹窗请求已在入口排除；原生菜单栏模式仍可通过箭头展开始终隐藏图标。
         if RevealRouting.clickWidensToAlwaysHidden(reason, sections: sections, behavior: pointerDisplayBehavior) {
             PelmetLog.log("toggle(\(reason)) on a display that shows all icons — Always Hidden too")
             toggleAll(reason: reason)
@@ -1177,6 +1183,7 @@ final class AppState {
     }
 
     func reveal(_ sections: Set<PelmetCore.Section>, reason: RevealReason) {
+        if suppressesPanelClick(reason) { return }
         if liveMirror.intercepts(reveal: reason, sections: sections, how: .reveal) { return }
         if anchoredShowAllAsksNothing(sections, reason) { return }
         PerfTrace.markTrigger("\(reason)")
@@ -1195,6 +1202,7 @@ final class AppState {
     /// once it is all out. A reveal that left Always Hidden in widens to
     /// include it instead of closing: the key asked for more, not less.
     func toggleAll(reason: RevealReason) {
+        if suppressesPanelClick(reason) { return }
         if liveMirror.intercepts(reveal: reason, sections: [.hidden, .alwaysHidden], how: .toggleAll) { return }
         let all: Set<PelmetCore.Section> = [.hidden, .alwaysHidden]
         // Off the anchor (no Screen Recording), a display that shows all
