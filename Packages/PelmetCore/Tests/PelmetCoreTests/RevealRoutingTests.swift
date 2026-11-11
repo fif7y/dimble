@@ -3,6 +3,46 @@ import Testing
 @testable import PelmetCore
 
 @Suite struct RevealRoutingTests {
+    @Test func emptyBarDoubleClickReplacesThePolicyBarWithConfiguredPanel() {
+        for target in [RevealTarget.panel, .row] {
+            var machine = RehideStateMachine(policy: RehidePolicy(autoRehide: true, delay: 1))
+            _ = machine.handle(.revealRequested([.hidden], .displayPolicy))
+            _ = machine.handle(.transitionSettled)
+            guard case .revealed(let current, let by) = machine.state else {
+                Issue.record("Expected the show-all policy baseline")
+                return
+            }
+            let all: Set<Section> = [.hidden, .alwaysHidden]
+            let replace = RevealRouting.replacesPolicyBarWithPanel(current: current, openedBy: by,
+                requested: all, reason: .doubleClick, target: target)
+            #expect(replace)
+            if replace { #expect(machine.handle(.concealRequested).contains(.conceal)) }
+            _ = machine.handle(.revealRequested(all, .doubleClick))
+            #expect(machine.handle(.transitionSettled).contains(.reveal(all)))
+            _ = machine.handle(.transitionSettled)
+            #expect(machine.state == .revealed(sections: all, reason: .doubleClick))
+            #expect(RevealRouting.destination(for: .doubleClick, target: target) == .panel)
+        }
+    }
+
+    @Test func onlyExplicitAlwaysHiddenPanelRequestsReplacePolicyBar() {
+        let all: Set<Section> = [.hidden, .alwaysHidden]
+        for reason in [RevealReason.doubleClick, .statusItem, .hotkey] {
+            #expect(RevealRouting.replacesPolicyBarWithPanel(current: [.hidden], openedBy: .displayPolicy,
+                requested: all, reason: reason, target: .row))
+        }
+        #expect(!RevealRouting.replacesPolicyBarWithPanel(current: [.hidden], openedBy: .displayPolicy,
+            requested: all, reason: .doubleClick, target: .menuBar))
+        #expect(!RevealRouting.replacesPolicyBarWithPanel(current: [.hidden], openedBy: .click,
+            requested: all, reason: .doubleClick, target: .row))
+        #expect(!RevealRouting.replacesPolicyBarWithPanel(current: all, openedBy: .displayPolicy,
+            requested: all, reason: .doubleClick, target: .row))
+        #expect(!RevealRouting.replacesPolicyBarWithPanel(current: [.hidden], openedBy: .displayPolicy,
+            requested: [.hidden], reason: .doubleClick, target: .row))
+        #expect(!RevealRouting.replacesPolicyBarWithPanel(current: [.hidden], openedBy: .displayPolicy,
+            requested: all, reason: .settingsPreview, target: .row))
+    }
+
     @Test func nativeShowAllBarCanRehideAlwaysHiddenWithoutConcealingHidden() {
         var machine = RehideStateMachine(policy: RehidePolicy(autoRehide: true, delay: 1))
         _ = machine.handle(.revealRequested([.hidden, .alwaysHidden], .doubleClick))

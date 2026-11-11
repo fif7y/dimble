@@ -1,5 +1,6 @@
 import AppKit
 import PelmetCore
+import PelmetEngine
 
 /// 只绘制组边界，不注册状态栏项目，避免影响用户排序或占用图标空间。
 @MainActor
@@ -7,11 +8,14 @@ final class SectionDividerOverlay {
     private var windows: [CGDirectDisplayID: NSPanel] = [:]
     private var frames: [CGDirectDisplayID: CGRect] = [:]
     private var visibilityTimer: Timer?
+    private var reported: [CGDirectDisplayID: String] = [:]
 
     func hide() {
+        if !frames.isEmpty { PelmetLog.log("divider: reveal ended or busy, hidden") }
         visibilityTimer?.invalidate()
         visibilityTimer = nil
         frames.removeAll()
+        reported.removeAll()
         for window in windows.values { window.orderOut(nil) }
     }
 
@@ -25,8 +29,16 @@ final class SectionDividerOverlay {
                 return (model.section(of: key), frame)
             }
             frames[id] = MenuBarGeometry.alwaysHiddenDivider(items: items)
+            if frames[id] == nil {
+                report(id, "no boundary (\(items.filter { $0.section == .alwaysHidden }.count) always-hidden, \(items.count) frames)")
+            }
         }
-        guard !frames.isEmpty else { hide(); return }
+        guard !frames.isEmpty else {
+            visibilityTimer?.invalidate()
+            visibilityTimer = nil
+            for window in windows.values { window.orderOut(nil) }
+            return
+        }
         draw()
         // 自动隐藏菜单栏和全屏切换不一定触发图标快照；仅在分割线启用期间检查窗口可见性。
         if visibilityTimer == nil {
@@ -44,8 +56,13 @@ final class SectionDividerOverlay {
             let cocoaFrame = NSRect(x: frame.minX, y: primaryTop - frame.maxY,
                                     width: frame.width, height: frame.height)
             guard let screen = NSScreen.screens.first(where: { $0.directDisplayID == id }),
-                  GlassPanel.drawnBarHeight(of: screen, fresh: true, in: onScreen) != nil,
-                  !ConcealGhostOverlay.barCover(over: cocoaFrame) else {
+                  GlassPanel.drawnBarHeight(of: screen, fresh: true, in: onScreen) != nil else {
+                report(id, "menu bar not visible")
+                windows[id]?.orderOut(nil)
+                continue
+            }
+            guard !ConcealGhostOverlay.barCover(over: cocoaFrame) else {
+                report(id, "bar covered")
                 windows[id]?.orderOut(nil)
                 continue
             }
@@ -68,7 +85,15 @@ final class SectionDividerOverlay {
             }
             window.setFrame(cocoaFrame, display: true)
             window.orderFrontRegardless()
+            report(id, "shown at \(Int(frame.minX)),\(Int(frame.minY))")
         }
+    }
+
+    /// 仅记录状态变化，区分缺少图标坐标、覆盖层遮挡和实际绘制，避免定时器刷日志。
+    private func report(_ display: CGDirectDisplayID, _ state: String) {
+        guard reported[display] != state else { return }
+        reported[display] = state
+        PelmetLog.log("divider: display \(display) \(state)")
     }
 
     private final class DividerView: NSView {

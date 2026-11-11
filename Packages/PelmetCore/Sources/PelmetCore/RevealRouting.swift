@@ -32,6 +32,14 @@ public enum RevealTarget: String, Codable, CaseIterable, Sendable {
 }
 
 public enum RevealRouting {
+    /// 常显策略展开的菜单栏只是基线；明确请求始终隐藏时仍须尊重弹窗设置。
+    public static func replacesPolicyBarWithPanel(current: Set<Section>, openedBy: RevealReason,
+                                                  requested: Set<Section>, reason: RevealReason,
+                                                  target: RevealTarget) -> Bool {
+        openedBy == .displayPolicy && !current.contains(.alwaysHidden)
+            && requested.contains(.alwaysHidden) && destination(for: reason, target: target) == .panel
+    }
+
     /// 只在关闭状态下的空白菜单栏点击取新锚点，避免已打开的面板在选图标时横移。
     public static func centersPanelOnClick(_ reason: RevealReason?, enabled: Bool, isOpen: Bool) -> Bool {
         enabled && !isOpen && (reason == .click || reason == .doubleClick)

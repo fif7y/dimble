@@ -1188,6 +1188,14 @@ final class AppState {
         if suppressesPanelClick(reason, sections: sections) { return }
         if liveMirror.intercepts(reveal: reason, sections: sections, how: .reveal) { return }
         if anchoredShowAllAsksNothing(sections, reason) { return }
+        // 空白处双击直接走 reveal，不经过 toggleAll；在共同入口切换，避免沿用常显菜单栏。
+        if !transitions.anchored, pointerDisplayBehavior == .alwaysShowAll, revealPresenter === barPresenter,
+           case .revealed(let current, let by) = rehide.state,
+           RevealRouting.replacesPolicyBarWithPanel(current: current, openedBy: by, requested: sections,
+               reason: reason, target: revealDecision(for: reason).target) {
+            PelmetLog.log("reveal(\(reason)) — replace the policy's bar with the configured panel")
+            concealNow()
+        }
         PerfTrace.markTrigger("\(reason)")
         // The panel is up and this needs the real bar (⌘↩ in Search, an
         // Apply): the panel closes first and the reveal queues behind it. A
@@ -1214,15 +1222,7 @@ final class AppState {
         // third click. Closing Always Hidden goes back to the policy's
         // reveal, not to an empty bar.
         if !transitions.anchored, pointerDisplayBehavior == .alwaysShowAll, revealPresenter === barPresenter,
-           case .revealed(let current, let by) = rehide.state {
-            let target = revealDecision(for: reason).target
-            if by == .displayPolicy, !current.contains(.alwaysHidden),
-               RevealRouting.destination(for: reason, target: target) == .panel {
-                PelmetLog.log("toggleAll(\(reason)) off the anchor — the policy's bar goes, \(target.rawValue) opens")
-                concealNow()
-                reveal(all, reason: reason)
-                return
-            }
+           case .revealed(let current, _) = rehide.state {
             if current.contains(.alwaysHidden), current.contains(.hidden) {
                 dispatch(rehide.handle(.narrowRequested([.hidden], .displayPolicy)))
                 PelmetLog.log("toggleAll(\(reason)) off the anchor — narrowed to the policy's reveal, state=\(rehide.state)")
