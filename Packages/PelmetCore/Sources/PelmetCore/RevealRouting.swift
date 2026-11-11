@@ -32,6 +32,11 @@ public enum RevealTarget: String, Codable, CaseIterable, Sendable {
 }
 
 public enum RevealRouting {
+    /// 只在关闭状态下的空白菜单栏点击取新锚点，避免已打开的面板在选图标时横移。
+    public static func centersPanelOnClick(_ reason: RevealReason?, enabled: Bool, isOpen: Bool) -> Bool {
+        enabled && !isOpen && (reason == .click || reason == .doubleClick)
+    }
+
     public enum Destination: Equatable, Sendable {
         case bar
         case panel
