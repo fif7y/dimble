@@ -172,6 +172,12 @@ enum AppTiming {
     /// Below ~100ms every swipe-through of the band reads as a hover
     /// (the fire-time live-pointer check catches the rest).
     static let hoverDelayFloor: TimeInterval = 0.1
+    /// Right-click claim (#140): not oftener than this while the pointer
+    /// travels along the band. The verdict is a cross-process AX hit-test
+    /// (~0.3ms) and a move already costs 0.24ms with the geometry cached.
+    /// How long a taken claim then stands is the tap's own
+    /// `BarRightClickTap.claimFreshness` — it is read off the main actor.
+    static let barRightClickClaimRefresh: TimeInterval = 0.15
     /// A chevron click this soon after a hover reveal was dispatched was
     /// decided before the user could see the bar open (the picture is up
     /// ~100–200ms after dispatch, a reaction takes ~250ms more): it means

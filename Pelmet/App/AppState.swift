@@ -3925,6 +3925,18 @@ final class AppState {
             statusItem?.updateSymbol(revealed: isRevealedOrRevealing)
             releaseOrphanedItemsInBar()
         }
+        // The bar is about to move: bare bar the right-click tap was holding
+        // a claim on may be an icon by the time the button goes down (#140).
+        // Only the three effects that move it — the timer ones fire whenever
+        // the pointer crosses the band, which would leave no claim standing.
+        if effects.contains(where: {
+            switch $0 {
+            case .reveal, .conceal, .narrow: true
+            case .none, .armTimer, .cancelTimer: false
+            }
+        }) {
+            bandMonitor?.releaseRightClickClaim()
+        }
         for effect in effects {
             switch effect {
             case .none:
