@@ -70,6 +70,22 @@ import Testing
         #expect(bar.isClean)
     }
 
+    // The gap the limit splits, from 59 real glyphs over four bars: a hard
+    // edge across the band costs about 6%, the sparsest real glyph 9.3%.
+    @Test func aSparseGlyphIsRefused() {
+        var bar = Column { _ in 48 }
+        bar.ink(width: 8, height: 8)          // 64 of 640 = 10%
+        #expect(bar.share > 0.09 && bar.share < 0.11)
+        #expect(!bar.isClean)
+    }
+
+    @Test func anEdgeAcrossTheBandIsKept() {
+        var bar = Column { _ in 48 }
+        bar.ink(width: 20, height: 2)         // 40 of 640 = 6.25%
+        #expect(bar.share > 0.06 && bar.share < 0.07)
+        #expect(bar.isClean)
+    }
+
     // A speck is not an icon: the limit leaves room for one.
     @Test func aSpeckStaysClean() {
         var bar = Column { _ in 48 }

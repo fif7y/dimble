@@ -16,11 +16,29 @@ public enum BarReference {
     public static let inkStep = 26
 
     /// The share of a column's middle that may read as ink before the column
-    /// is refused. A menu bar glyph fills a third of its cell and more; a
-    /// clean column, blurred by the band, leaves near nothing. 12% sits
-    /// between them with room on both sides. First live pass decides whether
-    /// it moves — `pass:` logs the share it measured.
-    public static let inkShareLimit = 0.12
+    /// is refused.
+    ///
+    /// Measured 2026-11-11 over four real bars — Gab's three displays (a
+    /// built-in at 2x and two externals at 1x, over a flat wallpaper) and the
+    /// translucent bar over a photo wallpaper in #129's screenshot — by
+    /// sliding a column's width across each and scoring every position:
+    ///
+    /// - **Bar with no icon on it reads 0.00%.** Not a median, the maximum,
+    ///   on all four. The band's blur leaves nothing 26 levels off its own
+    ///   margins, even with a photograph under it.
+    /// - **59 real glyphs, scored on centre, run 3.3% to 36.7%.** The two
+    ///   thinnest (3.3%, 3.6%) are separators. The sparsest real glyph is
+    ///   9.3%, and the median is 15.8% at 2x, 21% at 1x.
+    /// - The one clean-looking thing that scored at all was a hard vertical
+    ///   edge inside the band (#129's stale cover boundary): 6.7% over a 2x
+    ///   column. A reference with a window's edge in it is wrong anyway, so
+    ///   refusing that column is right.
+    ///
+    /// So the gap is 6.7% to 9.3% and 8% splits it: every glyph but a
+    /// separator is caught, and nothing that is only bar is refused. It is a
+    /// narrow gap — widen the sample before moving this, with
+    /// `pelmet.debug.picturePass`, which logs the share of every column.
+    public static let inkShareLimit = 0.08
 
     /// How much of the column's middle is not bar, 0 to 1.
     ///
