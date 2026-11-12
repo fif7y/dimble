@@ -196,6 +196,15 @@ final class ItemPictures {
     /// and is see-through or narrow next to the widest run is a neighbour's
     /// capsule spilling over (Velja's, OpenClip's) and is left out. Nil when
     /// the picture is blank.
+    /// How much of an empty-bar column is not bar (`BarReference.inkShare`).
+    /// Nil when the column can't be read.
+    static func referenceInk(_ background: CGImage) -> Double? {
+        let w = background.width, h = background.height
+        guard let bitmap = rgba(background, width: w, height: h) else { return nil }
+        defer { withExtendedLifetime(bitmap.context) {} }
+        return BarReference.inkShare(bitmap.pixels, width: w, height: h)
+    }
+
     private static func inkBounds(of image: CGImage) -> CGRect? {
         let w = image.width, h = image.height
         guard w > 0, h > 0, let bitmap = rgba(image, width: w, height: h) else { return nil }

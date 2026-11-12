@@ -2817,6 +2817,7 @@ extension TransitionCoordinator {
         let under = empty.first { abs($0.windowFrame.minY - raw.windowFrame.minY) < 1 && $0.windowFrame.intersects(raw.windowFrame) }
         let scale = CGFloat(base.image.width) / base.windowFrame.width
         var pictures: [ItemID: ItemPictures.Picture] = [:]
+        var contaminated: [(ItemID, Double)] = []
         for (key, f) in items {
             // Exactly the item's frame, less a point a side: neighbouring
             // frames overlap by a point or two, and `cropped(toPrimaryX:)`
@@ -2836,14 +2837,30 @@ extension TransitionCoordinator {
                 windowFrame: NSRect(x: f.minX + 1, y: base.windowFrame.minY, width: rect.width / scale, height: base.windowFrame.height),
                 takenAt: base.takenAt)
             let bgRect = under.map { rect.offsetBy(dx: ((base.windowFrame.minX - $0.windowFrame.minX) * scale).rounded(), dy: 0) }
+            let background = bgRect.flatMap { under?.image.cropping(to: $0) }
+            // The empty bar is only empty where no icon stayed. The icons
+            // move between this strip and the bar the reference was taken
+            // over, so a visible icon can stand in the column a hidden one
+            // was filmed in (#128). Both the keyed column and the mask come
+            // out of that subtraction, so there is nothing downstream to
+            // fall back to: the item keeps its app icon and pictures on a
+            // later pass, which is what an icon that won't cut out does.
+            if let background, let ink = ItemPictures.referenceInk(background), ink >= BarReference.inkShareLimit {
+                contaminated.append((key, ink))
+                continue
+            }
             guard let picture = ItemPictures.picture(
                 from: column,
                 raw: raw.image.cropping(to: rect),
-                background: bgRect.flatMap { under?.image.cropping(to: $0) })
+                background: background)
             else { continue }
             pictures[key] = picture
             if picture.isHighlighted { PelmetLog.log("pass: \(key.rawValue) on a coloured capsule") }
             if dump { dumpPass([column], name: key.rawValue) }
+        }
+        if !contaminated.isEmpty {
+            let named = contaminated.map { "\($0.0.rawValue) \(Int($0.1 * 100))%" }.joined(separator: ", ")
+            PelmetLog.log("pass: \(contaminated.count) column(s) where the empty bar held an icon, not cut — \(named)")
         }
         return pictures
     }
