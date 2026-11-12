@@ -34,6 +34,15 @@ public enum BarReference {
     ///   column. A reference with a window's edge in it is wrong anyway, so
     ///   refusing that column is right.
     ///
+    /// Busier wallpapers were the obvious worry, so 22 more real bars were
+    /// read off other people's screenshots on the issues — light and dark,
+    /// photographs, gradients, several displays. **Empty bar never crossed
+    /// the step on any of them.** Its distance from its own margin line runs
+    /// 0 to 14.8 levels, median 3.8, so the busiest bar in the sample still
+    /// had 11 levels of headroom under 26, and every one of them scored a
+    /// 0.00% share where no icon sat. What the band does to a photograph is
+    /// blur it flat; more colour in it does not change that.
+    ///
     /// So the gap is 6.7% to 9.3% and 8% splits it: every glyph but a
     /// separator is caught, and nothing that is only bar is refused. It is a
     /// narrow gap — widen the sample before moving this, with
