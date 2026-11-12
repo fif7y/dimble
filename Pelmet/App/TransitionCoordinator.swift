@@ -2845,7 +2845,12 @@ extension TransitionCoordinator {
             // out of that subtraction, so there is nothing downstream to
             // fall back to: the item keeps its app icon and pictures on a
             // later pass, which is what an icon that won't cut out does.
-            if let background, let ink = ItemPictures.referenceInk(background), ink >= BarReference.inkShareLimit {
+            let ink = background.flatMap { ItemPictures.referenceInk($0) }
+            // `pelmet.debug.picturePass` prints every column's share, not
+            // just the refused ones: the limit is only worth what a real
+            // bar's spread says it is.
+            if dump, let ink { PelmetLog.log("pass: \(key.rawValue) empty-bar ink \(String(format: "%.1f%%", ink * 100))") }
+            if let ink, ink >= BarReference.inkShareLimit {
                 contaminated.append((key, ink))
                 continue
             }
@@ -2859,7 +2864,7 @@ extension TransitionCoordinator {
             if dump { dumpPass([column], name: key.rawValue) }
         }
         if !contaminated.isEmpty {
-            let named = contaminated.map { "\($0.0.rawValue) \(Int($0.1 * 100))%" }.joined(separator: ", ")
+            let named = contaminated.map { "\($0.0.rawValue) \(String(format: "%.1f%%", $0.1 * 100))" }.joined(separator: ", ")
             PelmetLog.log("pass: \(contaminated.count) column(s) where the empty bar held an icon, not cut — \(named)")
         }
         return pictures
