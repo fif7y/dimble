@@ -4955,8 +4955,15 @@ final class AppState {
         overflowTrappedItems = trappedItems
         guard trapped != overflowTrappedCount else { return }
         if (trapped > 0) != (overflowTrappedCount > 0) {
+            // With the frames: the read is an overlap test, and a report of
+            // an icon that plainly fits (#143) is answered by the x ranges
+            // it overlapped, which nothing else in the log carries.
+            let named = trappedItems.map { id -> String in
+                guard let f = framed.first(where: { $0.id == id })?.frame else { return id.rawValue }
+                return "\(id.rawValue) \(Int(f.minX))..\(Int(f.maxX))"
+            }
             PelmetLog.log(trapped > 0
-                ? "overflow: \(trapped) icon(s) behind the native « — \(trappedItems.map(\.rawValue).joined(separator: ", "))"
+                ? "overflow: \(trapped) icon(s) behind the native « — \(named.joined(separator: ", "))"
                 : "overflow: cleared")
         }
         overflowTrappedCount = trapped
