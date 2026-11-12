@@ -167,16 +167,23 @@ struct PanelView: View {
             }
             // The padding scrolls with the tiles: they run to the glass's
             // edge, not to a line inside it.
-            scrolling(tiles.padding(content.query.isEmpty ? .all : [.horizontal, .bottom], padding))
-            // Under the scroll view, so it stays put while the tiles move,
-            // and inside the VStack, so it is never over a tile. The gap
-            // above it is the tiles' own bottom padding.
-            if content.showsSettingsButton, !content.isEmpty {
-                settingsCog
-                    .padding([.horizontal, .bottom], padding)
-            }
+            scrolling(tiles.padding(content.query.isEmpty ? .all : [.horizontal, .bottom], padding)
+                .padding(.bottom, cogRoom))
         }
         .fixedSize()
+        // The cog hangs in the corner over the tiles' own bottom padding
+        // instead of taking a line of its own (Gab, 2026-11-11: "it adds a
+        // lot of empty space for a small action"). `cogRoom` is the few
+        // points it needs beyond that padding, and it is a padding on the
+        // tiles, so the measuring pass still counts it. An overlay adds no
+        // height by itself, which is the point.
+        .overlay(alignment: .bottomTrailing) {
+            if content.showsSettingsButton, !content.isEmpty {
+                settingsCog
+                    .padding(.trailing, padding)
+                    .padding(.bottom, 4)
+            }
+        }
         .overlay(alignment: .leading) {
             if content.layout == .panel, !content.isEmpty {
                 ZStack(alignment: .leading) {
@@ -361,16 +368,25 @@ struct PanelView: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(PanelHost.space)) } action: { onFrame(.fold, $0) }
     }
 
+    /// What the cog needs below the last row, on top of the tiles' own
+    /// bottom padding. The glyph is 11pt in an 18pt frame, so 14 here leaves
+    /// it clear of the tile above without a line of its own: 30pt of panel
+    /// height became 14pt.
+    private var cogRoom: CGFloat {
+        content.showsSettingsButton && !content.isEmpty ? 14 : 0
+    }
+
     /// The cog in the bottom-right corner (#95). Borderless like every other
     /// control in the panel: the glyph alone at rest, a well only under the
-    /// pointer. It sits at the trailing edge because the VStack is trailing
-    /// and the tiles' right edge is the one the eye follows down.
+    /// pointer, the same two lines as the search row's magnifying glass. It
+    /// sits at the trailing edge because the tiles' right edge is the one the
+    /// eye follows down.
     private var settingsCog: some View {
         Button(action: onSettings) {
             Image(systemName: "gearshape")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(ink.tertiary)
-                .frame(width: 20, height: 20)
+                .frame(width: 18, height: 18)
                 .contentShape(Circle())
         }
         .buttonStyle(FoldFillStyle(ink: ink, shape: Circle(), resting: .clear))
