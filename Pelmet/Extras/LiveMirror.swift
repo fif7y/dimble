@@ -3306,12 +3306,6 @@ final class LiveMirror {
         func ms() -> Int { Int(-started.timeIntervalSinceNow * 1000) }
         let generation = backdropGeneration
         liftedReturn?.cancel()
-        // The card goes with the pill.
-        let open = await cardProbe()
-        if open.open {
-            PelmetLog.log("livemirror: card open (retake) — closing it")
-            await pressPill("retake", name: open.owners.first { !$0.isEmpty })
-        }
         guard isActive, !exiting, !handingOver, !standDown else { return }
         if coverLifted {
             coverLifted = false
@@ -3345,6 +3339,14 @@ final class LiveMirror {
             // (A display that shows every icon has its Hidden icons beyond the
             // cover's end: growing it would hide them.)
             if !side.showsAll, let picture = side.picture { buildCover(side, left: side.coverMinX, right: picture.windowFrame.maxX, why: "retake") }
+        }
+        // The card goes with the pill. It waits for the covers: closing it is
+        // an AX press on another process, and a cover known to be stale has no
+        // reason to stay up for it (#136).
+        let open = await cardProbe()
+        if open.open {
+            PelmetLog.log("livemirror: card open (retake) — closing it")
+            await pressPill("retake", name: open.owners.first { !$0.isEmpty })
         }
         // The assertion comes back; once the bar beneath is bare (the same
         // wait that lifts a cover) the pictures are taken, the old cover
