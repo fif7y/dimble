@@ -144,6 +144,15 @@ final class PanelPresenter: RevealPresenter {
     /// nothing, one the notch hides): not asked for again until a picture
     /// would have gone stale anyway.
     private var unpicturable: [ItemID: Date] = [:]
+    /// `ConcealGhostOverlay.surfaceSignature()` when `unpicturable` was last
+    /// cleared. A tile the pass tried and missed waits out `maxAge` before it
+    /// is tried again, which is right while the bar it failed against is the
+    /// same bar. A new wallpaper, or a light/dark switch, is a different bar:
+    /// whatever refused the column is gone with it, so the wait goes too and
+    /// the tile has its picture back on the next open instead of in a quarter
+    /// of an hour. The signature is the backdrop watch's own, read here
+    /// rather than observed, since nothing needs it until a pass is weighed.
+    private var unpicturableSurface: [Int] = []
     /// Icons a pass revealed their section for and never found listed:
     /// their app runs with its own icon off, and the bar shows nothing for
     /// them (CleanShot, #26). Left out of the panel until the bar lists them
@@ -2248,6 +2257,14 @@ final class PanelPresenter: RevealPresenter {
         if passTask != nil {
             if let done { passWaiters.append(done) }
             return
+        }
+        let surface = ConcealGhostOverlay.surfaceSignature()
+        if surface != unpicturableSurface {
+            if !unpicturable.isEmpty {
+                PelmetLog.log("panel: the wallpaper or appearance changed — \(unpicturable.count) tile(s) asked for again")
+                unpicturable.removeAll()
+            }
+            unpicturableSurface = surface
         }
         var wanted = missing.filter { key in
             unpicturable[key].map { -$0.timeIntervalSinceNow >= ItemPictures.maxAge } ?? true
