@@ -32,6 +32,11 @@ public enum RevealTarget: String, Codable, CaseIterable, Sendable {
 }
 
 public enum RevealRouting {
+    /// Capture an empty-bar click only on opening, so an open panel stays put while aiming at a tile.
+    public static func centersPanelOnClick(_ reason: RevealReason?, enabled: Bool, isOpen: Bool) -> Bool {
+        enabled && !isOpen && (reason == .click || reason == .doubleClick)
+    }
+
     public enum Destination: Equatable, Sendable {
         case bar
         case panel

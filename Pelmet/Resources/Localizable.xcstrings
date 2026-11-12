@@ -1,6 +1,8 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Open at the click position in empty menu bar space. Chevron clicks stay anchored to the chevron.": {},
+    "Center on menu bar click": {},
     "%@ already opens %@. Press a different combination.": {
       "localizations": {
         "de": {

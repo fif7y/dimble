@@ -3,6 +3,17 @@ import Testing
 @testable import PelmetCore
 
 @Suite struct RevealRoutingTests {
+    @Test func clickCenteringIsOptInAndNeverMovesAnOpenPanel() {
+        let reasons: [RevealReason?] = [nil, .click, .doubleClick, .statusItem, .hover,
+                                      .hotkey, .barDrag, .displayPolicy, .settingsPreview, .itemInBar]
+        for reason in reasons {
+            #expect(!RevealRouting.centersPanelOnClick(reason, enabled: false, isOpen: false))
+            #expect(!RevealRouting.centersPanelOnClick(reason, enabled: true, isOpen: true))
+            #expect(RevealRouting.centersPanelOnClick(reason, enabled: true, isOpen: false)
+                    == (reason == .click || reason == .doubleClick))
+        }
+    }
+
     // A reveal a person asks for follows the setting; the menu bar target is
     // the bar for every reason.
     private func followsTheSetting(_ reason: RevealReason) {

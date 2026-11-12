@@ -31,6 +31,9 @@ public struct PanelOptions: Codable, Equatable, Sendable {
         case handle
     }
 
+    /// Keep the chevron anchor by default; only empty-bar clicks can opt into centering.
+    public var centersOnClick: Bool = false
+
     /// A name under every tile.
     public var showsNames: Bool = false
     /// Dimmed tiles for apps in a section that aren't running, a click
@@ -66,7 +69,7 @@ public struct PanelOptions: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case showsNames, columnsWithNames, columnsCompact, separatorsBreakRows, alwaysHidden, alwaysHiddenOpen
-        case alwaysHiddenFold, showsClosedApps
+        case alwaysHiddenFold, showsClosedApps, centersOnClick
     }
 
     public init(from decoder: Decoder) throws {
@@ -79,6 +82,7 @@ public struct PanelOptions: Codable, Equatable, Sendable {
             c.field(Int?.self, key, nil)
                 .map { min(max($0, Self.columnRange.lowerBound), Self.columnRange.upperBound) }
         }
+        centersOnClick = c.field(Bool.self, .centersOnClick, defaults.centersOnClick)
         showsNames = c.field(Bool.self, .showsNames, defaults.showsNames)
         columnsWithNames = count(.columnsWithNames)
         columnsCompact = count(.columnsCompact)
