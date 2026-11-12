@@ -2024,6 +2024,29 @@ final class LiveMirror {
     /// `keepMirrors`: the mirrors stay in the cover they stand in (the exit's:
     /// they leave there, with the exit motion, while the new cover is already
     /// up beneath them), and that cover goes once they are gone.
+    /// The bar as it is right now, to stand in while a retake runs (#136).
+    /// `bare` leaves the WindowServer's bar window out, so what comes back
+    /// is the empty bar pixel for pixel even with every icon still on it,
+    /// and it needs none of the settling the proper picture waits for. Our
+    /// own windows are left out too, so the cover standing over the bar
+    /// doesn't film itself. If it doesn't come, the old cover stays up and
+    /// the retake runs as it did before.
+    private func standInPicture(_ side: Side) async {
+        guard let old = side.picture else { return }
+        let shift = side.screen.frame.maxX - primaryMaxX
+        let rect = CGRect(x: old.windowFrame.minX - shift, y: 0, width: old.windowFrame.width, height: 40)
+        guard let fresh = await ConcealGhostOverlay.snapshotSet(
+            of: rect, excludingOwnWindows: true, displays: [side.id], bare: true, liveMirror: true
+        ).first else {
+            PelmetLog.log("livemirror: display \(side.id) has no stand-in picture — the old cover stays up for the retake")
+            return
+        }
+        side.picture = fresh
+        side.pictureAt = Date()
+        side.pictureGeneration = backdropGeneration
+        PelmetLog.log("livemirror: display \(side.id) stand-in picture \(Int(fresh.windowFrame.minX))..\(Int(fresh.windowFrame.maxX))")
+    }
+
     private func buildCover(_ side: Side, left: CGFloat, right: CGFloat, why: String, keepMirrors: Bool = false) -> Bool {
         guard let picture = side.picture else { return false }
         // The Hidden icons did not move (a display that shows every icon):
@@ -3310,6 +3333,13 @@ final class LiveMirror {
                 mirror.placeCandidate = nil
                 if mirror.clock.locked { carryOn(mirror, now: Date()) }
             }
+            // The picture in hand was taken over the backdrop that just
+            // left, so a cover rebuilt from it is a block of the old Space
+            // over the new one — a black capsule over a wallpaper, for the
+            // whole retake (#136, measured at 3.2s on 2026-11-11). The bare
+            // bar costs ~90ms at any time, so the cover that stands in shows
+            // the Space we are on.
+            if !side.showsAll, side.cover != nil { await standInPicture(side) }
             // The « slides back and the extras leave: the cover reaches to the
             // concealed « again, where the picture ends.
             // (A display that shows every icon has its Hidden icons beyond the
