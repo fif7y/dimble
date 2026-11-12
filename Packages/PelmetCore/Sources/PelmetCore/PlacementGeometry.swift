@@ -5,7 +5,7 @@
 import CoreGraphics
 
 public enum PlacementGeometry {
-    /// 以点击点为中心放置面板；点击靠近屏幕边缘时，把面板夹在屏幕内。
+    /// Center on the click, clamped to the display's margins near either edge.
     public static func centeredPanelX(pointerX: CGFloat, width: CGFloat,
                                       screenMinX: CGFloat, screenMaxX: CGFloat,
                                       margin: CGFloat) -> CGFloat {

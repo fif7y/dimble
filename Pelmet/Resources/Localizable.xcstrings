@@ -1,26 +1,8 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "Open at the click position in empty menu bar space. Chevron clicks stay anchored to the chevron.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "点击菜单栏空白区域时，在点击位置居中打开；点击箭头时仍显示在箭头下方。"
-          }
-        }
-      }
-    },
-    "Center on menu bar click": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "点击菜单栏时居中"
-          }
-        }
-      }
-    },
+    "Open at the click position in empty menu bar space. Chevron clicks stay anchored to the chevron.": {},
+    "Center on menu bar click": {},
     "%@ already opens %@. Press a different combination.": {
       "localizations": {
         "de": {

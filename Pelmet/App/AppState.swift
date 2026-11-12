@@ -97,8 +97,6 @@ final class AppState {
     /// bar reads concealed (the "Show Live Activities" setting).
     @ObservationIgnored lazy var liveMirror = LiveMirror(appState: self)
     @ObservationIgnored private lazy var barPresenter = BarPresenter(transitions: transitions)
-    @ObservationIgnored private let sectionDivider = SectionDividerOverlay()
-    @ObservationIgnored private var sectionDividerRefresh: Task<Void, Never>?
     /// The hidden icons as tiles under the chevron (docs/PANEL-PLAN.md §5).
     @ObservationIgnored lazy var panelPresenter = PanelPresenter(appState: self)
     /// Who drew the reveal that is up, so the conceal goes to the same one.
@@ -1122,18 +1120,12 @@ final class AppState {
 
     // MARK: - Intents (UI + monitors call these)
 
-    /// 在状态机及 Live Mirror 接手前检查鼠标所在屏幕，避免先隐藏图标再拒绝弹窗。
-    private func suppressesPanelClick(_ reason: RevealReason, sections: Set<PelmetCore.Section>) -> Bool {
-        let uuid = NSScreen.underPointer?.displayUUIDString
-        return RevealRouting.suppressesPanelClick(reason, sections: sections,
-            behavior: settings.behavior(forDisplayUUID: uuid),
-            target: settings.revealTarget(forDisplayUUID: uuid))
-    }
-
     func toggle(reason: RevealReason, sections: Set<PelmetCore.Section> = [.hidden]) {
-        if suppressesPanelClick(reason, sections: sections) { return }
         if liveMirror.intercepts(reveal: reason, sections: sections, how: .toggle) { return }
-        // 弹窗请求已在入口排除；原生菜单栏模式仍可通过箭头展开始终隐藏图标。
+        // A chevron click on a display that shows all icons opens Always
+        // Hidden there, in that display's "Show hidden icons in" (#96). A plain toggle
+        // asked for nothing when anchored, and closed the icons that display
+        // shows when the pointer's display decided.
         if RevealRouting.clickWidensToAlwaysHidden(reason, sections: sections, behavior: pointerDisplayBehavior) {
             PelmetLog.log("toggle(\(reason)) on a display that shows all icons — Always Hidden too")
             toggleAll(reason: reason)
@@ -1185,17 +1177,8 @@ final class AppState {
     }
 
     func reveal(_ sections: Set<PelmetCore.Section>, reason: RevealReason) {
-        if suppressesPanelClick(reason, sections: sections) { return }
         if liveMirror.intercepts(reveal: reason, sections: sections, how: .reveal) { return }
         if anchoredShowAllAsksNothing(sections, reason) { return }
-        // 空白处双击直接走 reveal，不经过 toggleAll；在共同入口切换，避免沿用常显菜单栏。
-        if !transitions.anchored, pointerDisplayBehavior == .alwaysShowAll, revealPresenter === barPresenter,
-           case .revealed(let current, let by) = rehide.state,
-           RevealRouting.replacesPolicyBarWithPanel(current: current, openedBy: by, requested: sections,
-               reason: reason, target: revealDecision(for: reason).target) {
-            PelmetLog.log("reveal(\(reason)) — replace the policy's bar with the configured panel")
-            concealNow()
-        }
         PerfTrace.markTrigger("\(reason)")
         // The panel is up and this needs the real bar (⌘↩ in Search, an
         // Apply): the panel closes first and the reveal queues behind it. A
@@ -1212,7 +1195,6 @@ final class AppState {
     /// once it is all out. A reveal that left Always Hidden in widens to
     /// include it instead of closing: the key asked for more, not less.
     func toggleAll(reason: RevealReason) {
-        if suppressesPanelClick(reason, sections: [.hidden, .alwaysHidden]) { return }
         if liveMirror.intercepts(reveal: reason, sections: [.hidden, .alwaysHidden], how: .toggleAll) { return }
         let all: Set<PelmetCore.Section> = [.hidden, .alwaysHidden]
         // Off the anchor (no Screen Recording), a display that shows all
@@ -1222,7 +1204,15 @@ final class AppState {
         // third click. Closing Always Hidden goes back to the policy's
         // reveal, not to an empty bar.
         if !transitions.anchored, pointerDisplayBehavior == .alwaysShowAll, revealPresenter === barPresenter,
-           case .revealed(let current, _) = rehide.state {
+           case .revealed(let current, let by) = rehide.state {
+            let target = revealDecision(for: reason).target
+            if by == .displayPolicy, !current.contains(.alwaysHidden),
+               RevealRouting.destination(for: reason, target: target) == .panel {
+                PelmetLog.log("toggleAll(\(reason)) off the anchor — the policy's bar goes, \(target.rawValue) opens")
+                concealNow()
+                reveal(all, reason: reason)
+                return
+            }
             if current.contains(.alwaysHidden), current.contains(.hidden) {
                 dispatch(rehide.handle(.narrowRequested([.hidden], .displayPolicy)))
                 PelmetLog.log("toggleAll(\(reason)) off the anchor — narrowed to the policy's reveal, state=\(rehide.state)")
@@ -1634,14 +1624,6 @@ final class AppState {
     }
 
     func rehideTriggered(_ trigger: RehideTrigger) {
-        // 显示全部的原生菜单栏只收回临时展开的始终隐藏图标，避免常显图标一起消失。
-        if trigger == .delayExpired, rehide.policy.autoRehide,
-           !transitions.anchored, pointerDisplayBehavior == .alwaysShowAll,
-           revealPresenter === barPresenter,
-           case .revealed(let sections, _) = rehide.state, sections.contains(.alwaysHidden) {
-            dispatch(rehide.handle(.narrowRequested([.hidden], .displayPolicy)))
-            return
-        }
         PelmetLog.log("rehideTrigger(\(trigger)) state=\(rehide.state)")
         dispatch(rehide.handle(.trigger(trigger)))
     }
@@ -2325,7 +2307,6 @@ final class AppState {
     }
 
     func settingsChanged() {
-        defer { refreshSectionDivider() }
         rehide.policy = settings.rehidePolicy
         if settings.showStatusItem, statusItem == nil {
             // A chevron switched on mid-session is a fresh registration the
@@ -3764,9 +3745,7 @@ final class AppState {
     /// own items follow them like any reveal: told "concealed" mid-pass,
     /// the extras the engine had just shown hid again and the bar bounced
     /// under the capture (2026-10-09).
-    @ObservationIgnored var picturePassSections: Set<PelmetCore.Section>? {
-        didSet { refreshSectionDivider() }
-    }
+    @ObservationIgnored var picturePassSections: Set<PelmetCore.Section>?
 
     /// What is revealed ON THE BAR. A reveal the panel draws leaves the bar
     /// concealed, so Pelmet's own items, covers and pictures stay put.
@@ -3789,24 +3768,6 @@ final class AppState {
         }
     }
 
-    private func refreshSectionDivider(snapshot fresh: EngineSnapshot? = nil) {
-        sectionDividerRefresh?.cancel()
-        guard !isTransitioning, !panelShowsReveal, picturePassSections == nil,
-              currentRevealedSections.contains(.alwaysHidden),
-              let snap = fresh ?? snapshot, snap.itemsAtRest else {
-            sectionDivider.hide()
-            return
-        }
-        sectionDividerRefresh = Task { [weak self] in
-            guard let self else { return }
-            var copies = await engine.barCopies()
-            guard !Task.isCancelled else { return }
-            // 不让短暂单独显示的项目或旧副本形成虚假的分组边界。
-            for id in snap.concealed.union(snap.shownAlone) { copies.removeValue(forKey: id) }
-            sectionDivider.update(model: settings.sectionModel, copies: copies)
-        }
-    }
-
     private func dispatch(_ effects: [RehideEffect]) {
         // Extras are NOT applied here: the engine's reflow companion applies
         // them inside the converge so their size change shares the assertion
@@ -3814,7 +3775,6 @@ final class AppState {
         // The chevron flips at transition START — settle-time flips read as an
         // unacknowledged click.
         defer {
-            refreshSectionDivider()
             statusItem?.updateSymbol(revealed: isRevealedOrRevealing)
             releaseOrphanedItemsInBar()
         }
@@ -4042,9 +4002,7 @@ final class AppState {
                 // pointer has been on it.
                 let panelHolds = self.panelShowsReveal && self.panelPresenter.holdsReveal
                 if self.editorHoldsBar
-                    || RevealRouting.displayPolicyHoldsReveal(behavior: self.pointerDisplayBehavior,
-                        anchored: self.transitions.anchored, panelShowsReveal: self.panelShowsReveal,
-                        sections: self.currentRevealedSections)
+                    || (!self.transitions.anchored && self.pointerDisplayBehavior == .alwaysShowAll)
                     || self.applying
                     || panelHolds
                     || bandReason != nil {
@@ -4906,7 +4864,6 @@ final class AppState {
 
     func updateSnapshot(_ snap: EngineSnapshot) {
         defer {
-            refreshSectionDivider(snapshot: snap)
             if transitions.anchored {
                 transitions.refreshHeld("items moved")
             } else if launchBaselineApplied, case .concealed = rehide.state, revealAnchored, !transitions.anchorTarget,

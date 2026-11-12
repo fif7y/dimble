@@ -32,28 +32,9 @@ public enum RevealTarget: String, Codable, CaseIterable, Sendable {
 }
 
 public enum RevealRouting {
-    /// 常显策略展开的菜单栏只是基线；明确请求始终隐藏时仍须尊重弹窗设置。
-    public static func replacesPolicyBarWithPanel(current: Set<Section>, openedBy: RevealReason,
-                                                  requested: Set<Section>, reason: RevealReason,
-                                                  target: RevealTarget) -> Bool {
-        openedBy == .displayPolicy && !current.contains(.alwaysHidden)
-            && requested.contains(.alwaysHidden) && destination(for: reason, target: target) == .panel
-    }
-
-    /// 只在关闭状态下的空白菜单栏点击取新锚点，避免已打开的面板在选图标时横移。
+    /// Capture an empty-bar click only on opening, so an open panel stays put while aiming at a tile.
     public static func centersPanelOnClick(_ reason: RevealReason?, enabled: Bool, isOpen: Bool) -> Bool {
         enabled && !isOpen && (reason == .click || reason == .doubleClick)
-    }
-
-    /// 显示全部的屏幕屏蔽普通点击，但双击等明确请求始终隐藏图标的操作仍须生效。
-    public static func suppressesPanelClick(_ reason: RevealReason, sections: Set<Section>, behavior: DisplayBehavior, target: RevealTarget) -> Bool {
-        behavior == .alwaysShowAll && target != .menuBar && !sections.contains(.alwaysHidden)
-            && (reason == .click || reason == .doubleClick || reason == .statusItem)
-    }
-
-    /// 显示全部只保持原生菜单栏展开，临时面板仍须在鼠标离开后自动收起。
-    public static func displayPolicyHoldsReveal(behavior: DisplayBehavior, anchored: Bool, panelShowsReveal: Bool, sections: Set<Section>) -> Bool {
-        behavior == .alwaysShowAll && !anchored && !panelShowsReveal && !sections.contains(.alwaysHidden)
     }
 
     public enum Destination: Equatable, Sendable {

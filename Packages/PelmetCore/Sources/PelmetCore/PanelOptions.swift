@@ -31,7 +31,7 @@ public struct PanelOptions: Codable, Equatable, Sendable {
         case handle
     }
 
-    /// 默认保留箭头定位；开启后仅菜单栏空白处点击可居中打开。
+    /// Keep the chevron anchor by default; only empty-bar clicks can opt into centering.
     public var centersOnClick: Bool = false
 
     /// A name under every tile.

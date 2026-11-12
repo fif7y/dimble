@@ -84,7 +84,7 @@ final class PanelPresenter: RevealPresenter {
     /// Opened by the pointer on a bar (a hover, a click, a ⌘-drag), not by
     /// a key or Settings: the pointer's display is the one (`targetScreen`).
     private var openedAtBar = false
-    /// 仅本次打开时记录点击锚点，后续点击和悬停转为主动操作都不重新定位。
+    /// Kept for this open; later clicks and making a hover panel deliberate never recenter it.
     private var clickAnchor: NSPoint?
     /// A display unplugged or rearranged while it is open.
     private var screenObserver: NSObjectProtocol?

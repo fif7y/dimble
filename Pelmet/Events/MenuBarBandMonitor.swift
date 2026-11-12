@@ -479,10 +479,7 @@ final class MenuBarBandMonitor {
     enum DeferReason: String { case band, active, elevated, drag, overflow }
 
     func rehideDeferReason() -> DeferReason? {
-        // 跨到显示全部的屏幕后此缓存可能仍为 true，必须再核对鼠标的实时位置。
-        let location = NSEvent.mouseLocation
-        if pointerInBand, let geometry = screenGeometry(containing: location),
-           NSMouseInRect(location, geometry.band, false) { return .band }
+        if pointerInBand { return .band }
         if cmdDragActive || dropAdoptionPending || appState?.dropAdoptionInFlight == true { return .drag }
         // Pelmet frontmost only holds the bar for the layout editor and the
         // onboarding demo — the General tab is not a reason to stay revealed.
