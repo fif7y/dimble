@@ -145,6 +145,17 @@ public enum ItemMover {
         source.userData = SyntheticInput.tag
         let originalPosition = CGEvent(source: nil)?.location
         let shield = DragShield()
+        // A click keeps mouse/cursor association ON, unlike a drag. The
+        // shield turns it off so a drag's pointer cannot fly across the
+        // screen, but with it off the pointer is decoupled from the point
+        // the click carries, and a status item whose button reads the
+        // pointer reads it wherever the user left it and opens nothing —
+        // #142. OpenClip's menu never opened (0 of 8, three builds) and
+        // opened every time once association stayed on (8 of 8); Unclutter
+        // and Apple's sound item were 8 of 8 either way, which is why this
+        // only ever hit some apps (probed 2026-11-13). The cursor still
+        // hides, so none of this shows.
+        shield.keepAssociation = true
         shield.activate()
         defer { shield.deactivate() }
         let (downType, upType): (CGEventType, CGEventType) =
@@ -285,9 +296,14 @@ private final class DragShield {
     /// Association and cursor-hide are both reset by macOS whenever frontmost
     /// changes — which the drag itself causes. Cheap; called after every
     /// posted event.
+    /// A click (not a drag) can keep association on: the cursor still hides,
+    /// but the pointer really is where the click lands, which is what an item
+    /// that reads the pointer needs (#142).
+    var keepAssociation = false
+
     func reassert() {
         guard active else { return }
-        CGAssociateMouseAndMouseCursorPosition(0)
+        if !keepAssociation { CGAssociateMouseAndMouseCursorPosition(0) }
         CGDisplayHideCursor(CGMainDisplayID())
         hideCount += 1
     }
