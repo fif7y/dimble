@@ -1084,9 +1084,19 @@ final class MenuBarBandMonitor {
         guard let primary = NSScreen.screens.first else { return false }
         // Convert bottom-left mouse coords → top-left AX coords.
         let axPoint = CGPoint(x: point.x, y: primary.frame.maxY - point.y)
+        // The bar's topmost row is MenuBarAgent's own window, and it shadows
+        // everything drawn under it: at the row's y the hit test answers
+        // AXWindow/com.apple.MenuBarAgent for the WHOLE width — over "File",
+        // over the Apple glyph, everywhere — which read as empty bar, so
+        // every click along the very top edge toggled a reveal (#147, grid
+        // probe 2026-11-13). The click belongs to whatever is drawn there, so
+        // ask a few points into the bar instead. Per display: a side bar's
+        // top row is at its own screen's y, not at 0.
+        let screenTopAX = primary.frame.maxY - (screen?.frame.maxY ?? primary.frame.maxY)
+        let probeY = max(axPoint.y, screenTopAX + Self.barTopProbeInset)
         let systemWide = AXUIElementCreateSystemWide()
         var element: AXUIElement?
-        guard AXUIElementCopyElementAtPosition(systemWide, Float(axPoint.x), Float(axPoint.y), &element) == .success,
+        guard AXUIElementCopyElementAtPosition(systemWide, Float(axPoint.x), Float(probeY), &element) == .success,
               let element else {
             // Nothing under the pointer at all — treat as empty bar.
             return true
@@ -1112,6 +1122,27 @@ final class MenuBarBandMonitor {
             if recordsHit { PelmetLog.log("band: hit-test role=AXMenuBar owner=\(owner) → own extras bar, not empty") }
             return false
         }
+        // The corner left of the Apple menu is the Apple menu's, not empty
+        // space: macOS opens it from the screen's very edge while the item's
+        // AX frame starts 10pt in, so the strip between hit-tests as the bare
+        // backdrop and a corner click toggled a reveal under the menu that
+        // was opening — a click on the glyph itself was already refused
+        // (#147, probe 2026-11-13). Whichever bar is under the pointer
+        // answers for its own display. The screen's edge gates the frame
+        // reads, so a click anywhere else on the bar pays nothing for this.
+        if role == "AXMenuBar", let screen,
+           point.x - screen.frame.minX <= AppleMenuCorner.maxInset,
+           let bar = Self.axFrame(element),
+           AppleMenuCorner.holdsClick(
+               pointX: point.x,
+               barMinX: bar.minX,
+               appleMinX: Self.firstItemMinX(of: element)
+           ) {
+            if recordsHit {
+                PelmetLog.log("band: hit-test x=\(Int(point.x)) owner=\(owner) → the Apple menu's corner, not empty")
+            }
+            return false
+        }
         // The frontmost app's bare AXMenuBar element is the backdrop that
         // spans the whole bar — hitting it (not an AXMenuBarItem title) means
         // empty space. The agent's own window/group backdrop counts too.
@@ -1123,6 +1154,38 @@ final class MenuBarBandMonitor {
         lastHitOwner = role == "AXMenuBarItem" && owner != "?" ? owner : nil
         PelmetLog.log("band: hit-test role=\(role) owner=\(owner) → empty=\(empty)")
         return empty
+    }
+
+    /// How far into the bar the hit test is asked, past MenuBarAgent's own
+    /// window on the top row. The row measured 1pt (AX y=0 was the agent's
+    /// window, y=1 the app's bar); 3 clears it with room to spare and is
+    /// still well inside a 24pt bar.
+    private static let barTopProbeInset: CGFloat = 3
+
+    /// An element's AX frame (top-left origin), nil when AX won't give both
+    /// halves of it.
+    private static func axFrame(_ element: AXUIElement) -> CGRect? {
+        var positionValue: CFTypeRef?
+        var sizeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionValue) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue) == .success,
+              let positionValue, let sizeValue,
+              CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
+        var origin = CGPoint.zero
+        var extent = CGSize.zero
+        guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &origin),
+              AXValueGetValue(sizeValue as! AXValue, .cgSize, &extent) else { return nil }
+        return CGRect(origin: origin, size: extent)
+    }
+
+    /// The left edge of a menu bar's first item, the Apple menu — every app's
+    /// bar has it at child 0. Nil when the bar gives no children to read.
+    private static func firstItemMinX(of bar: AXUIElement) -> CGFloat? {
+        var childrenValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(bar, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+              let children = childrenValue as? [AXUIElement], let first = children.first else { return nil }
+        return axFrame(first)?.minX
     }
 
     /// The element is Pelmet's `AXExtrasMenuBar` (its status items' bar),
