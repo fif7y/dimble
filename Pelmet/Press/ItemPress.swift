@@ -287,6 +287,10 @@ final class ItemPress {
             let geometry = Self.geometry(at: frame)
             let before = await Self.counts(pid: target.pid, geometry: geometry)
             let wasFront = Self.isFrontmost(target.pid)
+            if Self.aimProbeOn {
+                let mid = CGPoint(x: frame.midX, y: frame.midY)
+                PelmetLog.log("press: \(key.rawValue) aim x\(Int(frame.minX))..\(Int(frame.maxX)) y\(Int(frame.minY))..\(Int(frame.maxY)) click \(Int(mid.x)),\(Int(mid.y)) → \(Self.whatIsAt(mid)), want pid \(target.pid)")
+            }
             await ItemMover.shieldedClick(
                 at: CGPoint(x: frame.midX, y: frame.midY),
                 button: button == .secondary ? .right : .left
@@ -512,6 +516,36 @@ final class ItemPress {
             if frontCounts, Self.isFrontmost(pid) { return .appInFront }
         }
         return nil
+    }
+
+    /// #142: a press that logs "showed nothing" either never reached the item
+    /// or reached something else, and nothing in the log tells the two apart.
+    /// Off unless `defaults write app.fif7y.Pelmet pelmet.debug.aimProbe
+    /// -bool YES`, so the shipped press runs exactly as before: this is one
+    /// synchronous AX read in the middle of a press, the kind of thing that
+    /// moves the timing it is there to measure.
+    private static var aimProbeOn: Bool {
+        UserDefaults.standard.bool(forKey: "pelmet.debug.aimProbe")
+    }
+
+    /// What the system says sits at the point the click is about to land on.
+    /// Our own element — the cover that hides the reveal — is named, never
+    /// read: an attribute read of our own AX element from the main thread
+    /// deadlocks (that is what `axCopyAttribute` exists for).
+    private static func whatIsAt(_ point: CGPoint) -> String {
+        var element: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(
+            AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &element) == .success,
+            let element
+        else { return "nothing" }
+        var pid: pid_t = 0
+        AXUIElementGetPid(element, &pid)
+        guard pid != ProcessInfo.processInfo.processIdentifier else { return "our own window" }
+        var roleValue: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue)
+        let role = roleValue as? String ?? "?"
+        let owner = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? "pid \(pid)"
+        return "\(role)/\(owner)"
     }
 
     private static func isFrontmost(_ pid: pid_t) -> Bool {
