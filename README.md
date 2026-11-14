@@ -76,7 +76,7 @@ seconds) or the moment you click somewhere else.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/screenshot-settings-light.png">
-    <img src="docs/assets/screenshot-settings.png" alt="Behavior pane: Instant, Smooth and Fade animation cards with a live preview, the icon spacing slider with its Apply button, Reveal on hover with a delay menu, reveal on click in empty space and double-click for Always Hidden, Hide again after a delay you pick or when you click elsewhere, and the Notification Center clock click" width="640">
+    <img src="docs/assets/screenshot-settings.png" alt="Behavior pane: Instant, Smooth and Fade animation cards with a live preview, the icon spacing slider with its Apply button, Reveal on hover with a delay menu, reveal on click in empty space and double-click for Always Hidden, Hide again after a delay you pick or when you click elsewhere, and the right-click menu card where you tick and reorder what the chevron's menu shows" width="640">
   </picture><br>
   <sub>Your rules for revealing, and for putting everything back.</sub>
 </p>
@@ -165,7 +165,7 @@ Settings › Menu Bar › "Show Live Activities" turns it off. New in 0.3.4.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/screenshot-general-light.png">
-    <img src="docs/assets/screenshot-general.png" alt="General settings: launch at login, the menu bar icon toggle with seven icon styles, the right-click menu, a Shortcuts card (show hidden icons, show Always Hidden too, search the menu bar, open Notification Center, open Settings), the display language picker and the Accessibility and Screen Recording permission status" width="640">
+    <img src="docs/assets/screenshot-general.png" alt="General settings: launch at login, the menu bar icon toggle with nine icon styles, the accent color swatches, the right-click menu, a Shortcuts card (show hidden icons, show Always Hidden too, search the menu bar, open Notification Center, open Settings), the display language picker and the Accessibility and Screen Recording permission status" width="640">
   </picture><br>
   <sub>General. Pick the icon Dimble wears, or your language.</sub>
 </p>
