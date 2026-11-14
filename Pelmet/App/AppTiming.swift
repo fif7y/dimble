@@ -298,6 +298,14 @@ enum AppTiming {
     /// Bounded: a frame that never settles is clicked where it last read.
     static let pressFrameTolerance: CGFloat = 1
     static let pressFrameCap: TimeInterval = 1
+    /// A layer-0 window taller than this is a panel, not a bar row: the
+    /// floor the press oracle counts a menu from (`ItemPress.counts`).
+    nonisolated static let pressPanelFloor: CGFloat = 40
+    /// What the oracle RECORDS a turned-down window from, below what it
+    /// counts from. Measured 2026-11-14 (#151): a 30pt layer-0 panel was
+    /// missed by the count and named by nothing, because the record shared
+    /// the count's floor. Low enough that anything visible is named.
+    nonisolated static let pressRecordFloor: CGFloat = 8
     /// A press waits this long for a reveal or conceal already running.
     static let pressTransitionWait: TimeInterval = 2
     /// A newer press makes the one before it yield: it still waits this

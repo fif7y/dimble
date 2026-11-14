@@ -72,7 +72,6 @@ final class ItemPress {
         let barTop: CGFloat
         /// The bar's height below that top.
         let barBottom: CGFloat
-        let screenWidth: CGFloat
         /// Where the click lands. A menu or popover the press opens is
         /// anchored to the item, so its span sits near this x — recorded,
         /// not yet gated on, so #151's log says whether it discriminates.
@@ -111,7 +110,9 @@ final class ItemPress {
             let lowest = g.barTop + g.barBottom + 60
             var gates: [String] = []
             if layer != 0 { gates.append("layer \(layer)") }
-            if width >= g.screenWidth * 0.6 { gates.append("width \(Int(width))≥\(Int(g.screenWidth * 0.6))") }
+            if height <= AppTiming.pressPanelFloor {
+                gates.append("height \(Int(height))≤\(Int(AppTiming.pressPanelFloor))")
+            }
             if y < g.barTop { gates.append("y \(Int(y))<\(Int(g.barTop))") }
             if y > lowest { gates.append("y \(Int(y))>\(Int(lowest))") }
             let gap = max(0, max(x - g.clickX, g.clickX - (x + width)))
@@ -611,12 +612,11 @@ final class ItemPress {
            id != CGMainDisplayID() {
             let bounds = CGDisplayBounds(id)
             return Geometry(barTop: bounds.minY, barBottom: max(frame.maxY - bounds.minY, 24),
-                            screenWidth: bounds.width, clickX: mid.x)
+                            clickX: mid.x)
         }
         return Geometry(
             barTop: 0,
             barBottom: NSScreen.screens.first.map { $0.frame.maxY - $0.visibleFrame.maxY } ?? 24,
-            screenWidth: NSScreen.screens.first?.frame.width ?? 1440,
             clickX: mid.x
         )
     }
@@ -648,26 +648,41 @@ final class ItemPress {
                   let y = bounds["Y"], let width = bounds["Width"], let height = bounds["Height"]
             else { continue }
             let x = bounds["X"] ?? 0
-            if pid > 0, owner == pid, height > 40 { counts.own.insert(number) }
+            if pid > 0, owner == pid, height > AppTiming.pressPanelFloor { counts.own.insert(number) }
             guard owner != me else { continue }
             // A system popover can sit at the bar's own level (layer 25,
             // 1131pt tall): the bar's level is excluded only at the bar's
             // height.
             if layer > 0, layer != 25 || height > 60 {
                 counts.elevated.insert(number)
-            } else if layer == 0, height > 40, width < geometry.screenWidth * 0.6,
+            } else if layer == 0, height > AppTiming.pressPanelFloor,
                       y >= geometry.barTop, y <= geometry.barTop + geometry.barBottom + 60 {
                 // A popover at the normal level: its top sits between the
                 // clicked bar's display top and 60pt below the bar (its
-                // bounds carry a margin), and it is nowhere near a document
-                // window's width.
+                // bounds carry a margin).
+                //
+                // No width test. One stood here — narrower than 60% of the
+                // display — and turned down a real panel: measured
+                // 2026-11-14 against a layer-0 panel of a known shape
+                // (dimble-tools/layer0harness), 1200pt of 1800 read as
+                // nothing opened and the item was concealed under it. The
+                // band is what keeps document windows out, not the width:
+                // they sit below the bar, wide or not. A panel anchored to
+                // the item is near `clickX` where a document window is not,
+                // which is the next discriminator if the band proves too
+                // loose — still only recorded, not gated on, since nothing
+                // has measured a document window against it.
                 counts.elevated.insert(number)
-            } else if height > 40, layer <= 0 || layer == 25 {
-                // #151: tall enough to be a menu and not counted. Which
+            } else if height > AppTiming.pressRecordFloor, layer <= 0 || layer == 25 {
+                // #151: could have been the menu and was not counted. Which
                 // gate turned it down is the open question, and both ways
                 // of being wrong are bad — a miss conceals the item under
                 // its own menu (#26), a false count holds the bar revealed
                 // for `pressMenuCap` — so this records rather than guesses.
+                //
+                // Recorded from a lower floor than it is counted from: at
+                // the counting floor a 30pt panel was turned down AND
+                // recorded by nothing, so the log named no cause at all.
                 counts.turnedDown[number] = TurnedDown(
                     layer: layer, x: x, y: y, width: width, height: height,
                     owner: info[kCGWindowOwnerName as String] as? String ?? "pid \(owner)"
