@@ -276,7 +276,7 @@ struct PanelView: View {
                     // the air below it whatever the gap is.
                     .overlay(alignment: .top) {
                         if hasOtherIcons, !block.isFolded {
-                            Rectangle().fill(ink.tertiary)
+                            Rectangle().fill(ink.rule)
                                 .frame(height: 1)
                                 .offset(y: (groupGap - 1) / 2)
                                 .allowsHitTesting(false)
@@ -645,6 +645,10 @@ struct PanelInk {
     var primary: Color { base.opacity(scheme == .dark ? 0.92 : 0.86) }
     var secondary: Color { base.opacity(scheme == .dark ? 0.64 : 0.6) }
     var tertiary: Color { base.opacity(scheme == .dark ? 0.40 : 0.36) }
+    /// The group separator. It only has to say "a boundary is here", which a
+    /// line at reading strength overstates, so it sits between the wells and
+    /// the inks that carry meaning.
+    var rule: Color { base.opacity(scheme == .dark ? 0.14 : 0.11) }
     var well: Color { base.opacity(scheme == .dark ? 0.075 : 0.05) }
     var wellHover: Color { base.opacity(scheme == .dark ? 0.13 : 0.085) }
     var wellPress: Color { base.opacity(scheme == .dark ? 0.2 : 0.13) }
