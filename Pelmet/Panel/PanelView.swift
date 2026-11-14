@@ -269,13 +269,16 @@ struct PanelView: View {
                 if fold == .handle {
                     handleFold(block)
                 }
-                foldedTiles(block, gap: fold == .count ? 6 : first && fold == nil ? 0 : 10)
-                    // Use the existing group gap so expansion keeps the panel size and drag coordinates unchanged.
+                // Use the existing group gap so expansion keeps the panel size and drag coordinates unchanged.
+                let groupGap: CGFloat = fold == .count ? 6 : first && fold == nil ? 0 : 10
+                foldedTiles(block, gap: groupGap)
+                    // Centred in that gap, so the air above the rule matches
+                    // the air below it whatever the gap is.
                     .overlay(alignment: .top) {
                         if hasOtherIcons, !block.isFolded {
                             Rectangle().fill(ink.tertiary)
                                 .frame(height: 1)
-                                .offset(y: 2)
+                                .offset(y: (groupGap - 1) / 2)
                                 .allowsHitTesting(false)
                                 .accessibilityHidden(true)
                         }
