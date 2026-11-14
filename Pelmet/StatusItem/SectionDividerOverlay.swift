@@ -76,7 +76,6 @@ final class SectionDividerOverlay {
                 window.level = .statusBar
                 window.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
                 window.animationBehavior = .none
-                window.sharingType = .none
                 window.contentView = DividerView()
                 windows[id] = window
             }
