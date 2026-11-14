@@ -426,7 +426,20 @@ final class MenuBarBandMonitor {
         // an "always show all" display too, so its claim is taken there.
         refreshRightClickClaim(at: location, inBand: inBand, of: screen)
 
-        guard appState.settings.behavior(forDisplayUUID: displayUUID) == .collapse else { return }
+        // The flag describes a collapsing display's band, and the reveal work
+        // below is for those displays only. A pointer that crossed onto a
+        // show-all display is in no band this flag names, so it is cleared
+        // here instead of keeping the last display's value: `rehideDeferReason`
+        // and `suppressHoverUntilPointerLeaves` both read it, and a stale true
+        // ate the next hover visit whole (#84). The crossing above has already
+        // armed the countdown through `DisplayCrossing.action`.
+        guard appState.settings.behavior(forDisplayUUID: displayUUID) == .collapse else {
+            if pointerInBand {
+                pointerInBand = false
+                hoverSuppressedUntilExit = false
+            }
+            return
+        }
 
         if inBand, !pointerInBand {
             pointerInBand = true
@@ -508,11 +521,7 @@ final class MenuBarBandMonitor {
     enum DeferReason: String { case band, active, elevated, drag, overflow }
 
     func rehideDeferReason() -> DeferReason? {
-        // Crossing onto a show-all display can leave this cache set; verify
-        // the live pointer location.
-        let location = NSEvent.mouseLocation
-        if pointerInBand, let geometry = screenGeometry(containing: location),
-           NSMouseInRect(location, geometry.band, false) { return .band }
+        if pointerInBand { return .band }
         if cmdDragActive || dropAdoptionPending || appState?.dropAdoptionInFlight == true { return .drag }
         // Pelmet frontmost only holds the bar for the layout editor and the
         // onboarding demo — the General tab is not a reason to stay revealed.

@@ -41,17 +41,22 @@ public enum RevealRouting {
             && requested.contains(.alwaysHidden) && destination(for: reason, target: target) == .panel
     }
 
-    /// Ignore ordinary panel clicks on show-all displays, but preserve
-    /// explicit Always Hidden requests.
+    /// A click in the empty bar of a display that shows all icons asks for
+    /// icons it already shows, so it opens no panel. The chevron is not one
+    /// of these: there it widens to Always Hidden (#96, `clickWidensToAlwaysHidden`,
+    /// which runs first), and a request that already carries Always Hidden
+    /// is a deliberate one wherever it came from.
     public static func suppressesPanelClick(_ reason: RevealReason, sections: Set<Section>, behavior: DisplayBehavior, target: RevealTarget) -> Bool {
         behavior == .alwaysShowAll && target != .menuBar && !sections.contains(.alwaysHidden)
-            && (reason == .click || reason == .doubleClick || reason == .statusItem)
+            && (reason == .click || reason == .doubleClick)
     }
 
     /// The show-all policy holds the native baseline open, not temporary
     /// panels or Always Hidden reveals.
     public static func displayPolicyHoldsReveal(behavior: DisplayBehavior, anchored: Bool, panelShowsReveal: Bool, sections: Set<Section>) -> Bool {
         behavior == .alwaysShowAll && !anchored && !panelShowsReveal && !sections.contains(.alwaysHidden)
+    }
+
     /// Capture an empty-bar click only on opening, so an open panel stays put while aiming at a tile.
     public static func centersPanelOnClick(_ reason: RevealReason?, enabled: Bool, isOpen: Bool) -> Bool {
         enabled && !isOpen && (reason == .click || reason == .doubleClick)

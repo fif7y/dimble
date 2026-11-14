@@ -1134,13 +1134,21 @@ final class AppState {
     }
 
     func toggle(reason: RevealReason, sections: Set<PelmetCore.Section> = [.hidden]) {
-        if suppressesPanelClick(reason, sections: sections) { return }
         if liveMirror.intercepts(reveal: reason, sections: sections, how: .toggle) { return }
-        // Panel clicks were filtered above; native bar mode still lets the
-        // chevron reveal Always Hidden.
+        // A chevron click on a display that shows all icons opens Always
+        // Hidden there, in that display's "Show hidden icons in" (#96). A plain
+        // toggle asked for nothing when anchored, and closed the icons that
+        // display shows when the pointer's display decided. This widening
+        // comes BEFORE the suppression below, which reads the sections a
+        // reveal would carry: suppressed first, the chevron was inert there.
         if RevealRouting.clickWidensToAlwaysHidden(reason, sections: sections, behavior: pointerDisplayBehavior) {
             PelmetLog.log("toggle(\(reason)) on a display that shows all icons — Always Hidden too")
             toggleAll(reason: reason)
+            return
+        }
+        // What is left asks only for icons that display already shows.
+        if suppressesPanelClick(reason, sections: sections) {
+            PelmetLog.log("toggle(\(reason)) ignored — this display shows these icons already")
             return
         }
         if anchoredShowAllAsksNothing(sections, reason) { return }
@@ -1189,7 +1197,6 @@ final class AppState {
     }
 
     func reveal(_ sections: Set<PelmetCore.Section>, reason: RevealReason) {
-        if suppressesPanelClick(reason, sections: sections) { return }
         if liveMirror.intercepts(reveal: reason, sections: sections, how: .reveal) { return }
         if anchoredShowAllAsksNothing(sections, reason) { return }
         // Empty-space double-clicks bypass toggleAll, so replace the policy
@@ -1217,7 +1224,6 @@ final class AppState {
     /// once it is all out. A reveal that left Always Hidden in widens to
     /// include it instead of closing: the key asked for more, not less.
     func toggleAll(reason: RevealReason) {
-        if suppressesPanelClick(reason, sections: [.hidden, .alwaysHidden]) { return }
         if liveMirror.intercepts(reveal: reason, sections: [.hidden, .alwaysHidden], how: .toggleAll) { return }
         let all: Set<PelmetCore.Section> = [.hidden, .alwaysHidden]
         // Off the anchor (no Screen Recording), a display that shows all
@@ -1645,6 +1651,7 @@ final class AppState {
            !transitions.anchored, pointerDisplayBehavior == .alwaysShowAll,
            revealPresenter === barPresenter,
            case .revealed(let sections, _) = rehide.state, sections.contains(.alwaysHidden) {
+            PelmetLog.log("rehideTrigger(\(trigger)) state=\(rehide.state) — narrow to the policy's bar")
             dispatch(rehide.handle(.narrowRequested([.hidden], .displayPolicy)))
             return
         }
