@@ -9,6 +9,7 @@ import Testing
 
     @Test func defaultsAreCompactAutoAndFolded() throws {
         let options = PanelOptions()
+        #expect(!options.centersOnClick)
         #expect(!options.showsNames)
         #expect(options.columnsWithNames == nil && options.columnsCompact == nil)
         #expect(!options.separatorsBreakRows)
@@ -21,8 +22,15 @@ import Testing
         #expect(try decode("{}") == options)
     }
 
+    @Test func invalidClickCenteringFallsBackWithoutLosingOtherSettings() throws {
+        let options = try decode(#"{"centersOnClick":"yes","showsNames":true}"#)
+        #expect(!options.centersOnClick)
+        #expect(options.showsNames)
+    }
+
     @Test func roundTrips() throws {
         var options = PanelOptions()
+        options.centersOnClick = true
         options.showsNames = true
         options.columnsWithNames = 4
         options.columnsCompact = 7

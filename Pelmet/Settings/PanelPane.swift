@@ -82,7 +82,7 @@ struct PanelPane: View {
     /// The Icons rows and the modes that draw them.
     private static let modeRows: [String: Set<RevealTarget>] = [
         "panelNames": [.panel], "panelColumns": [.panel], "panelClosedApps": [.panel, .row],
-        "panelGroups": [.panel, .row], "panelAlwaysHidden": [.panel, .row], "panelFold": [.panel],
+        "panelCenterOnClick": [.panel, .row], "panelGroups": [.panel, .row], "panelAlwaysHidden": [.panel, .row], "panelFold": [.panel],
     ]
 
     /// The notch line only where a display has one; "under the menu bar"
@@ -103,6 +103,10 @@ struct PanelPane: View {
     private var icons: some View {
         let options = appState.settings.panel
         return SettingsCard(title: "Icons") {
+            SettingToggleRow(title: "Center on menu bar click",
+                             caption: "Open at the click position in empty menu bar space. Chevron clicks stay anchored to the chevron.",
+                             isOn: binding(\.centersOnClick))
+                .settingAnchor("panelCenterOnClick")
             if inUse.contains(.panel) {
                 SettingRow(title: "Columns",
                            caption: "Auto fits your icons. Or drag the panel's edge.") {

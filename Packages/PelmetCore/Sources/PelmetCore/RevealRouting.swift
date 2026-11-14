@@ -52,6 +52,9 @@ public enum RevealRouting {
     /// panels or Always Hidden reveals.
     public static func displayPolicyHoldsReveal(behavior: DisplayBehavior, anchored: Bool, panelShowsReveal: Bool, sections: Set<Section>) -> Bool {
         behavior == .alwaysShowAll && !anchored && !panelShowsReveal && !sections.contains(.alwaysHidden)
+    /// Capture an empty-bar click only on opening, so an open panel stays put while aiming at a tile.
+    public static func centersPanelOnClick(_ reason: RevealReason?, enabled: Bool, isOpen: Bool) -> Bool {
+        enabled && !isOpen && (reason == .click || reason == .doubleClick)
     }
 
     public enum Destination: Equatable, Sendable {

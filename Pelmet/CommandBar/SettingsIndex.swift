@@ -76,6 +76,8 @@ enum SettingsIndex {
 
             panel("hiddenIconsIn", String(localized: "Show hidden icons in"),
                   ["panel", "grid", "row", "notch", "overflow", "dropdown", "tray", "layout", "per display", "monitor", "external"]),
+            panel("panelCenterOnClick", String(localized: "Center on menu bar click"),
+                  ["center", "click", "position", "pointer", "panel", "row"]),
             panel("panelNames", String(localized: "Show names"),
                   ["labels", "names", "titles", "panel"]),
             panel("panelColumns", String(localized: "Columns"),
