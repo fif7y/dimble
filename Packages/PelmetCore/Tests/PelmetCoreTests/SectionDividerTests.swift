@@ -15,6 +15,28 @@ struct SectionDividerTests {
         #expect(frame == CGRect(x: 93, y: 6, width: 2, height: 12))
     }
 
+    // Gab's bar, 2026-11-14: a 26pt slot holding a 23pt battery next to a
+    // 38pt slot holding a 14pt glyph. Centred on the slot edge the line sat
+    // 5pt from one icon and 16pt from the other.
+    @Test func lopsidedSlotsCentreOnTheIconsNotTheSlotEdge() {
+        let frame = MenuBarGeometry.alwaysHiddenDivider(items: [
+            (.alwaysHidden, rect(1414, width: 26)), (.hidden, rect(1448, width: 38)),
+        ])
+        #expect(frame?.midX == 1447)
+    }
+
+    // However lopsided, the line never lands on top of an icon's slot.
+    @Test func theLineStaysInTheGapBetweenTheSlots() {
+        let narrowThenWide = MenuBarGeometry.alwaysHiddenDivider(items: [
+            (.alwaysHidden, rect(0, width: 4)), (.hidden, rect(8, width: 100)),
+        ])
+        #expect(narrowThenWide?.midX == 8)
+        let wideThenNarrow = MenuBarGeometry.alwaysHiddenDivider(items: [
+            (.alwaysHidden, rect(0, width: 100)), (.hidden, rect(104, width: 4)),
+        ])
+        #expect(wideThenNarrow?.midX == 100)
+    }
+
     @Test func separatesFromVisibleWhenHiddenIsEmpty() {
         #expect(MenuBarGeometry.alwaysHiddenDivider(items: [
             (.alwaysHidden, rect(44)), (.visible, rect(68)),

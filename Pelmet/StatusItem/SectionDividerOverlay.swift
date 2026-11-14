@@ -8,11 +8,13 @@ final class SectionDividerOverlay {
     private var windows: [CGDirectDisplayID: NSPanel] = [:]
     private var frames: [CGDirectDisplayID: CGRect] = [:]
     private var reported: [CGDirectDisplayID: String] = [:]
+    private var gaps: [CGDirectDisplayID: String] = [:]
 
     func hide() {
         if !frames.isEmpty { PelmetLog.log("divider: reveal ended or busy, hidden") }
         frames.removeAll()
         reported.removeAll()
+        gaps.removeAll()
         for window in windows.values { window.orderOut(nil) }
     }
 
@@ -26,6 +28,11 @@ final class SectionDividerOverlay {
                 return (model.section(of: key), frame)
             }
             frames[id] = MenuBarGeometry.alwaysHiddenDivider(items: items)
+            // The icons either side, so a divider that looks off-centre can be
+            // read against the slots it was centred in.
+            gaps[id] = MenuBarGeometry.alwaysHiddenNeighbours(items: items).map {
+                " between \(Int($0.left.minX))…\(Int($0.left.maxX)) and \(Int($0.right.minX))…\(Int($0.right.maxX))"
+            }
             if frames[id] == nil {
                 report(id, "no boundary (\(items.filter { $0.section == .alwaysHidden }.count) always-hidden, \(items.count) frames)")
             }
@@ -81,7 +88,7 @@ final class SectionDividerOverlay {
             }
             window.setFrame(cocoaFrame, display: true)
             window.orderFrontRegardless()
-            report(id, "shown at \(Int(frame.minX)),\(Int(frame.minY))")
+            report(id, "shown at \(Int(frame.minX)),\(Int(frame.minY))\(gaps[id] ?? "")")
         }
     }
 
