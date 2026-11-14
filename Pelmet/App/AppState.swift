@@ -900,6 +900,14 @@ final class AppState {
                 self?.scheduleAnchorCheck("display change")
             }
         })
+        // A full-screen app takes the bar with no screens change and no icon
+        // snapshot: the space change is when the divider's visibility check is
+        // worth running again (it replaced a 0.5s poll — don't bring that back).
+        chevronHostObservers.append(workspace.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshSectionDivider() }
+        })
         chevronHostObservers.append(DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
         ) { [weak self] _ in
@@ -1661,6 +1669,11 @@ final class AppState {
 
     func pointerReturnedToBand() {
         dispatch(rehide.handle(.pointerReturned))
+        // Under menu-bar auto-hide the bar is only drawn while the pointer is
+        // at the top edge, and nothing else tells us it came or went: the
+        // divider's own visibility check runs on both crossings instead of a
+        // timer polling for it.
+        refreshSectionDivider()
     }
 
     func pointerEnteredHoverZone() {
@@ -1669,6 +1682,8 @@ final class AppState {
 
     func pointerLeftBand() {
         dispatch(rehide.handle(.pointerLeft))
+        // The other half of the auto-hide pair: the bar goes with the pointer.
+        refreshSectionDivider()
     }
 
     /// Anything is out: a section, or only icons Show in Menu Bar brought out.

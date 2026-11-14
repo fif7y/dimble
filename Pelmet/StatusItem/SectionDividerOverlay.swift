@@ -7,13 +7,10 @@ import PelmetEngine
 final class SectionDividerOverlay {
     private var windows: [CGDirectDisplayID: NSPanel] = [:]
     private var frames: [CGDirectDisplayID: CGRect] = [:]
-    private var visibilityTimer: Timer?
     private var reported: [CGDirectDisplayID: String] = [:]
 
     func hide() {
         if !frames.isEmpty { PelmetLog.log("divider: reveal ended or busy, hidden") }
-        visibilityTimer?.invalidate()
-        visibilityTimer = nil
         frames.removeAll()
         reported.removeAll()
         for window in windows.values { window.orderOut(nil) }
@@ -34,22 +31,18 @@ final class SectionDividerOverlay {
             }
         }
         guard !frames.isEmpty else {
-            visibilityTimer?.invalidate()
-            visibilityTimer = nil
             for window in windows.values { window.orderOut(nil) }
             return
         }
         draw()
-        // Auto-hide and full-screen changes may not update icon snapshots; poll only while a divider is active.
-        if visibilityTimer == nil {
-            visibilityTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.draw() }
-            }
-        }
     }
 
+    /// `onScreen` stays optional: `drawnBarHeight` falls back to its own read
+    /// when the window list is nil, and an empty array would read as a real
+    /// list with no menu bar in it — every display "not visible" whenever the
+    /// list call fails.
     private func draw() {
-        let onScreen = ConcealGhostOverlay.onScreenWindows() ?? []
+        let onScreen = ConcealGhostOverlay.onScreenWindows()
         let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
         for (id, window) in windows where frames[id] == nil { window.orderOut(nil) }
         for (id, frame) in frames {
@@ -61,7 +54,11 @@ final class SectionDividerOverlay {
                 windows[id]?.orderOut(nil)
                 continue
             }
-            guard !ConcealGhostOverlay.barCover(over: cocoaFrame) else {
+            // Live mode's cover only: an anchored reveal keeps a held bar
+            // picture up for `AppTiming.anchoredBarCeiling` (a day), and those
+            // are not live covers. Counting every cover meant the divider
+            // never drew at all once Hidden was pinned.
+            guard !ConcealGhostOverlay.liveCover(over: cocoaFrame) else {
                 report(id, "bar covered")
                 windows[id]?.orderOut(nil)
                 continue
