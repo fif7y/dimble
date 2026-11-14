@@ -32,6 +32,28 @@ public enum RevealTarget: String, Codable, CaseIterable, Sendable {
 }
 
 public enum RevealRouting {
+    /// A policy-opened bar is only the baseline; explicit Always Hidden
+    /// requests still follow the panel setting.
+    public static func replacesPolicyBarWithPanel(current: Set<Section>, openedBy: RevealReason,
+                                                  requested: Set<Section>, reason: RevealReason,
+                                                  target: RevealTarget) -> Bool {
+        openedBy == .displayPolicy && !current.contains(.alwaysHidden)
+            && requested.contains(.alwaysHidden) && destination(for: reason, target: target) == .panel
+    }
+
+    /// Ignore ordinary panel clicks on show-all displays, but preserve
+    /// explicit Always Hidden requests.
+    public static func suppressesPanelClick(_ reason: RevealReason, sections: Set<Section>, behavior: DisplayBehavior, target: RevealTarget) -> Bool {
+        behavior == .alwaysShowAll && target != .menuBar && !sections.contains(.alwaysHidden)
+            && (reason == .click || reason == .doubleClick || reason == .statusItem)
+    }
+
+    /// The show-all policy holds the native baseline open, not temporary
+    /// panels or Always Hidden reveals.
+    public static func displayPolicyHoldsReveal(behavior: DisplayBehavior, anchored: Bool, panelShowsReveal: Bool, sections: Set<Section>) -> Bool {
+        behavior == .alwaysShowAll && !anchored && !panelShowsReveal && !sections.contains(.alwaysHidden)
+    }
+
     public enum Destination: Equatable, Sendable {
         case bar
         case panel
