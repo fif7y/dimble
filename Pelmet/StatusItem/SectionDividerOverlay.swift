@@ -86,7 +86,9 @@ final class SectionDividerOverlay {
         }
     }
 
-    /// Log state changes only, distinguishing missing geometry, covers and drawing without polling noise.
+    /// Log state changes only: a redraw that reaches the same verdict as the
+    /// last one says nothing, so missing geometry, a cover and drawing each
+    /// appear once per change.
     private func report(_ display: CGDirectDisplayID, _ state: String) {
         guard reported[display] != state else { return }
         reported[display] = state
