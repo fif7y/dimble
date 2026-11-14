@@ -255,6 +255,11 @@ struct PanelView: View {
         if block.foldable {
             // A search shows the matches, no fold.
             let fold: PanelOptions.AlwaysHiddenFold? = content.query.isEmpty ? content.fold : nil
+            let hasOtherIcons = content.blocks.contains { other in
+                other.kind != .alwaysHidden && !other.isFolded && other.grid.rows.joined().contains {
+                    $0.tile != .fold && $0.tile != .rowBreak
+                }
+            }
             VStack(alignment: .trailing, spacing: 0) {
                 // Both stay where they are: the tiles come out under them.
                 if fold == .count {
@@ -265,6 +270,16 @@ struct PanelView: View {
                     handleFold(block)
                 }
                 foldedTiles(block, gap: fold == .count ? 6 : first && fold == nil ? 0 : 10)
+                    // Use the existing group gap so expansion keeps the panel size and drag coordinates unchanged.
+                    .overlay(alignment: .top) {
+                        if hasOtherIcons, !block.isFolded {
+                            Rectangle().fill(ink.tertiary)
+                                .frame(height: 1)
+                                .offset(y: 2)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
                     // The open grid lit as a drop target. Outside the fold's
                     // mask, which cuts at the grid's width.
                     .background(alignment: .bottomTrailing) {

@@ -97,6 +97,8 @@ final class AppState {
     /// bar reads concealed (the "Show Live Activities" setting).
     @ObservationIgnored lazy var liveMirror = LiveMirror(appState: self)
     @ObservationIgnored private lazy var barPresenter = BarPresenter(transitions: transitions)
+    @ObservationIgnored private let sectionDivider = SectionDividerOverlay()
+    @ObservationIgnored private var sectionDividerRefresh: Task<Void, Never>?
     /// The hidden icons as tiles under the chevron (docs/PANEL-PLAN.md §5).
     @ObservationIgnored lazy var panelPresenter = PanelPresenter(appState: self)
     /// Who drew the reveal that is up, so the conceal goes to the same one.
@@ -2458,6 +2460,7 @@ final class AppState {
     }
 
     func settingsChanged() {
+        defer { refreshSectionDivider() }
         rehide.policy = settings.rehidePolicy
         if settings.showStatusItem, statusItem == nil {
             // A chevron switched on mid-session is a fresh registration the
@@ -3912,7 +3915,9 @@ final class AppState {
     /// own items follow them like any reveal: told "concealed" mid-pass,
     /// the extras the engine had just shown hid again and the bar bounced
     /// under the capture (2026-10-09).
-    @ObservationIgnored var picturePassSections: Set<PelmetCore.Section>?
+    @ObservationIgnored var picturePassSections: Set<PelmetCore.Section>? {
+        didSet { refreshSectionDivider() }
+    }
 
     /// What is revealed ON THE BAR. A reveal the panel draws leaves the bar
     /// concealed, so Pelmet's own items, covers and pictures stay put.
@@ -3935,6 +3940,24 @@ final class AppState {
         }
     }
 
+    private func refreshSectionDivider(snapshot fresh: EngineSnapshot? = nil) {
+        sectionDividerRefresh?.cancel()
+        guard !isTransitioning, !panelShowsReveal, picturePassSections == nil,
+              currentRevealedSections.contains(.alwaysHidden),
+              let snap = fresh ?? snapshot, snap.itemsAtRest else {
+            sectionDivider.hide()
+            return
+        }
+        sectionDividerRefresh = Task { [weak self] in
+            guard let self else { return }
+            var copies = await engine.barCopies()
+            guard !Task.isCancelled else { return }
+            // Individually revealed items and concealed copies must not create a false section boundary.
+            for id in snap.concealed.union(snap.shownAlone) { copies.removeValue(forKey: id) }
+            sectionDivider.update(model: settings.sectionModel, copies: copies)
+        }
+    }
+
     private func dispatch(_ effects: [RehideEffect]) {
         // Extras are NOT applied here: the engine's reflow companion applies
         // them inside the converge so their size change shares the assertion
@@ -3942,6 +3965,7 @@ final class AppState {
         // The chevron flips at transition START — settle-time flips read as an
         // unacknowledged click.
         defer {
+            refreshSectionDivider()
             statusItem?.updateSymbol(revealed: isRevealedOrRevealing)
             releaseOrphanedItemsInBar()
         }
@@ -5052,6 +5076,7 @@ final class AppState {
 
     func updateSnapshot(_ snap: EngineSnapshot) {
         defer {
+            refreshSectionDivider(snapshot: snap)
             if transitions.anchored {
                 transitions.refreshHeld("items moved")
             } else if launchBaselineApplied, case .concealed = rehide.state, revealAnchored, !transitions.anchorTarget,

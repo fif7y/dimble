@@ -1110,6 +1110,11 @@ final class ConcealGhostOverlay {
         registry.allObjects.contains { $0.isLiveCover && !$0.finished && $0.window.isVisible && $0.window.frame.intersects(rect) }
     }
 
+    /// The divider stays hidden while a cover conceals another display or animates a transition.
+    static func barCover(over rect: NSRect) -> Bool {
+        registry.allObjects.contains { !$0.finished && $0.window.isVisible && $0.window.frame.intersects(rect) }
+    }
+
     /// Shortens the cover from the right, in place: the picture stays where it
     /// is and the window just ends sooner (a new window for a shorter cover
     /// left a gap of three frames, and the layers in it had to move).
