@@ -175,7 +175,20 @@ enum OverflowToggle {
         for attempt in 1...2 {
             let frame = currentFrame(of: toggle.element) ?? toggle.frame
             guard frame != .zero else { return false }
-            await ItemMover.shieldedClick(at: CGPoint(x: frame.midX, y: frame.midY))
+            let at = CGPoint(x: frame.midX, y: frame.midY)
+            // #150: every caller clicks the « under a bar cover — a press
+            // begins its cover before it expands the « (ItemPress), and a
+            // quiet Apply pass runs under one throughout. A cover takes the
+            // click, so the « never flips: the same thing that made an
+            // item's press show nothing in #142, where the fix was to let
+            // the covers pass the click through. The « needs it too.
+            ConcealGhostOverlay.everyCoverPassesClicks(true)
+            // The window server commits `ignoresMouseEvents` a frame or two
+            // late, so the click waits for it exactly as a press does.
+            try? await Task.sleep(for: .milliseconds(40))
+            PelmetLog.log("overflow«: click \(attempt) at \(Int(at.x)),\(Int(at.y)) → \(ItemPress.whatIsAt(at))")
+            await ItemMover.shieldedClick(at: at)
+            ConcealGhostOverlay.everyCoverPassesClicks(false)
             try? await Task.sleep(for: AppTiming.overflowExpandSettle)
             let now = state(of: toggle.element)
             PelmetLog.log("overflow«: click \(attempt) → \(now.map { $0 ? "expanded" : "collapsed" } ?? "gone")")
