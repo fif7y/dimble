@@ -145,6 +145,9 @@ final class SectionGrouper {
         let level = Int(CGWindowLevelForKey(.popUpMenuWindow))
         for w in list {
             guard let layer = w[kCGWindowLayer as String] as? Int, layer == level,
+                  // Our own windows at this level — the panel's drag ghost,
+                  // the chevron's context menu — are not another app's menu.
+                  (w[kCGWindowOwnerPID as String] as? pid_t) != ProcessInfo.processInfo.processIdentifier,
                   (w[kCGWindowAlpha as String] as? Double ?? 1) > 0.01,
                   let b = w[kCGWindowBounds as String] as? [String: CGFloat],
                   let width = b["Width"], let height = b["Height"], width > 20, height > 12

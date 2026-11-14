@@ -189,6 +189,10 @@ enum AppTiming {
     static let dragAdoptDelay: TimeInterval = 0.35
     /// Rehide re-arm while deferred (pointer in band / elevated window).
     static let rehideDeferRearm: TimeInterval = 1.5
+    /// How long an open pop-up menu may hold the reveal. A window that never
+    /// goes away must not pin the bar open for good; same cap as a press's
+    /// wait for the menu it opened (`pressMenuCap`).
+    static let rehideMenuHoldCap: TimeInterval = 60
     /// Termination: max wait for engine.stop() before replying anyway.
     static let terminationStopDeadline: TimeInterval = 2
     /// Accessibility grant poll. A revoked grant only shows up as empty AX

@@ -518,7 +518,13 @@ final class MenuBarBandMonitor {
     /// pointer. Nil when nothing holds. One window list per verdict: the
     /// old Bool + diagnostic-twin pair walked the list twice per deferred
     /// reveal (perf audit 2026-09-15, fix 4b).
-    enum DeferReason: String { case band, active, elevated, drag, overflow }
+    enum DeferReason: String { case band, active, elevated, drag, overflow, menu }
+
+    /// When the open-menu hold started, so a pop-up-menu-level window that
+    /// never goes away cannot hold the reveal open for good.
+    private var menuHoldSince: Date?
+    /// One log line per hold, not one per re-arm.
+    private var menuHoldLogged = false
 
     func rehideDeferReason() -> DeferReason? {
         if pointerInBand { return .band }
@@ -527,6 +533,31 @@ final class MenuBarBandMonitor {
         // onboarding demo — the General tab is not a reason to stay revealed.
         if NSApp.isActive, appState?.editorHoldsBar == true || OnboardingController.shared.isPresented { return .active }
         if pointerIsOverElevatedWindow() { return .elevated }
+        // Something an item opened is still up. Concealing under it orphans
+        // it: the agent takes the icon off the bar, the app never hears its
+        // menu close, and its button stays highlighted and dead until the app
+        // is clicked again — the other app's state, which no later reveal
+        // clears (ItemPress waits the same thing out for its own presses,
+        // OpenClip's palette every reveal, measured 2026-11-14 17:36).
+        // `pointerIsOverElevatedWindow` cannot stand in for this: it is a
+        // pointer hit test, and that palette's window bounds start 35pt ABOVE
+        // the screen top, which its band test turns down. Any app's open menu
+        // holds, not just a clicked item's own: an item opened by the app's
+        // hotkey highlights its button just the same.
+        if let owner = SectionGrouper.popUpMenuOwner() {
+            let since = menuHoldSince ?? Date()
+            menuHoldSince = since
+            if Date().timeIntervalSince(since) < AppTiming.rehideMenuHoldCap {
+                if !menuHoldLogged {
+                    menuHoldLogged = true
+                    PelmetLog.log("rehide: an open menu holds the reveal (\(owner))")
+                }
+                return .menu
+            }
+        } else {
+            menuHoldSince = nil
+            menuHoldLogged = false
+        }
         // Apple's « open on hidden icons that didn't fit: it draws them left
         // of the notch, and the notch is off the band, so the way there read
         // as leaving the bar and they concealed under the pointer (#81, live
