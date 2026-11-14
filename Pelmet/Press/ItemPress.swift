@@ -661,17 +661,27 @@ final class ItemPress {
                 // clicked bar's display top and 60pt below the bar (its
                 // bounds carry a margin).
                 //
-                // No width test. One stood here — narrower than 60% of the
-                // display — and turned down a real panel: measured
+                // No width test. One stood here — narrower than 60% of
+                // the display — and turned down a real panel: measured
                 // 2026-11-14 against a layer-0 panel of a known shape
                 // (dimble-tools/layer0harness), 1200pt of 1800 read as
-                // nothing opened and the item was concealed under it. The
-                // band is what keeps document windows out, not the width:
-                // they sit below the bar, wide or not. A panel anchored to
-                // the item is near `clickX` where a document window is not,
-                // which is the next discriminator if the band proves too
-                // loose — still only recorded, not gated on, since nothing
-                // has measured a document window against it.
+                // nothing opened and the item was concealed under it.
+                //
+                // What this band does NOT do is keep document windows out.
+                // Measured the same day: the only layer-0 window on screen
+                // over 40pt tall was a 950×840 editor at y=75, inside the
+                // band, and under the width test as well. It never counted
+                // because only a window that APPEARS during the wait is
+                // counted and that one was already in `before`. So the path
+                // this leaves open is a document window that opens inside
+                // the wait with its top in the band, and the cost is the bar
+                // held revealed for `pressMenuCap`. Narrow, against a
+                // miss on every wide panel on every press.
+                //
+                // The click gap is what actually separates the two: that
+                // editor sat 619pt from the click, a Safari window 944pt,
+                // panels 0pt. Three samples is not a gate, so it stays
+                // recorded — but it, not a wider band, is the next move.
                 counts.elevated.insert(number)
             } else if height > AppTiming.pressRecordFloor, layer <= 0 || layer == 25 {
                 // #151: could have been the menu and was not counted. Which
