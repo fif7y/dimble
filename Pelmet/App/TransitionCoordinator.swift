@@ -346,6 +346,14 @@ final class TransitionCoordinator {
     /// reveal path floats it synchronously instead of paying ~100ms+ of SCK
     /// capture before the swap can even start (snappiness).
     private var revealCoverSnapshot: [ConcealGhostOverlay.BarSnapshot] = []
+    /// Why the last `freshEmptyBarSnapshots` turned the picture down, for
+    /// the `perf` line's cover detail. Measured 2026-11-14: a third of
+    /// hover reveals settle at 276ms against 87ms for the rest, and the
+    /// cover is nearly all of the gap (179ms against 17ms) — but the line
+    /// said only "live capture", and the two paths that did name a reason
+    /// fired 5 times between them against 61 slow reveals. So the two
+    /// silent ones say which they were.
+    private var lastCoverMiss: String?
     /// The primary-band rect the idle picture was captured with.
     private var revealCoverTakenRect: CGRect?
     /// The active display (see `AppState.lastMouseDownDisplay`) when each
@@ -727,8 +735,12 @@ final class TransitionCoordinator {
             backdropMayHaveChanged()
             await awaitCoverRetake(style: style)
             let emptyBar = freshEmptyBarSnapshots()
+            // Read now, not at the mark: the awaits below let another
+            // caller of freshEmptyBarSnapshots overwrite it.
+            let coverMiss = lastCoverMiss
             await hold(appState.barsKeptConcealed)
-            let coverSource = !emptyBar.isEmpty ? "precaptured" : style != .smooth ? "live capture" : "none"
+            var coverSource = !emptyBar.isEmpty ? "precaptured" : style != .smooth ? "live capture" : "none"
+            if emptyBar.isEmpty, let coverMiss { coverSource += ", \(coverMiss)" }
             if !emptyBar.isEmpty {
                 // The still shows the collapsed glyph; a hole over the
                 // glyph's core lets the live chevron (flipped at the swap)
@@ -1342,19 +1354,28 @@ final class TransitionCoordinator {
     /// to the blink's footprint — so the reveal path takes it `cropped`
     /// back to its own rect and the blink cuts its own cover out of it.
     private func freshEmptyBarSnapshots(cropped: Bool = true) -> [ConcealGhostOverlay.BarSnapshot] {
-        guard let first = revealCoverSnapshot.first,
-              Date().timeIntervalSince(first.takenAt) < AppTiming.revealCoverFreshness
-        else { return [] }
+        guard let first = revealCoverSnapshot.first else {
+            lastCoverMiss = "no picture"
+            return []
+        }
+        let age = Date().timeIntervalSince(first.takenAt)
+        guard age < AppTiming.revealCoverFreshness else {
+            lastCoverMiss = "picture \(Int(age))s old, over \(Int(AppTiming.revealCoverFreshness))s"
+            return []
+        }
         guard revealCoverActiveDisplay == appState?.lastMouseDownDisplay else {
+            lastCoverMiss = "picture from another active display"
             PelmetLog.log("cover: picture from another active display (\(revealCoverActiveDisplay ?? 0) → \(appState?.lastMouseDownDisplay ?? 0)), not used")
             return []
         }
         // The panel is not in the backdrop signature: a picture taken under
         // it is only true while it is open, and the other way round.
         guard revealCoverUnderPanel == ClockClickRelay.notificationCenterIsOpen() else {
+            lastCoverMiss = "picture taken with the panel \(revealCoverUnderPanel ? "open" : "closed")"
             PelmetLog.log("cover: picture taken with the panel \(revealCoverUnderPanel ? "open" : "closed"), not used")
             return []
         }
+        lastCoverMiss = nil
         guard cropped, let want = revealCoverRect, want != precaptureRect else { return revealCoverSnapshot }
         let narrowed = ConcealGhostOverlay.cropped(revealCoverSnapshot, toPrimaryX: want.minX...want.maxX)
         return narrowed.isEmpty ? revealCoverSnapshot : narrowed

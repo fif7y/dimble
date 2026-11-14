@@ -7,6 +7,11 @@
 //     engine 141ms [walk 96ms plan 1ms activate 41ms walk2 88ms],
 //     settled 240ms, lift 470ms
 //
+// A cover that was not precaptured names why, so the slow reveals in a
+// log can be grouped by cause: `cover (live capture, picture 1240s old,
+// over 900s)`, `no picture`, `picture from another active display`,
+// `picture taken with the panel open`.
+//
 // Every number is ms since `dispatch` except the first, which is how long
 // the intent took to reach `AppState.dispatch` (the hover re-verify's
 // window-server IPCs, the click path's AX hit-test). No signposts: the
