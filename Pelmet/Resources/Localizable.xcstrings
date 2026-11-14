@@ -1,7 +1,7 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "Open at the click position in empty menu bar space. Chevron clicks stay anchored to the chevron.": {},
+    "Opens where you click in empty menu bar space. The chevron keeps its anchor, and a panel that is already open does not move.": {},
     "Center on menu bar click": {},
     "%@ already opens %@. Press a different combination.": {
       "localizations": {

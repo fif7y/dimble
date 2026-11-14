@@ -25,6 +25,22 @@ struct PlacementGeometryTests {
                                                   screenMinX: 0, screenMaxX: 1728, margin: 20) == 1308)
     }
 
+    @Test func centeredPanelKeepsASecondDisplaysOrigin() {
+        // A display left of the built-in one: negative origin, same width.
+        #expect(PlacementGeometry.centeredPanelX(pointerX: -800, width: 400,
+                                                  screenMinX: -1728, screenMaxX: 0, margin: 20) == -1000)
+        #expect(PlacementGeometry.centeredPanelX(pointerX: -10, width: 400,
+                                                  screenMinX: -1728, screenMaxX: 0, margin: 20) == -420)
+        #expect(PlacementGeometry.centeredPanelX(pointerX: -1720, width: 400,
+                                                  screenMinX: -1728, screenMaxX: 0, margin: 20) == -1708)
+    }
+
+    @Test func centeredPanelWiderThanTheDisplayStaysAtTheNearMargin() {
+        // The caller clamps the width first; the helper must not invert.
+        #expect(PlacementGeometry.centeredPanelX(pointerX: 800, width: 1728,
+                                                  screenMinX: 0, screenMaxX: 1728, margin: 20) == 20)
+    }
+
     @Test func inSlotChecksOrderAgainstPresentNeighborsOnly() {
         #expect(PlacementGeometry.inSlot(x: 450, leftMidX: 400, rightMidX: 500))
         #expect(!PlacementGeometry.inSlot(x: 390, leftMidX: 400, rightMidX: 500))

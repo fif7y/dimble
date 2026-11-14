@@ -104,7 +104,7 @@ struct PanelPane: View {
         let options = appState.settings.panel
         return SettingsCard(title: "Icons") {
             SettingToggleRow(title: "Center on menu bar click",
-                             caption: "Open at the click position in empty menu bar space. Chevron clicks stay anchored to the chevron.",
+                             caption: "Opens where you click in empty menu bar space. The chevron keeps its anchor, and a panel that is already open does not move.",
                              isOn: binding(\.centersOnClick))
                 .settingAnchor("panelCenterOnClick")
             if inUse.contains(.panel) {

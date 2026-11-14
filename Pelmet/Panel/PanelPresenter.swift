@@ -84,8 +84,14 @@ final class PanelPresenter: RevealPresenter {
     /// Opened by the pointer on a bar (a hover, a click, a ⌘-drag), not by
     /// a key or Settings: the pointer's display is the one (`targetScreen`).
     private var openedAtBar = false
-    /// Kept for this open; later clicks and making a hover panel deliberate never recenter it.
+    /// The click this open centred on, spent at the first `place`: later
+    /// clicks and making a hover panel deliberate never recentre it.
     private var clickAnchor: NSPoint?
+    /// What the click centred on became: a right edge for the rest of this
+    /// open, so the panel is anchored exactly as a chevron-anchored one is.
+    /// A column drag reads `window.frame.maxX`, so a centring that moved
+    /// with the width fed its own distance back and ran away (#135).
+    private var clickRight: CGFloat?
     /// A display unplugged or rearranged while it is open.
     private var screenObserver: NSObjectProtocol?
     /// Windows built again because the window server had the panel off the
@@ -540,6 +546,7 @@ final class PanelPresenter: RevealPresenter {
         isOpen = false
         pointerOnPanel = false
         clickAnchor = nil
+        clickRight = nil
         askedThisOpen = []
         askedAgainLogged = false
         // A column drag cut short saves where it got to; its tip goes with
@@ -788,18 +795,25 @@ final class PanelPresenter: RevealPresenter {
             right = min(right, target.frame.maxX - (chevron.screen.frame.maxX - chevron.frame.maxX) + Self.pastChevron)
         }
         let width = min(size.width, target.frame.width - 2 * margin)
+        // The click is spent here, once: centred on the width the panel
+        // first asked for, and kept as a right edge from then on.
+        if let anchor = clickAnchor {
+            clickAnchor = nil
+            if NSMouseInRect(anchor, target.frame, false) {
+                clickRight = PlacementGeometry.centeredPanelX(
+                    pointerX: anchor.x, width: width,
+                    screenMinX: target.frame.minX, screenMaxX: target.frame.maxX,
+                    margin: margin
+                ) + width
+            }
+        }
+        // A display unplugged under an open panel leaves an edge off it.
+        if let clickRight, clickRight > target.frame.minX, clickRight <= target.frame.maxX {
+            right = clickRight
+        }
         let top = Self.top(on: target)
         // The glass's frame, then the window's: wider by the grip's margin.
-        let glassX: CGFloat
-        if let clickAnchor, NSMouseInRect(clickAnchor, target.frame, false) {
-            glassX = PlacementGeometry.centeredPanelX(
-                pointerX: clickAnchor.x, width: width,
-                screenMinX: target.frame.minX, screenMaxX: target.frame.maxX,
-                margin: margin
-            ).rounded()
-        } else {
-            glassX = max(right - width, target.frame.minX + margin).rounded()
-        }
+        let glassX = max(right - width, target.frame.minX + margin).rounded()
         let frame = NSRect(
             x: glassX - window.leadingMargin,
             y: (top - size.height).rounded(),

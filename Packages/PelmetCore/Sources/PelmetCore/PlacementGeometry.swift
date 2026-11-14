@@ -10,7 +10,9 @@ public enum PlacementGeometry {
                                       screenMinX: CGFloat, screenMaxX: CGFloat,
                                       margin: CGFloat) -> CGFloat {
         let minX = screenMinX + margin
-        let maxX = screenMaxX - margin - width
+        // A panel wider than the display less both margins would put the
+        // far bound left of the near one and the clamp would invert.
+        let maxX = max(screenMaxX - margin - width, minX)
         return min(max(pointerX - width / 2, minX), maxX)
     }
 
