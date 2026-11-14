@@ -800,11 +800,15 @@ final class PanelPresenter: RevealPresenter {
         if let anchor = clickAnchor {
             clickAnchor = nil
             if NSMouseInRect(anchor, target.frame, false) {
-                clickRight = PlacementGeometry.centeredPanelX(
+                let edge = PlacementGeometry.centeredPanelX(
                     pointerX: anchor.x, width: width,
                     screenMinX: target.frame.minX, screenMaxX: target.frame.maxX,
                     margin: margin
                 ) + width
+                clickRight = edge
+                PelmetLog.log("panel: centred on the click at x=\(Int(anchor.x)), right edge \(Int(edge))")
+            } else {
+                PelmetLog.log("panel: the click at x=\(Int(anchor.x)) is off this display, the chevron keeps the anchor")
             }
         }
         // A display unplugged under an open panel leaves an edge off it.

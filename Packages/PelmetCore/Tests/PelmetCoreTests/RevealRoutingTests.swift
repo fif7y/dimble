@@ -318,4 +318,25 @@ import Testing
         #expect(!RevealRouting.clickWidensToAlwaysHidden(.hotkey, sections: [.hidden], behavior: .alwaysShowAll))
         #expect(!RevealRouting.clickWidensToAlwaysHidden(.statusItem, sections: [.hidden, .alwaysHidden], behavior: .alwaysShowAll))
     }
+
+    @Test func onlyABarClickCentresThePanel() {
+        #expect(RevealRouting.centersPanelOnClick(.click, enabled: true, isOpen: false))
+        #expect(RevealRouting.centersPanelOnClick(.doubleClick, enabled: true, isOpen: false))
+        // The chevron, a hover and the hotkey keep the anchor they already had.
+        for reason in [RevealReason.statusItem, .hover, .hotkey, .barDrag, .itemInBar] {
+            #expect(!RevealRouting.centersPanelOnClick(reason, enabled: true, isOpen: false))
+        }
+        #expect(!RevealRouting.centersPanelOnClick(nil, enabled: true, isOpen: false))
+    }
+
+    @Test func offBySettingTheClickChangesNothing() {
+        #expect(!RevealRouting.centersPanelOnClick(.click, enabled: false, isOpen: false))
+        #expect(!RevealRouting.centersPanelOnClick(.doubleClick, enabled: false, isOpen: false))
+    }
+
+    // Aiming at a tile means clicking the bar behind an open panel: it must not jump.
+    @Test func anOpenPanelStaysPutWhenTheBarIsClickedAgain() {
+        #expect(!RevealRouting.centersPanelOnClick(.click, enabled: true, isOpen: true))
+        #expect(!RevealRouting.centersPanelOnClick(.doubleClick, enabled: true, isOpen: true))
+    }
 }
