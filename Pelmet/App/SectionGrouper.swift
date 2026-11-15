@@ -157,6 +157,55 @@ final class SectionGrouper {
         return nil
     }
 
+    /// The owner of a tooltip hanging from the menu bar. A tooltip is the
+    /// orphan one level above an open menu: take the icon off the bar while
+    /// its tooltip shows and the app never hears the pointer leave, so the
+    /// tooltip stays up at the icon's old spot — measured 2026-11-14 with a
+    /// status item of our own, still up 5s after the pointer had left the
+    /// bar entirely, where the same tooltip clears inside 2s if the item
+    /// stays (#148). Nothing else in the rehide gate can see one: tooltips
+    /// sit two levels above `.popUpMenuWindow`, past the 24...102 the
+    /// band monitor's pointer test walks and above the level this file's
+    /// `popUpMenuOwner` matches.
+    ///
+    /// Band-local, unlike `popUpMenuOwner`: tooltips happen all over the
+    /// screen all day, and one deep inside some app's window is not the
+    /// bar's business — only a tooltip whose top edge hangs from a display's
+    /// own band counts, or every hover in Xcode would pin the bar open.
+    static func barTooltipOwner() -> String? {
+        guard let list = ConcealGhostOverlay.onScreenWindows(),
+              let primary = NSScreen.screens.first else { return nil }
+        // Two above `.popUpMenuWindow` (so 103), which has no window-level
+        // key of its own. Measured, not derived.
+        let level = Int(CGWindowLevelForKey(.popUpMenuWindow)) + 2
+        // A bar tooltip's top edge sits just under the icon, which on a
+        // notched display is INSIDE the band (31pt into a 39pt band,
+        // measured) — so the window the band allows reaches from each
+        // display's top edge to a little below its band.
+        let slack: CGFloat = 12
+        // CG window bounds are top-left-origin global coordinates.
+        let bands: [(x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>)] = NSScreen.screens.map {
+            let top = primary.frame.maxY - $0.frame.maxY
+            let bandHeight = $0.frame.maxY - $0.visibleFrame.maxY
+            return ($0.frame.minX...$0.frame.maxX, (top - 1)...(top + bandHeight + slack))
+        }
+        for w in list {
+            guard let layer = w[kCGWindowLayer as String] as? Int, layer == level,
+                  // Our own tooltips — Settings, the panel — are ours to
+                  // clear, and must not hold the bar open.
+                  (w[kCGWindowOwnerPID as String] as? pid_t) != ProcessInfo.processInfo.processIdentifier,
+                  (w[kCGWindowAlpha as String] as? Double ?? 1) > 0.01,
+                  let b = w[kCGWindowBounds as String] as? [String: CGFloat],
+                  let x = b["X"], let y = b["Y"],
+                  let width = b["Width"], let height = b["Height"],
+                  width > 20, height > 12,
+                  bands.contains(where: { $0.x.contains(x) && $0.y.contains(y) })
+            else { continue }
+            return w[kCGWindowOwnerName as String] as? String ?? "pid \(w[kCGWindowOwnerPID as String] ?? "?")"
+        }
+        return nil
+    }
+
     /// The roster was assigned: look again only if it actually changed.
     /// The budget sees every change, not only the ones a check finds a stray
     /// under: a drop to Hidden and back between two placements left

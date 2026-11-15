@@ -514,17 +514,23 @@ final class MenuBarBandMonitor {
     }
 
     /// Why rehide holds off: pointer in the band, Pelmet's own editor or
-    /// onboarding in front, or a menubar-anchored menu/popover under the
-    /// pointer. Nil when nothing holds. One window list per verdict: the
+    /// onboarding in front, a menubar-anchored menu/popover under the
+    /// pointer, or a menu or tooltip an item still has up. Nil when nothing
+    /// holds. One window list per verdict: the
     /// old Bool + diagnostic-twin pair walked the list twice per deferred
     /// reveal (perf audit 2026-09-15, fix 4b).
-    enum DeferReason: String { case band, active, elevated, drag, overflow, menu }
+    enum DeferReason: String { case band, active, elevated, drag, overflow, menu, tooltip }
 
     /// When the open-menu hold started, so a pop-up-menu-level window that
     /// never goes away cannot hold the reveal open for good.
     private var menuHoldSince: Date?
     /// One log line per hold, not one per re-arm.
     private var menuHoldLogged = false
+    /// The same pair for the tooltip hold, which is a separate window level
+    /// and a separate stamp: reading `band=tooltip` instead of `band=menu`
+    /// is the difference between #148 and the orphaned popover.
+    private var tooltipHoldSince: Date?
+    private var tooltipHoldLogged = false
 
     func rehideDeferReason() -> DeferReason? {
         if pointerInBand { return .band }
@@ -557,6 +563,28 @@ final class MenuBarBandMonitor {
         } else {
             menuHoldSince = nil
             menuHoldLogged = false
+        }
+        // A tooltip the bar put up is the same orphan one level higher: the
+        // icon goes, the app never hears the pointer leave, and the tooltip
+        // stays where the icon was (#148, reproduced 2026-11-14 with a
+        // status item of our own — it outlived the pointer leaving the bar,
+        // where the same tooltip clears inside 2s if the item stays). The
+        // window is at a level neither test above reaches, so this is the
+        // only gate that can see it; `barTooltipOwner` keeps it band-local
+        // so a tooltip inside some app's window cannot pin the bar open.
+        if let owner = SectionGrouper.barTooltipOwner() {
+            let since = tooltipHoldSince ?? Date()
+            tooltipHoldSince = since
+            if Date().timeIntervalSince(since) < AppTiming.rehideMenuHoldCap {
+                if !tooltipHoldLogged {
+                    tooltipHoldLogged = true
+                    PelmetLog.log("rehide: a tooltip holds the reveal (\(owner))")
+                }
+                return .tooltip
+            }
+        } else {
+            tooltipHoldSince = nil
+            tooltipHoldLogged = false
         }
         // Apple's « open on hidden icons that didn't fit: it draws them left
         // of the notch, and the notch is off the band, so the way there read
