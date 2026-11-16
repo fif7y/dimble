@@ -2549,7 +2549,16 @@ extension TransitionCoordinator {
             var itemsOut = Set<ItemID>()
             var followUps = 0
             var lastPictured = 0
-            while PicturePassBatches.wantsAnotherRound(followUpsDone: followUps, leftovers: leftovers, lastRoundPictured: lastPictured) {
+            var lastAsked = 0
+            // How many may come out at once. A round whose items all came
+            // back behind the « had too many out for the bar's room, so the
+            // cap halves; a first round that found none of them clear says
+            // that much already, so the rounds start halved (#153).
+            var cap = PicturePassBatches.startingCap(leftovers: leftovers.count, firstRoundClear: first.solid.count)
+            while PicturePassBatches.wantsAnotherRound(
+                followUpsDone: followUps, leftovers: leftovers,
+                lastRoundPictured: lastPictured, lastRoundAsked: lastAsked
+            ) {
                 let elapsed = -coverStart.timeIntervalSinceNow
                 if let blocker = PicturePassBatches.blocker(
                     .init(hasCover: cover != nil, hasEmptyBarPicture: !empty.isEmpty,
@@ -2566,7 +2575,12 @@ extension TransitionCoordinator {
                 cover?.keepUp(for: AppTiming.picturePassBatch + PicturePassBatches.liftReserve)
                 // One swap a round: the items come out before the sections go
                 // back, and later rounds only put away what got its picture.
-                let asked = leftovers
+                cap = PicturePassBatches.nextCap(cap: cap, lastRoundAsked: lastAsked, lastRoundPictured: lastPictured)
+                let asked = PicturePassBatches.batch(leftovers, cap: cap)
+                lastAsked = asked.count
+                if asked.count < leftovers.count {
+                    PelmetLog.log("pass: batch \(followUps) asks for \(asked.count) of \(leftovers.count) — more out at once than the bar had room for")
+                }
                 roundsAsked.formUnion(asked)
                 let out = asked.subtracting(itemsOut)
                 if !out.isEmpty { await engine.reveal(items: out) }
@@ -2607,7 +2621,9 @@ extension TransitionCoordinator {
                 let got = cut.isEmpty ? [:] : await filmAndCut(cut, empty: empty, dump: false, ms: ms).pictures
                 for (key, picture) in got { pictures?[key] = picture }
                 lastPictured = got.count
-                leftovers = PicturePassBatches.remaining(asked, pictured: Set(got.keys))
+                // From every leftover, not only this round's ask: a capped
+                // round leaves the rest for the next one (#153).
+                leftovers = PicturePassBatches.remaining(leftovers, pictured: Set(got.keys))
                 PelmetLog.log("pass: batch \(followUps) revealed \(asked.count), pictured \(got.count), left \(leftovers.count) at \(ms())ms")
             }
             if !itemsOut.isEmpty { await engine.conceal(items: itemsOut) }

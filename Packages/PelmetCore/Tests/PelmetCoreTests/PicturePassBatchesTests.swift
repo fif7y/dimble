@@ -199,9 +199,74 @@ struct PicturePassBatchesTests {
         #expect(PicturePassBatches.wantsAnotherRound(followUpsDone: 0, leftovers: [id("a")], lastRoundPictured: 0))
     }
 
-    @Test func aRoundThatPicturedNothingEndsTheLoop() {
-        #expect(!PicturePassBatches.wantsAnotherRound(followUpsDone: 1, leftovers: [id("a")], lastRoundPictured: 0))
-        #expect(PicturePassBatches.wantsAnotherRound(followUpsDone: 1, leftovers: [id("a")], lastRoundPictured: 2))
+    @Test func aRoundThatPicturedNothingEndsTheLoopOnceOneItemIsAllItAsked() {
+        #expect(!PicturePassBatches.wantsAnotherRound(
+            followUpsDone: 1, leftovers: [id("a")], lastRoundPictured: 0, lastRoundAsked: 1))
+        #expect(PicturePassBatches.wantsAnotherRound(
+            followUpsDone: 1, leftovers: [id("a")], lastRoundPictured: 2, lastRoundAsked: 1))
+    }
+
+    // MARK: the cap on how many come out at once (#153)
+
+    @Test func aRoundThatPicturedNothingWithSeveralOutIsWorthRepeatingSmaller() {
+        // Nine out at once all came back behind the «: halve and try again.
+        let left: Set<ItemID> = Set((0..<9).map { id("i\($0)") })
+        #expect(PicturePassBatches.wantsAnotherRound(
+            followUpsDone: 1, leftovers: left, lastRoundPictured: 0, lastRoundAsked: 9))
+    }
+
+    @Test func theRoundsStartHalvedWhenTheFirstRoundFoundNoneClear() {
+        #expect(PicturePassBatches.startingCap(leftovers: 9, firstRoundClear: 0) == 4)
+        #expect(PicturePassBatches.startingCap(leftovers: 1, firstRoundClear: 0) == 1)
+        #expect(PicturePassBatches.startingCap(leftovers: 9, firstRoundClear: 3) == 9)
+    }
+
+    @Test func theCapHalvesAfterAnEmptyRoundAndNeverGrowsBack() {
+        #expect(PicturePassBatches.nextCap(cap: 9, lastRoundAsked: 9, lastRoundPictured: 0) == 4)
+        #expect(PicturePassBatches.nextCap(cap: 4, lastRoundAsked: 4, lastRoundPictured: 0) == 2)
+        #expect(PicturePassBatches.nextCap(cap: 2, lastRoundAsked: 2, lastRoundPictured: 0) == 1)
+        // Never to nothing, and never wider after a round that worked.
+        #expect(PicturePassBatches.nextCap(cap: 1, lastRoundAsked: 1, lastRoundPictured: 0) == 1)
+        #expect(PicturePassBatches.nextCap(cap: 4, lastRoundAsked: 4, lastRoundPictured: 4) == 4)
+        // Before the first round there is nothing to learn from.
+        #expect(PicturePassBatches.nextCap(cap: 9, lastRoundAsked: 0, lastRoundPictured: 0) == 9)
+    }
+
+    @Test func aBatchTakesTheCapsWorthInKeyOrder() {
+        let left: Set<ItemID> = [id("c"), id("a"), id("b")]
+        #expect(PicturePassBatches.batch(left, cap: 3) == left)
+        #expect(PicturePassBatches.batch(left, cap: 9) == left)
+        #expect(PicturePassBatches.batch(left, cap: 2) == [id("a"), id("b")])
+        #expect(PicturePassBatches.batch(left, cap: 0) == [id("a")])
+    }
+
+    @Test func theRoundsNarrowUntilTheBarHasRoom() {
+        // A bar with room for three at a time: the first round asks for all
+        // nine and pictures none, then the cap finds a size that fits.
+        var left: Set<ItemID> = Set((0..<9).map { id("i\($0)") })
+        // The first round found none of them clear, so the rounds start
+        // halved instead of spending one on all nine.
+        var cap = PicturePassBatches.startingCap(leftovers: left.count, firstRoundClear: 0)
+        var done = 0
+        var pictured = 0
+        var asked = 0
+        var sizes: [Int] = []
+        while PicturePassBatches.wantsAnotherRound(
+            followUpsDone: done, leftovers: left, lastRoundPictured: pictured, lastRoundAsked: asked
+        ) {
+            cap = PicturePassBatches.nextCap(cap: cap, lastRoundAsked: asked, lastRoundPictured: pictured)
+            let round = PicturePassBatches.batch(left, cap: cap)
+            asked = round.count
+            sizes.append(asked)
+            done += 1
+            let got: Set<ItemID> = round.count <= 3 ? round : []
+            pictured = got.count
+            left = PicturePassBatches.remaining(left, pictured: got)
+        }
+        #expect(sizes == [4, 2, 2])
+        // Three rounds is the cap, so a bar this tight finishes over the
+        // next few panel opens, which ask again for what is still owed.
+        #expect(left.count == 5)
     }
 
     @Test func atMostThreeFollowUps() {

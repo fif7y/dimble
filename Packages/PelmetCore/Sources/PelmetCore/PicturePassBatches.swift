@@ -130,12 +130,42 @@ public enum PicturePassBatches {
     // MARK: - Whether to go on
 
     /// Whether to run another follow-up. None when nothing is owed, at the
-    /// cap, or when the round before pictured nothing new: the same items
-    /// would draw the same way. `lastRoundPictured` is ignored before the
-    /// first follow-up.
-    public static func wantsAnotherRound(followUpsDone: Int, leftovers: Set<ItemID>, lastRoundPictured: Int) -> Bool {
+    /// cap, or when the round before pictured nothing new AND had only one
+    /// item out: the same set draws the same way, but a smaller one can find
+    /// room the « took (#153). `lastRoundPictured` and `lastRoundAsked` are
+    /// ignored before the first follow-up.
+    public static func wantsAnotherRound(
+        followUpsDone: Int, leftovers: Set<ItemID>, lastRoundPictured: Int, lastRoundAsked: Int = 0
+    ) -> Bool {
         guard !leftovers.isEmpty, followUpsDone < maxFollowUps else { return false }
-        return followUpsDone == 0 || lastRoundPictured > 0
+        if followUpsDone == 0 || lastRoundPictured > 0 { return true }
+        return lastRoundAsked > 1
+    }
+
+    /// How many leftovers the next round may ask for, learnt from the round
+    /// before. A round that pictured nothing had more out at once than the
+    /// bar had room for, so every one of them came back behind the «; the cap
+    /// halves and never grows back, since the room doesn't (#153: nine at
+    /// once on a full MacBook Air bar stayed trapped, every tile a chevron).
+    public static func nextCap(cap: Int, lastRoundAsked: Int, lastRoundPictured: Int) -> Int {
+        guard lastRoundAsked > 0, lastRoundPictured == 0 else { return cap }
+        return max(1, lastRoundAsked / 2)
+    }
+
+    /// The cap the rounds start with: every leftover, unless the first
+    /// full-section round found not one of the items it wanted clear of the
+    /// others. That already says the bar had no room for that many, so the
+    /// rounds start halved rather than spending one on a set that would come
+    /// back behind the « whole (#153).
+    public static func startingCap(leftovers: Int, firstRoundClear: Int) -> Int {
+        firstRoundClear == 0 ? max(1, leftovers / 2) : leftovers
+    }
+
+    /// The items of a round, capped: the cap's worth of leftovers in key
+    /// order, so a round is reproducible and the rest fall to the next one.
+    public static func batch(_ leftovers: Set<ItemID>, cap: Int) -> Set<ItemID> {
+        guard cap < leftovers.count else { return leftovers }
+        return Set(leftovers.sorted { $0.rawValue < $1.rawValue }.prefix(max(1, cap)))
     }
 
     /// What must hold at the start of every follow-up.
