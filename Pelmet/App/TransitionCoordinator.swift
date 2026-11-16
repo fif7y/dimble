@@ -2592,6 +2592,15 @@ extension TransitionCoordinator {
                     PelmetLog.log("pass: batch \(followUps) has \(now.phantoms.count) behind the «, not cropped")
                 }
                 let cut = bar.filter { now.solid[$0.key] == $0.frame && clearOfRule($0.frame) }
+                if cut.count < asked.count {
+                    // Which of the three gates ate them: a pass that pictures
+                    // nothing leaves every tile on the picture it already had,
+                    // however wrong, and the count alone never said why (#153).
+                    let onBar = Set(bar.map(\.key))
+                    let moved = bar.filter { now.solid[$0.key] != $0.frame }.count
+                    let ruled = bar.filter { now.solid[$0.key] == $0.frame && !clearOfRule($0.frame) }.count
+                    PelmetLog.log("pass: batch \(followUps) left \(asked.count - cut.count) uncropped — \(asked.subtracting(onBar).count) not on the bar, \(moved) read at another place, \(ruled) under the rule")
+                }
                 let got = cut.isEmpty ? [:] : await filmAndCut(cut, empty: empty, dump: false, ms: ms).pictures
                 for (key, picture) in got { pictures?[key] = picture }
                 lastPictured = got.count
