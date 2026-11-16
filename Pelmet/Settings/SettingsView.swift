@@ -1183,6 +1183,12 @@ private struct GeneralPane: View {
 private struct BehaviorPane: View {
     @Environment(AppState.self) private var appState
 
+    static let middleClickOptions: [(MiddleClickReveal, LocalizedStringKey)] = [
+        (.nothing, "Nothing"),
+        (.both, "Hidden + Always Hidden"),
+        (.alwaysHiddenOnly, "Always Hidden only"),
+    ]
+
     private static let hoverDelayOptions: [(TimeInterval, LocalizedStringKey)] = [
         (0.1, "After 0.1s"), (0.2, "After 0.2s"), (0.3, "After 0.3s"),
         (0.4, "After 0.4s"), (0.5, "After 0.5s"),
@@ -1236,6 +1242,13 @@ private struct BehaviorPane: View {
                 isOn: binding(\.revealTriggers.doubleClickForAlwaysHidden)
             )
             .settingAnchor("doubleClickReveal")
+            // No caption: the picker row above in "Hide again" has none
+            // either, and the options say where it applies.
+            SettingRow(title: "Middle-click reveals") {
+                PelmetMenuPicker(selection: binding(\.revealTriggers.middleClick),
+                                 options: Self.middleClickOptions)
+            }
+            .settingAnchor("middleClickReveal")
         }
 
         SettingsCard(title: "Hide again") {

@@ -62,6 +62,8 @@ enum SettingsIndex {
                      ["click", "empty area", "blank"]),
             behavior("doubleClickReveal", String(localized: "Double-click shows Always Hidden too"),
                      ["double click", "always hidden"]),
+            behavior("middleClickReveal", String(localized: "Middle-click reveals"),
+                     ["middle click", "scroll wheel", "always hidden", "wheel", "third button"]),
             behavior("autoRehide", String(localized: "Hide again"),
                      ["auto hide", "rehide", "conceal", "timer", "delay", "seconds", "close", "never"]),
             behavior("rehideElsewhere", String(localized: "Hide again when you click elsewhere"),

@@ -64,22 +64,61 @@ public enum DisplayBehavior: String, Codable, Equatable, Sendable {
     case collapse
 }
 
+/// What a middle-click on the chevron reveals (#149). A double-click fires
+/// the single click first, so the bar does the wrong thing on the way to the
+/// right one; the middle button has nothing on the way down. Nothing by
+/// default: a trackpad has no middle button and some mice don't either.
+public enum MiddleClickReveal: String, Codable, CaseIterable, Sendable {
+    case nothing
+    case both
+    case alwaysHiddenOnly
+
+    /// The sections the click toggles, nil when it does nothing.
+    public var sections: Set<Section>? {
+        switch self {
+        case .nothing: nil
+        case .both: [.hidden, .alwaysHidden]
+        case .alwaysHiddenOnly: [.alwaysHidden]
+        }
+    }
+}
+
 public struct RevealTriggers: Codable, Equatable, Sendable {
     public var hoverEnabled: Bool
     public var hoverDelay: TimeInterval
     public var clickEnabled: Bool
     public var doubleClickForAlwaysHidden: Bool
+    public var middleClick: MiddleClickReveal
 
     public init(
         hoverEnabled: Bool = true,
         hoverDelay: TimeInterval = 0.1,
         clickEnabled: Bool = true,
-        doubleClickForAlwaysHidden: Bool = true
+        doubleClickForAlwaysHidden: Bool = true,
+        middleClick: MiddleClickReveal = .nothing
     ) {
         self.hoverEnabled = hoverEnabled
         self.hoverDelay = hoverDelay
         self.clickEnabled = clickEnabled
         self.doubleClickForAlwaysHidden = doubleClickForAlwaysHidden
+        self.middleClick = middleClick
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case hoverEnabled, hoverDelay, clickEnabled, doubleClickForAlwaysHidden, middleClick
+    }
+
+    /// Field by field, like the blob around it: a key added after a user's
+    /// settings were written (`middleClick`) must not throw their hover delay
+    /// and click rules back to the defaults with it.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = RevealTriggers()
+        hoverEnabled = c.field(Bool.self, .hoverEnabled, d.hoverEnabled)
+        hoverDelay = c.field(TimeInterval.self, .hoverDelay, d.hoverDelay)
+        clickEnabled = c.field(Bool.self, .clickEnabled, d.clickEnabled)
+        doubleClickForAlwaysHidden = c.field(Bool.self, .doubleClickForAlwaysHidden, d.doubleClickForAlwaysHidden)
+        middleClick = c.field(MiddleClickReveal.self, .middleClick, d.middleClick)
     }
 }
 

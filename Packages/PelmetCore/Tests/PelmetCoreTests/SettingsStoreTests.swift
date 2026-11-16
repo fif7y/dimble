@@ -20,6 +20,31 @@ struct SettingsStoreTests {
         #expect(settings.effectiveHideSystemExtras)
     }
 
+    /// A blob written before `middleClick` existed must not throw the other
+    /// reveal triggers out with it: all-or-nothing decoding would reset the
+    /// hover delay and the click rules over one key the user never saw (#149).
+    @Test func revealTriggersKeepTheirFieldsWhenANewKeyIsMissing() throws {
+        let old = Data(#"{"hoverEnabled":false,"hoverDelay":0.4,"clickEnabled":false,"doubleClickForAlwaysHidden":false}"#.utf8)
+        let back = try JSONDecoder().decode(RevealTriggers.self, from: old)
+        #expect(back.hoverEnabled == false)
+        #expect(back.hoverDelay == 0.4)
+        #expect(back.clickEnabled == false)
+        #expect(back.doubleClickForAlwaysHidden == false)
+        #expect(back.middleClick == .nothing)
+        // A value this build doesn't know (a downgrade) falls back alone.
+        let unknown = Data(#"{"hoverDelay":0.4,"middleClick":"somethingElse"}"#.utf8)
+        let kept = try JSONDecoder().decode(RevealTriggers.self, from: unknown)
+        #expect(kept.middleClick == .nothing)
+        #expect(kept.hoverDelay == 0.4)
+        #expect(kept.hoverEnabled)
+    }
+
+    @Test func middleClickNamesTheSectionsItToggles() {
+        #expect(MiddleClickReveal.nothing.sections == nil)
+        #expect(MiddleClickReveal.both.sections == [.hidden, .alwaysHidden])
+        #expect(MiddleClickReveal.alwaysHiddenOnly.sections == [.alwaysHidden])
+    }
+
     // Pending order edits survive a quit (docs/CORE-SETS.md M1), and a blob
     // saved before the field existed decodes with none pending.
     @Test func orderEditsRoundTripAndDefault() throws {

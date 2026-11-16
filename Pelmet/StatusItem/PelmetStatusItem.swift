@@ -12,6 +12,7 @@ final class PelmetStatusItem {
     private let item: NSStatusItem
     private weak var appState: AppState?
     private var removalObservation: NSKeyValueObservation?
+    private var middleClickMonitors: [Any] = []
     private var removed = false
 
     init(appState: AppState) {
@@ -55,6 +56,7 @@ final class PelmetStatusItem {
         }
         warning = !appState.accessibilityGranted
         applyImage()
+        syncMiddleClick()
         showUpdateDot(SparkleController.shared.availableVersion != nil)
     }
 
@@ -163,8 +165,61 @@ final class PelmetStatusItem {
     func remove() {
         removed = true
         removalObservation = nil
+        middleClickMonitors.forEach(NSEvent.removeMonitor)
+        middleClickMonitors.removeAll()
         MenuBarInkBroadcast.shared.stop()
         NSStatusBar.system.removeStatusItem(item)
+    }
+
+    /// The middle button never reaches a status item's action: AppKit sends
+    /// the action for the left and right buttons only, whatever
+    /// `sendAction(on:)` asks of it (measured on build 96, 2026-11-16 — a
+    /// synthetic `otherMouseUp` on the chevron reached the session tap, a
+    /// left one at the same point reached `clicked()`, the middle one never
+    /// did). So the click is read off the event stream instead and matched
+    /// to the chevron's own window. Only while the setting asks for it:
+    /// set to nothing, there is no monitor at all (#149).
+    func syncMiddleClick() {
+        let wanted = appState?.settings.revealTriggers.middleClick.sections != nil
+        guard wanted != !middleClickMonitors.isEmpty else { return }
+        guard wanted else {
+            middleClickMonitors.forEach(NSEvent.removeMonitor)
+            middleClickMonitors.removeAll()
+            return
+        }
+        // A click on our own chevron is delivered to us, so the local
+        // monitor is the one that fires; the global one is there for a
+        // click macOS hands to whoever is in front instead.
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .otherMouseUp, handler: { [weak self] event in
+            self?.middleClicked(at: NSEvent.mouseLocation) == true ? nil : event
+        }) { middleClickMonitors.append(local) }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .otherMouseUp, handler: { [weak self] _ in
+            self?.middleClicked(at: NSEvent.mouseLocation)
+        }) { middleClickMonitors.append(global) }
+    }
+
+    /// True when the click was on the chevron and the reveal took it, so the
+    /// local monitor can keep it from going anywhere else.
+    @discardableResult
+    private func middleClicked(at point: NSPoint) -> Bool {
+        guard let appState, !removed,
+              let sections = appState.settings.revealTriggers.middleClick.sections,
+              let frame = item.button?.window?.frame, frame.contains(point)
+        else { return false }
+        lastLeftClickAt = nil
+        let out = sections.isSubset(of: appState.revealedSectionsForExtras)
+        PelmetLog.log("statusItem middle-click → \(out ? "conceal" : "reveal") \(sections.map(\.rawValue).sorted().joined(separator: "+"))")
+        // A reveal unions and never narrows, which is what ⌥-click and the
+        // double-click use to widen: a middle click 63ms into a hover reveal
+        // of Hidden was read as that hover's own reveal and Always Hidden
+        // never came (measured 2026-11-16). Once they are all out the same
+        // click puts them away.
+        if out {
+            appState.toggle(reason: .statusItem, sections: sections)
+        } else {
+            appState.reveal(sections, reason: .statusItem)
+        }
+        return true
     }
 
     func updateSymbol(revealed: Bool) {

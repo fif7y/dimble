@@ -2495,6 +2495,7 @@ final class AppState {
             statusItem = nil
         } else {
             statusItem?.updateSymbol(revealed: isRevealedOrRevealing)
+            statusItem?.syncMiddleClick()
         }
         // Re-registering unregisters first — a per-tick re-register left the
         // shortcut momentarily dead. Only touch it when it actually changed.
