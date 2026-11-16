@@ -1,5 +1,7 @@
 .DS_Store
 /build
+# swift build --package-path leaves one per package
+Packages/*/build/
 # credentials (notary .p8, sparkle private key) — NEVER commit
 /_Assets/
 # local-only docs (purged from public history 2026-08-20)
