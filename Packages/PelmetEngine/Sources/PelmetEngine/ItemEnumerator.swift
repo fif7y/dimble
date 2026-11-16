@@ -64,19 +64,49 @@ public actor ItemEnumerator {
             guard let groups = copyAttribute(window, kAXChildrenAttribute) as? [AXUIElement] else {
                 continue
             }
-            var described: [(item: RawItem, standIn: Bool)?] = []
+            var described: [(item: RawItem, standIn: Bool, untitled: Bool)?] = []
             var standIns: [pid_t: [(slot: Int, group: StandIn)]] = [:]
             for group in groups {
                 switch describeGroup(group, extras: &extrasByPID) {
-                case .item(let item):
-                    described.append((item, false))
+                case .item(let item, let untitled):
+                    described.append((item, false, untitled))
                 case .namedStandIn(let item):
-                    described.append((item, true))
+                    described.append((item, true, false))
                 case .standIn(let standIn):
                     standIns[standIn.pid, default: []].append((described.count, standIn))
                     described.append(nil)
                 case nil:
                     continue
+                }
+            }
+            // Every untitled button of an app took the same `Item-0`
+            // placeholder, so Stats' five modules deduped onto one id — one
+            // row in the editor, one picture, one glyph for all of them
+            // (#152, #153). Tell them apart by place on this bar, the
+            // leftmost keeping `Item-0` so an assignment it already has
+            // survives. Per bar window, so the same item's copy on another
+            // display takes the same id and still folds into one.
+            var untitledSlots: [pid_t: [Int]] = [:]
+            for (slot, entry) in described.enumerated() where entry?.untitled == true {
+                untitledSlots[entry!.item.pid, default: []].append(slot)
+            }
+            for (_, slots) in untitledSlots where slots.count > 1 {
+                let ranks = Self.ranksByX(slots.map { described[$0]!.item.frame })
+                var bundle: String?
+                for (slot, rank) in zip(slots, ranks) {
+                    guard let entry = described[slot], let host = entry.item.id.bundleID else { continue }
+                    bundle = host
+                    guard rank > 0 else { continue }
+                    described[slot] = (RawItem(
+                        id: .status(bundle: host, title: "Item-\(rank)"),
+                        frame: entry.item.frame,
+                        appName: entry.item.appName,
+                        hostIsBundleless: entry.item.hostIsBundleless,
+                        pid: entry.item.pid
+                    ), entry.standIn, entry.untitled)
+                }
+                if let bundle {
+                    logOnce("enumerate: \(slots.count) untitled button(s) of \(bundle) named by place", pid: nil)
                 }
             }
             // A stand-in neither its place nor its being the app's lone
@@ -96,18 +126,24 @@ public actor ItemEnumerator {
                 )
                 for (entry, title) in zip(groupsOfApp, titles) {
                     guard let title else { continue }
-                    described[entry.slot] = (entry.group.item(titled: title), true)
+                    described[entry.slot] = (entry.group.item(titled: title), true, false)
                 }
                 let unnamed = titles.filter { $0 == nil }.count
                 let unread = extras.naming == .unread
+                let several = groupsOfApp.count > 1
+                let named = unread
+                    ? (several ? "by place, no extras bar to read" : "as its one icon, no extras bar to read")
+                    : "by position"
                 logOnce(unnamed == 0
-                    ? "enumerate: \(groupsOfApp.count) stand-in(s) of \(bundle) named " + (unread ? "as its one icon, no extras bar to read" : "by position")
+                    ? "enumerate: \(groupsOfApp.count) stand-in(s) of \(bundle) named " + named
                     : "enumerate: \(unnamed) of \(groupsOfApp.count) stand-in(s) of \(bundle) left unnamed — "
-                        + (unread ? "no extras bar to read" : "\(extras.items.count) item(s) on its extras bar")
+                        + (unread
+                            ? "no extras bar to read" + (several ? ", and two of them sit at one place" : "")
+                            : "\(extras.items.count) item(s) on its extras bar")
                         + (!unread && unnamed == groupsOfApp.count && groupsOfApp.count == extras.items.count ? ", places or width gaps disagree" : ""),
                     pid: nil)
             }
-            listed.append(contentsOf: described.compactMap { $0 })
+            listed.append(contentsOf: described.compactMap { $0.map { ($0.item, $0.standIn) } })
         }
         let echoes = Self.echoedStandIns(listed.map { (pid: $0.item.pid, frame: $0.item.frame, standIn: $0.standIn) })
         for index in echoes.sorted() {
@@ -188,7 +224,11 @@ public actor ItemEnumerator {
     /// A group read on its own, or a stand-in that only its place among its
     /// app's other groups on the same bar can name (`StandInMatch`).
     private enum Described {
-        case item(RawItem)
+        /// `untitled`: the leaf carried no title, identifier or description of
+        /// its own, so the id falls back to the `Item-0` placeholder and the
+        /// walk has to tell this one apart from its app's other untitled
+        /// buttons by place (#152).
+        case item(RawItem, untitled: Bool)
         /// A stand-in its app's extras bar names on its own.
         case namedStandIn(RawItem)
         case standIn(StandIn)
@@ -274,13 +314,13 @@ public actor ItemEnumerator {
                         appName: nil,
                         hostIsBundleless: false,
                         pid: agentPID
-                    ))
+                    ), untitled: false)
                 }
             case "AXButton":
                 // Real NSStatusItem buttons on the active display's bar (and
                 // other apps' dividers) sit in the tree as bare AXButtons — no
                 // nested AXApplication. Attribute by the button's owning pid.
-                if let item = describeLeaf(child, frame: frame) { return .item(item) }
+                if let leaf = describeLeaf(child, frame: frame) { return .item(leaf.item, untitled: leaf.untitled) }
             default:
                 continue
             }
@@ -293,9 +333,9 @@ public actor ItemEnumerator {
             var pid: pid_t = 0
             AXUIElementGetPid(child, &pid)
             guard pid > 0, pid != agentPID else { continue }
-            if let item = describeLeaf(child, frame: frame) {
-                logOnce("enumerate: fallback — role=\(roleLabel(child)) → \(item.id.rawValue)", pid: pid)
-                return .item(item)
+            if let leaf = describeLeaf(child, frame: frame) {
+                logOnce("enumerate: fallback — role=\(roleLabel(child)) → \(leaf.item.id.rawValue)", pid: pid)
+                return .item(leaf.item, untitled: leaf.untitled)
             }
         }
         logDrop("unrecognized children \(kids.map { roleLabel($0) })", pid: nil, role: nil)
@@ -304,7 +344,7 @@ public actor ItemEnumerator {
 
     /// Item attributed by a leaf element's owning pid, titled by whichever of
     /// title / identifier / description the element exposes.
-    private func describeLeaf(_ element: AXUIElement, frame: CGRect) -> RawItem? {
+    private func describeLeaf(_ element: AXUIElement, frame: CGRect) -> (item: RawItem, untitled: Bool)? {
         var pid: pid_t = 0
         AXUIElementGetPid(element, &pid)
         guard pid > 0, let host = hostBundle(ofPID: pid) else {
@@ -325,13 +365,13 @@ public actor ItemEnumerator {
         if title == nil, host.id == PelmetBundle.systemUIServerID {
             title = statusExtras(in: AXUIElementCreateApplication(pid)).name
         }
-        return RawItem(
+        return (RawItem(
             id: .status(bundle: host.id, title: title ?? "Item-0"),
             frame: frame,
             appName: NSRunningApplication(processIdentifier: pid)?.localizedName,
             hostIsBundleless: host.bundleless,
             pid: pid
-        )
+        ), title == nil)
     }
 
     /// `NSRunningApplication.bundleIdentifier` first; when the process is not
@@ -544,17 +584,60 @@ public actor ItemEnumerator {
     ) -> [String?] {
         switch naming {
         case .named(let name):
-            return groups.map { _ in name }
+            // One name for every group collapsed an app's icons onto one id:
+            // Stats' modules, a helper's untitled pair, read as a single item
+            // with one row in the editor, one picture and one glyph for all
+            // of them (#152, #153). The leftmost keeps the id it already had,
+            // so its assignment survives; the ones right of it take theirs by
+            // rank.
+            guard groups.count > 1 else { return groups.map { _ in name } }
+            return ranksByX(groups).map { $0 == 0 ? name : "Item-\($0)" }
         case .unread:
             // With no extras bar to count by, a lone group is the app's one
             // icon, under the tag the agent keeps for it
             // (`status:com.sindresorhus.Velja::Item-0`, 2026-10-13). Several
-            // groups are a guess: unnamed, as before.
-            return groups.count == 1 ? ["Item-0"] : groups.map { _ in nil }
+            // went unnamed, which left the app addressable only as a whole —
+            // Stats publishes no bar at all, so CPU, RAM and Battery were one
+            // row (#152). Icons at places of their own are icons of their
+            // own, by place. Two at one x are a stand-in over its own button
+            // or another bar's copy, and naming those would invent items, so
+            // they stay unnamed.
+            guard groups.count > 1 else { return groups.count == 1 ? ["Item-0"] : [] }
+            // The same 0.5pt the stand-in match calls one place: a live echo
+            // read 1362 and 1362.5 (2026-11-10).
+            let xs = groups.map(\.minX)
+            let shared = xs.indices.contains { i in xs.indices.contains { $0 != i && abs(xs[$0] - xs[i]) <= 0.5 } }
+            guard !shared else { return groups.map { _ in nil } }
+            return ranksByX(groups).map { "Item-\($0)" }
         case .byPosition:
+            // Every untitled entry was "Item-0", the same collapse one layer
+            // down. Rank them among the untitled ones so the first keeps its
+            // id (#152).
+            let untitled = untitledRanks(items)
             return StandInMatch.items(forGroups: groups, items: items.map(\.frame))
-                .map { $0.map { items[$0].title ?? "Item-0" } }
+                .map { $0.map { items[$0].title ?? "Item-\(untitled[$0] ?? 0)" } }
         }
+    }
+
+    /// Each group's place on the bar, left to right.
+    private static func ranksByX(_ groups: [CGRect]) -> [Int] {
+        var ranks = [Int](repeating: 0, count: groups.count)
+        for (rank, index) in groups.indices.sorted(by: { groups[$0].minX < groups[$1].minX }).enumerated() {
+            ranks[index] = rank
+        }
+        return ranks
+    }
+
+    /// Each untitled entry's place among the untitled ones, left to right. A
+    /// frameless entry sorts last, by its place in the walk.
+    private static func untitledRanks(_ items: [(title: String?, frame: CGRect?)]) -> [Int: Int] {
+        let order = items.indices
+            .filter { items[$0].title == nil }
+            .sorted {
+                (items[$0].frame?.minX ?? .greatestFiniteMagnitude, $0)
+                    < (items[$1].frame?.minX ?? .greatestFiniteMagnitude, $1)
+            }
+        return Dictionary(uniqueKeysWithValues: order.enumerated().map { ($0.element, $0.offset) })
     }
 
     /// Which of an app's AXMenuBar children (width, each entry's subrole)

@@ -92,10 +92,22 @@ import Testing
         #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1601]), naming: .unread, items: []) == ["Item-0"])
     }
 
-    @Test func withNoBarSeveralGroupsStayUnnamed() {
-        // Pelmet's sections key on the title: one phantom Item-0 for all
-        // would be an item of its own.
-        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1492, 1601]), naming: .unread, items: [])
+    /// #152: Stats publishes no menu bar at all, so its modules were read
+    /// with no titles to tell them apart and every group went unnamed — the
+    /// app addressable only as a whole, one row for CPU, RAM and Battery
+    /// together. Icons at places of their own are icons of their own.
+    @Test func withNoBarSeveralGroupsTakeTheirPlaces() {
+        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1601, 1492]), naming: .unread, items: [])
+            == ["Item-1", "Item-0"])
+    }
+
+    /// A group sharing its x with another is a stand-in over its own button
+    /// or a copy, not a second icon: naming those would invent items.
+    @Test func withNoBarGroupsAtOnePlaceStayUnnamed() {
+        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1492, 1492]), naming: .unread, items: [])
+            == [nil, nil])
+        // The live echo read 1362 and 1362.5 (2026-11-10), one place.
+        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1362, 1362.5]), naming: .unread, items: [])
             == [nil, nil])
     }
 
@@ -108,8 +120,33 @@ import Testing
             == ["T", "Item-0"])
     }
 
-    @Test func aNameNamesEveryGroup() {
-        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1, 2]), naming: .named("T"), items: []) == ["T", "T"])
+    @Test func aNameNamesALoneGroup() {
+        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1]), naming: .named("T"), items: []) == ["T"])
+    }
+
+    /// #152, #153: an app whose entries the titles can't tell apart — Stats'
+    /// modules, a helper's untitled icons — had every group named alike, so
+    /// several icons collapsed onto one id: one row in the editor, one
+    /// picture, one glyph for all of them. The leftmost keeps the id it
+    /// already had, the ones right of it take theirs by rank.
+    @Test func severalGroupsOfOneNameTakeIdsOfTheirOwn() {
+        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1601, 1492, 1700]), naming: .named("Item-0"), items: [])
+            == ["Item-1", "Item-0", "Item-2"])
+        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1, 2]), naming: .named("T"), items: [])
+            == ["T", "Item-1"])
+    }
+
+    /// The same collapse one layer down: `.byPosition` named every untitled
+    /// entry "Item-0". Rank them among the untitled ones, so the first keeps
+    /// the id it had.
+    @Test func byPositionSeveralUntitledEntriesAreIdsOfTheirOwn() {
+        let items: [(title: String?, frame: CGRect?)] = [
+            (nil, CGRect(x: 5010, y: 2, width: 24, height: 24)),
+            (nil, CGRect(x: 4901, y: 2, width: 24, height: 24)),
+            ("T", CGRect(x: 4800, y: 2, width: 24, height: 24)),
+        ]
+        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1601, 1492, 1400]), naming: .byPosition, items: items)
+            == ["Item-1", "Item-0", "T"])
     }
 
     // MARK: A stand-in on its app's real button
