@@ -112,11 +112,24 @@ final class ItemPictures {
         }
         let dark: Bool
         let entries: [Entry]
+        /// Nil in a file from before epochs.
+        let epoch: Int?
     }
+
+    /// Kept pictures from an earlier epoch are not loaded. 2: until build 98
+    /// an icon alone behind the native « was filmed as if it were clear, so
+    /// a kept picture could be the « itself, and a bar with no room never
+    /// retook it (#153). Nothing in a picture says which ones those are.
+    private static let keptEpoch = 2
 
     private func load() {
         guard let url = Self.keptURL, let data = try? Data(contentsOf: url),
               let kept = try? PropertyListDecoder().decode(Kept.self, from: data) else { return }
+        guard (kept.epoch ?? 1) >= Self.keptEpoch else {
+            PelmetLog.log("panel: \(kept.entries.count) kept picture(s) dropped — taken before an icon alone behind the « was told from a clear one")
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
         var loaded: [ItemID: Picture] = [:]
         for entry in kept.entries where -entry.takenAt.timeIntervalSinceNow < Self.keepFor {
             guard let source = CGImageSourceCreateWithData(entry.png as CFData, nil),
@@ -147,7 +160,7 @@ final class ItemPictures {
             return Kept.Entry(key: key.rawValue, png: png, width: picture.size.width, height: picture.size.height,
                               takenAt: picture.takenAt, isMonochrome: picture.isMonochrome, isHighlighted: picture.isHighlighted)
         }
-        guard let data = try? PropertyListEncoder().encode(Kept(dark: dark, entries: entries)) else { return }
+        guard let data = try? PropertyListEncoder().encode(Kept(dark: dark, entries: entries, epoch: Self.keptEpoch)) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
     }

@@ -291,4 +291,38 @@ struct PicturePassBatchesTests {
         #expect(done == 2)
         #expect(left == [id("e")])
     }
+
+    // MARK: an icon alone on the « (#153)
+
+    @Test func anIconAloneOnTheNativeChevronIsNotClear() {
+        // @2f4vwwb5t6-gif's round of one on 0.4.1-beta.2: Perplexity out on
+        // its own read 722…762, the edge the rounds of four and of two had
+        // stacked on. Nothing else overlapped it, so it read as clear, was
+        // filmed, and its tile became the «.
+        let perplexity = id("perplexity")
+        let frames = [(key: perplexity, frame: f(722, 40)), (key: id("visible"), frame: f(764, 20))]
+        let chevron = f(745, 17)
+        let drawn = PicturePassBatches.drawn(wanted: [perplexity], frames: frames, chevrons: [chevron])
+        #expect(drawn.solid.isEmpty)
+        #expect(drawn.phantoms == [perplexity])
+        // The same frame with no « on the bar is an icon with room.
+        #expect(PicturePassBatches.drawn(wanted: [perplexity], frames: frames).solid == [perplexity: f(722, 40)])
+    }
+
+    @Test func aNeighbourOfTheNativeChevronStaysClear() {
+        // A real icon beside the « shares at most ~2pt of AX padding with it.
+        let wifi = id("wifi")
+        let drawn = PicturePassBatches.drawn(
+            wanted: [wifi], frames: [(key: wifi, frame: f(760, 30))], chevrons: [f(745, 17), .zero])
+        #expect(drawn.solid == [wifi: f(760, 30)])
+    }
+
+    @Test func theFirstRoundOwesAnIconAloneOnTheNativeChevronARound() {
+        // One hidden icon, out behind the «: a leftover, not a clear frame.
+        let only = id("only")
+        let items: [(key: ItemID, frame: CGRect?)] = [(key: only, frame: f(722, 40))]
+        #expect(PicturePassBatches.readings(wanted: [only], items: items, primaryMaxX: maxX, chevrons: [f(745, 17)]) == [only: .phantom])
+        #expect(PicturePassBatches.leftovers(wanted: [only], items: items, primaryMaxX: maxX, chevrons: [f(745, 17)]) == [only])
+        #expect(PicturePassBatches.leftovers(wanted: [only], items: items, primaryMaxX: maxX).isEmpty)
+    }
 }

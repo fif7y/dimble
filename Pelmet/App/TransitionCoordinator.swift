@@ -2331,6 +2331,15 @@ final class TransitionCoordinator {
 // MARK: - Picture pass (docs/PANEL-PLAN.md §8 S1, decision D2)
 
 extension TransitionCoordinator {
+    /// Every native « on the primary bar, by its label. An icon alone
+    /// behind it overlaps no other icon, so only the « itself says its frame
+    /// is a parked one: a round of one filmed the « as that icon's picture
+    /// (#153). Read off the main thread, a few AX reads of the agent's list.
+    private func nativeChevrons(primaryMaxX: CGFloat) async -> [CGRect] {
+        await Task.detached { OverflowToggle.listedToggles().map(\.frame) }.value
+            .filter { $0.width > 0 && MenuBarGeometry.isInPrimaryBand($0, primaryMaxX: primaryMaxX) }
+    }
+
     /// With the bar at rest: `sections` revealed under a cover, each item
     /// cut out against the empty bar with Pelmet's windows left out,
     /// concealed, cover lifted. A 60fps film of S1 showed no motion on the
@@ -2529,7 +2538,11 @@ extension TransitionCoordinator {
         let primaryFrames = snap.items.compactMap { item in
             item.frame.flatMap { MenuBarGeometry.isInPrimaryBand($0, primaryMaxX: primaryMaxX) ? (key: item.id.sectionKey, frame: $0) : nil }
         }
-        let first = PicturePassBatches.drawn(wanted: Set(onPrimary.map(\.id.sectionKey)), frames: primaryFrames)
+        let chevrons = drawn.isEmpty ? [] : await nativeChevrons(primaryMaxX: primaryMaxX)
+        if !chevrons.isEmpty {
+            PelmetLog.log("pass: the native « is on the bar at \(chevrons.map { "\(Int($0.minX))…\(Int($0.maxX))" }) (read at \(ms())ms)")
+        }
+        let first = PicturePassBatches.drawn(wanted: Set(onPrimary.map(\.id.sectionKey)), frames: primaryFrames, chevrons: chevrons)
         if !first.phantoms.isEmpty {
             PelmetLog.log("pass: \(first.phantoms.count) behind the «, not cropped")
         }
@@ -2561,7 +2574,8 @@ extension TransitionCoordinator {
         if pictures != nil, !wanting.isEmpty {
             let asking = Set(wanting.filter(wanted))
             leftovers = PicturePassBatches.leftovers(
-                wanted: asking, items: snap.items.map { (key: $0.id.sectionKey, frame: $0.frame) }, primaryMaxX: primaryMaxX)
+                wanted: asking, items: snap.items.map { (key: $0.id.sectionKey, frame: $0.frame) }, primaryMaxX: primaryMaxX,
+                chevrons: chevrons)
             // An icon that moved under the film gets a round too: the «
             // kicked in mid-film on a full reveal, all 15 moved and none was
             // cut (2026-10-12 23:09). Out on their own, the bar is quiet.
@@ -2646,9 +2660,12 @@ extension TransitionCoordinator {
                 let bar = walk.items.compactMap { item in
                     item.frame.flatMap { MenuBarGeometry.isInPrimaryBand($0, primaryMaxX: primaryMaxX) ? (key: item.id.sectionKey, frame: $0) : nil }
                 }
-                let now = PicturePassBatches.drawn(wanted: asked, frames: bar)
+                // Read again each round: the « moves as the bar empties, and
+                // it is gone once nothing is behind it.
+                let roundChevrons = await nativeChevrons(primaryMaxX: primaryMaxX)
+                let now = PicturePassBatches.drawn(wanted: asked, frames: bar, chevrons: roundChevrons)
                 if !now.phantoms.isEmpty {
-                    PelmetLog.log("pass: batch \(followUps) has \(now.phantoms.count) behind the «, not cropped")
+                    PelmetLog.log("pass: batch \(followUps) has \(now.phantoms.count) behind the «, not cropped (« at \(roundChevrons.map { "\(Int($0.minX))…\(Int($0.maxX))" }))")
                 }
                 let cut = bar.filter { now.solid[$0.key] == $0.frame && clearOfRule($0.frame) }
                 if cut.count < asked.count {

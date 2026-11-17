@@ -40,9 +40,10 @@ public enum PicturePassBatches {
     /// overlapping a visible icon is as much a phantom as one overlapping
     /// another hidden icon. Twins of one key (title variants) read as the
     /// leftmost primary-bar frame they have, so they do not overlap
-    /// themselves.
+    /// themselves. `chevrons` is every native « on that bar: an icon alone
+    /// behind it overlaps no other icon, only the « it is parked on (#153).
     public static func readings(
-        wanted: Set<ItemID>, items: [(key: ItemID, frame: CGRect?)], primaryMaxX: CGFloat
+        wanted: Set<ItemID>, items: [(key: ItemID, frame: CGRect?)], primaryMaxX: CGFloat, chevrons: [CGRect] = []
     ) -> [ItemID: Reading] {
         var seen = Set<ItemID>()
         var framed = Set<ItemID>()
@@ -55,7 +56,7 @@ public enum PicturePassBatches {
             if let existing = onPrimary[key], existing.minX <= frame.minX { continue }
             onPrimary[key] = frame
         }
-        let phantoms = phantomKeys(in: onPrimary)
+        let phantoms = phantomKeys(in: onPrimary, chevrons: chevrons)
         var readings: [ItemID: Reading] = [:]
         for key in wanted {
             if !seen.contains(key) {
@@ -75,8 +76,10 @@ public enum PicturePassBatches {
     /// on the primary bar. Not a clear frame whose cut came back blank (an
     /// animated wallpaper, an empty glyph: the same reveal would give the
     /// same), not another display's, not one the walk never saw.
-    public static func leftovers(wanted: Set<ItemID>, items: [(key: ItemID, frame: CGRect?)], primaryMaxX: CGFloat) -> Set<ItemID> {
-        Set(readings(wanted: wanted, items: items, primaryMaxX: primaryMaxX).compactMap { key, reading in
+    public static func leftovers(
+        wanted: Set<ItemID>, items: [(key: ItemID, frame: CGRect?)], primaryMaxX: CGFloat, chevrons: [CGRect] = []
+    ) -> Set<ItemID> {
+        Set(readings(wanted: wanted, items: items, primaryMaxX: primaryMaxX, chevrons: chevrons).compactMap { key, reading in
             reading == .phantom || reading == .frameless ? key : nil
         })
     }
@@ -102,14 +105,16 @@ public enum PicturePassBatches {
         }
     }
 
-    /// `frames` is every primary-band frame of the walk, asked for or not.
-    public static func drawn(wanted: Set<ItemID>, frames: [(key: ItemID, frame: CGRect)]) -> Drawn {
+    /// `frames` is every primary-band frame of the walk, asked for or not,
+    /// and `chevrons` every native « on that bar. A round of one whose icon
+    /// came back on the « read as clear, and its tile became the « (#153).
+    public static func drawn(wanted: Set<ItemID>, frames: [(key: ItemID, frame: CGRect)], chevrons: [CGRect] = []) -> Drawn {
         var byKey: [ItemID: CGRect] = [:]
         for (key, frame) in frames {
             if let existing = byKey[key], existing.minX <= frame.minX { continue }
             byKey[key] = frame
         }
-        let phantoms = phantomKeys(in: byKey)
+        let phantoms = phantomKeys(in: byKey, chevrons: chevrons)
         var solid: [ItemID: CGRect] = [:]
         var behind = Set<ItemID>()
         for (key, frame) in byKey where wanted.contains(key) {
@@ -122,9 +127,12 @@ public enum PicturePassBatches {
         return Drawn(solid: solid, phantoms: behind)
     }
 
-    private static func phantomKeys(in byKey: [ItemID: CGRect]) -> Set<ItemID> {
+    /// The « counts as a frame to overlap, never as an item: the icons
+    /// behind it report frames parked on it, one of them or nine.
+    private static func phantomKeys(in byKey: [ItemID: CGRect], chevrons: [CGRect]) -> Set<ItemID> {
         let entries = Array(byKey)
-        return Set(PlacementGeometry.overflowTrapped(entries.map(\.value)).map { entries[$0].key })
+        let trapped = PlacementGeometry.overflowTrapped(entries.map(\.value) + chevrons)
+        return Set(trapped.filter { $0 < entries.count }.map { entries[$0].key })
     }
 
     // MARK: - Whether to go on
