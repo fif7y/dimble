@@ -40,12 +40,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        PelmetLog.log("stop: asked to quit \(Self.quitAsker())")
         // The instance that just renamed the bundle never started AppState,
         // so beginTermination would never reply and it would stay running
         // beside the relaunched one.
         guard !relaunching else { return .terminateNow }
         appState.beginTermination()
         return .terminateLater
+    }
+
+    /// Who asked for this quit (fif7y/dimble#130: clean quits nobody at the
+    /// Mac asked for). A quit from another process arrives as an Apple
+    /// Event carrying the sender's pid, and loginwindow adds why (log out,
+    /// restart, shut down). No event means the quit came from inside: our
+    /// own Quit, or Sparkle installing an update.
+    private static func quitAsker() -> String {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else {
+            return "from inside (no Apple Event)"
+        }
+        var parts: [String] = []
+        if let pid = event.attributeDescriptor(forKeyword: AEKeyword(keySenderPIDAttr))?.int32Value {
+            // A helper tool or a script has no bundle id: name its binary.
+            var path = [UInt8](repeating: 0, count: 4096)
+            let length = Int(proc_pidpath(pid, &path, UInt32(path.count)))
+            let binary = length > 0 ? String(decoding: path[..<length], as: UTF8.self) : "unknown"
+            let name = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? binary
+            parts.append("by \(name) (pid \(pid))")
+        } else {
+            parts.append("by an Apple Event with no sender pid")
+        }
+        if let why = event.attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue, why != 0 {
+            parts.append("reason \(NSFileTypeForHFSTypeCode(why) ?? String(why))")
+        }
+        return parts.joined(separator: ", ")
     }
 
     /// The one line saying Dimble went down on purpose. Without it, a log
