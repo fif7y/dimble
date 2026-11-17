@@ -82,6 +82,11 @@ final class TransitionCoordinator {
     /// `ConcealGhostOverlay.backdropSignature` at the time each picture was taken.
     private var revealCoverBackdrop: [Int] = []
     private var revealedStripBackdrop: [Int] = []
+    /// The rect `revealedStripBackdrop` was taken over. A signature lists the
+    /// windows around the rect it was given, so it only means anything
+    /// against one taken over that same rect — and the strip's rect is
+    /// neither the cover's nor the same from one reveal to the next (#154).
+    private var revealedStripBackdropRect: CGRect?
     /// The cover was dropped for a changed backdrop and not retaken yet.
     private var revealCoverWanted = false
     private var precaptureInFlight = false
@@ -132,7 +137,19 @@ final class TransitionCoordinator {
     private func backdropMayHaveChanged() {
         guard let appState, !revealCoverSnapshot.isEmpty || !revealedStripSnapshot.isEmpty || parkedCover != nil else { return }
         let list = ConcealGhostOverlay.onScreenWindows()
-        let now = ConcealGhostOverlay.backdropSignature(of: precaptureRect, in: list) + ConcealGhostOverlay.surfaceSignature()
+        let surface = ConcealGhostOverlay.surfaceSignature()
+        let now = ConcealGhostOverlay.backdropSignature(of: precaptureRect, in: list) + surface
+        // The strip picture's signature was taken over the strip's own rect,
+        // `now` over the union with the blink's footprint — so comparing the
+        // two asks whether a window moved in a region the strip picture
+        // never covered. Measured 2026-11-16: a window between the strip's
+        // edge (…1583) and the clock made the picture read stale on the
+        // first check after every capture, so a reveal was covered only
+        // until anything touched the bar's surroundings (#154). Compare it
+        // against its own rect.
+        let nowStrip = revealedStripBackdropRect.map {
+            ConcealGhostOverlay.backdropSignature(of: $0, in: list) + surface
+        } ?? now
         if revealCoverSnapshot.isEmpty, let parked = parkedCover, parked.backdrop == now, appState.currentRevealedSections.isEmpty {
             revealCoverSnapshot = parked.snapshot
             revealCoverBackdrop = parked.backdrop
@@ -143,7 +160,7 @@ final class TransitionCoordinator {
             PelmetLog.log("backdrop: back as it was (\((now.count - ConcealGhostOverlay.surfaceSignatureCount) / 5) window(s)) — cover restored, no capture")
         }
         let coverStale = !revealCoverSnapshot.isEmpty && now != revealCoverBackdrop
-        let stripStale = !revealedStripSnapshot.isEmpty && revealedStripBackground.isEmpty && now != revealedStripBackdrop
+        let stripStale = !revealedStripSnapshot.isEmpty && revealedStripBackground.isEmpty && nowStrip != revealedStripBackdrop
         guard coverStale || stripStale else { return }
         let concealed = appState.currentRevealedSections.isEmpty
         // A stale picture is worse than none: the reveal captures live
@@ -154,12 +171,13 @@ final class TransitionCoordinator {
         // the icons cut out against that empty bar are true whatever moved
         // beneath, and the next reveal composites them over the fresh cover.
         let stripCutOut = stripStale && !revealCoverSnapshot.isEmpty && revealCoverBackdrop == revealedStripBackdrop
-        let movers = ConcealGhostOverlay.backdropMovers(from: coverStale ? revealCoverBackdrop : revealedStripBackdrop, to: now, in: list)
+        let movers = ConcealGhostOverlay.backdropMovers(from: coverStale ? revealCoverBackdrop : revealedStripBackdrop, to: coverStale ? now : nowStrip, in: list)
         PelmetLog.log("backdrop: changed under the bar (\((now.count - ConcealGhostOverlay.surfaceSignatureCount) / 5) window(s): \(movers)) — cover \(coverStale ? (concealed ? "dropped, retake on approach" : "dropped") : "kept"), finished \(stripStale ? (stripCutOut ? "kept as a cut-out" : "dropped") : "kept")")
         if stripCutOut {
             revealedStripBackground = revealCoverSnapshot
         } else if stripStale {
             revealedStripSnapshot = []
+            revealedStripBackdropRect = nil
         }
         if coverStale {
             parkedCover = concealed ? (revealCoverSnapshot, revealCoverBackdrop, revealCoverActiveDisplay, revealCoverUnderPanel) : nil
@@ -216,7 +234,7 @@ final class TransitionCoordinator {
         revealCoverTakenRect = nil
         revealCoverWanted = concealed
         parkedCover = nil
-        revealedStripSnapshot = []; revealedStripBackground = []; revealedStripKeep = nil
+        revealedStripSnapshot = []; revealedStripBackground = []; revealedStripKeep = nil; revealedStripBackdropRect = nil
         Task {
             await engine.setRuleShown(items)
             if appState?.currentRevealedSections.isEmpty == true { scheduleRevealCoverPrecapture() }
@@ -476,13 +494,34 @@ final class TransitionCoordinator {
         // on/off showed the icons twice, one set standing still while the
         // strip slid out (Gab, 2026-10-02). Drop it, the idle retake
         // spans the new strip.
-        if let taken = revealCoverTakenRect, let want = precaptureRect,
-           want.minX < taken.minX - 1 || want.maxX > taken.maxX + 1 {
-            PelmetLog.log("cover: idle picture \(Int(taken.minX))..\(Int(taken.maxX)) is short of the strip \(Int(want.minX))..\(Int(want.maxX)), retaking")
-            revealCoverSnapshot = []
-            revealCoverTakenRect = nil
-            revealCoverWanted = true
-            parkedCover = nil
+        // The strip is what that test is about, so it is the strip this
+        // compares. The union also carries the blink, whose right edge
+        // rides the clock's LEFT edge (`coverEnd`), and the clock is
+        // right-anchored, so that edge moves whenever its text changes
+        // width, 4pt as one digit swaps. Measured 2026-11-16: the clock
+        // went 1683 to 1687, the union's edge 1675 to 1679, and the guard
+        // threw away a picture whose strip (…1583) was well inside it,
+        // which cost every reveal after it its cover (#154). The capture
+        // pads `capturePadding` past the rect on each side before
+        // clamping, so the stored rect understates the pixels it holds by
+        // that much: drift inside the padding is already covered.
+        if let taken = revealCoverTakenRect, let want = precaptureRect {
+            let short: (CGRect, CGFloat) -> Bool = { rect, slack in
+                rect.minX < taken.minX - slack || rect.maxX > taken.maxX + slack
+            }
+            var culprit: (name: String, rect: CGRect)?
+            if let strip = revealCoverRect, short(strip, 1) {
+                culprit = ("strip", strip)
+            } else if short(want, ConcealGhostOverlay.capturePadding) {
+                culprit = ("blink", want)
+            }
+            if let culprit {
+                PelmetLog.log("cover: idle picture \(Int(taken.minX))..\(Int(taken.maxX)) is short of the \(culprit.name) \(Int(culprit.rect.minX))..\(Int(culprit.rect.maxX)), retaking")
+                revealCoverSnapshot = []
+                revealCoverTakenRect = nil
+                revealCoverWanted = true
+                parkedCover = nil
+            }
         }
     }
 
@@ -783,7 +822,7 @@ final class TransitionCoordinator {
                         // take a fresh picture. The boot picture only
                         // lacked a cover; it waits for one.
                         if picture == nil, !revealedStripBackground.isEmpty {
-                            revealedStripSnapshot = []; revealedStripBackground = []; revealedStripKeep = nil
+                            revealedStripSnapshot = []; revealedStripBackground = []; revealedStripKeep = nil; revealedStripBackdropRect = nil
                         }
                     }
                 }
@@ -2064,16 +2103,21 @@ final class TransitionCoordinator {
         let chevronX = liveChevronMinX
         let anchor = liveAnchor
         let activeDisplay = appState.lastMouseDownDisplay
-        let backdrop = ConcealGhostOverlay.backdropSignature(of: revealCoverRect) + ConcealGhostOverlay.surfaceSignature()
+        // One read of the rect for the signature, the capture and the stamp:
+        // the strip moves as items come and go, and a signature taken over
+        // one rect cannot be compared against another (#154).
+        let stripRect = revealCoverRect
+        let backdrop = ConcealGhostOverlay.backdropSignature(of: stripRect) + ConcealGhostOverlay.surfaceSignature()
         let underPanel = ClockClickRelay.notificationCenterIsOpen()
         // Under a held bar's picture the icons are still there (#88).
-        let taken = await ConcealGhostOverlay.snapshotSet(of: revealCoverRect, excludingOwnWindows: !held.isEmpty)
+        let taken = await ConcealGhostOverlay.snapshotSet(of: stripRect, excludingOwnWindows: !held.isEmpty)
         guard !Task.isCancelled else { return }
         revealedStripSignature = signature
         revealedStripChevronX = chevronX
         revealedStripAnchor = anchor
         revealedStripActiveDisplay = activeDisplay
         revealedStripBackdrop = backdrop
+        revealedStripBackdropRect = stripRect
         revealedStripBackground = []
         revealedStripKeep = nil
         revealedStripUnderPanel = underPanel
@@ -2246,6 +2290,7 @@ final class TransitionCoordinator {
         revealedStripAnchor = liveAnchor
         revealedStripActiveDisplay = appState.lastMouseDownDisplay ?? Self.displayUnderPointer
         revealedStripBackdrop = ConcealGhostOverlay.backdropSignature(of: rect) + ConcealGhostOverlay.surfaceSignature()
+        revealedStripBackdropRect = rect
         revealedStripBackground = []
         revealedStripKeep = (hidden.minX - 6)...(hidden.maxX + 6)
         revealedStripUnderPanel = ClockClickRelay.notificationCenterIsOpen()
