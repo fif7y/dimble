@@ -226,6 +226,7 @@ enum CommandBarCorpus {
             animationCommand(.instant, String(localized: "Instant")),
             animationCommand(.smooth, String(localized: "Smooth")),
             animationCommand(.fade, String(localized: "Fade")),
+            animationCommand(.system, String(localized: "macOS")),
             command(.checkForUpdates, String(localized: "Check for Updates"), "arrow.triangle.2.circlepath",
                     ["update", "upgrade", "new version"]),
             command(.settings, String(localized: "Dimble Settings"), "gearshape",

@@ -164,6 +164,27 @@ struct SettingsStoreTests {
         }
     }
 
+    /// The macOS style round-trips, and a style this build doesn't know (a
+    /// newer build's, or "system" read by an older one) falls back to Smooth
+    /// without taking the other settings with it.
+    @Test func revealAnimationRoundTripsAndFallsBackToSmooth() throws {
+        var settings = SettingsStore()
+        settings.revealAnimation = .system
+        let back = try JSONDecoder().decode(SettingsStore.self, from: JSONEncoder().encode(settings))
+        #expect(back.revealAnimation == .system)
+        let unknown = try JSONDecoder().decode(
+            SettingsStore.self, from: Data(#"{"revealAnimation":"wobble","autoRehide":false}"#.utf8))
+        #expect(unknown.revealAnimation == .smooth)
+        #expect(unknown.autoRehide == false)
+    }
+
+    /// macOS alone plays without pictures; Instant and Fade alone capture a
+    /// missing cover on the spot (Smooth shows the agent's slide instead).
+    @Test func revealAnimationPictureRules() {
+        #expect(RevealAnimation.allCases.filter { !$0.animatesOverPictures } == [.system])
+        #expect(RevealAnimation.allCases.filter(\.capturesCoverLive) == [.instant, .fade])
+    }
+
     // The per-display choice (#88) reads value by value: an unknown target
     // or a wrong type drops that display's entry alone (back to the Panel
     // tab's choice), never the others, and never the rest of the blob.

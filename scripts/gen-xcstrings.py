@@ -99,6 +99,7 @@ T = {
     "Instant": dict(de="Sofort", fr="Instantané", es="Instantánea", it="Istantanea", pt="Instantânea", ja="即時", zh="即时", ko="즉시", ru="Мгновенно"),
     "Smooth": dict(de="Sanft", fr="Fluide", es="Suave", it="Fluida", pt="Suave", ja="スムーズ", zh="平滑", ko="부드럽게", ru="Плавно"),
     "Fade": dict(de="Überblenden", fr="Fondu", es="Fundido", it="Dissolvenza", pt="Esmaecer", ja="フェード", zh="淡入淡出", ko="페이드", ru="Затухание"),
+    "macOS": dict(de="macOS", fr="macOS", es="macOS", it="macOS", pt="macOS", ja="macOS", zh="macOS", ko="macOS", ru="macOS"),
     "System extras": dict(de="System-Extras", fr="Extras système", es="Extras del sistema", it="Extra di sistema", pt="Extras do sistema", ja="システムの追加項目", zh="系统附加项", ko="시스템 추가 항목", ru="Системные элементы"),
     "Now Playing, camera controls, AirDrop, Focus, Timer": dict(de="Jetzt läuft, Kamerasteuerung, AirDrop, Fokus, Timer", fr="Lecture en cours, commandes de caméra, AirDrop, Concentration, Minuteur", es="Ahora suena, controles de cámara, AirDrop, Modos de concentración, Temporizador", it="In riproduzione, controlli fotocamera, AirDrop, Full immersion, Timer", pt="Tocando agora, controles de câmera, AirDrop, Foco, Timer", ja="再生中、カメラコントロール、AirDrop、集中モード、タイマー", zh="现在播放、相机控制、隔空投送、专注模式、计时器", ko="지금 재생 중, 카메라 제어, AirDrop, 집중 모드, 타이머", ru="Сейчас играет, управление камерой, AirDrop, Фокусирование, Таймер"),
     "Always hidden": dict(de="Immer ausgeblendet", fr="Toujours masqués", es="Siempre ocultos", it="Sempre nascosti", pt="Sempre ocultos", ja="常に非表示", zh="始终隐藏", ko="항상 숨김", ru="Всегда скрыты"),

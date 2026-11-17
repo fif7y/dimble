@@ -597,9 +597,11 @@ final class PanelPresenter: RevealPresenter {
 
     // MARK: - Motion
 
-    /// Reduce Motion: Smooth's slide becomes a fade.
+    /// Reduce Motion: Smooth's slide becomes a fade. macOS has no panel
+    /// motion of its own: it folds like Smooth (placeholder).
     private static func foldStyle(_ style: RevealAnimation) -> RevealAnimation {
-        style == .smooth && reduceMotion ? .fade : style
+        let style = style == .system ? RevealAnimation.smooth : style
+        return style == .smooth && reduceMotion ? .fade : style
     }
 
     /// Always Hidden's fold, in the Animation style: the window takes the
@@ -614,7 +616,7 @@ final class PanelPresenter: RevealPresenter {
         let growing = to >= from
         let duration: TimeInterval = switch style {
         case .instant: 0
-        case .smooth: growing ? AppTiming.smoothRevealDuration : AppTiming.smoothExitDuration
+        case .smooth, .system: growing ? AppTiming.smoothRevealDuration : AppTiming.smoothExitDuration
         case .fade: growing ? 0 : AppTiming.fadeExitDuration
         }
         guard duration > 0, from != to else {

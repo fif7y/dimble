@@ -322,6 +322,7 @@ final class PelmetStatusItem {
             (RevealAnimation.instant, String(localized: "Instant")),
             (.smooth, String(localized: "Smooth")),
             (.fade, String(localized: "Fade")),
+            (.system, String(localized: "macOS")),
         ] {
             let option = NSMenuItem(title: title, action: #selector(AppMenuTarget.setAnimation(_:)), keyEquivalent: "")
             option.representedObject = style.rawValue

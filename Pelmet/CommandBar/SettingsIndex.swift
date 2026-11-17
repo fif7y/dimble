@@ -53,7 +53,7 @@ enum SettingsIndex {
                     ["permission", "capture", "grant", "allow", "cover"]),
 
             behavior("animation", String(localized: "Animation"),
-                     ["reveal", "smooth", "fade", "instant", "transition", "style", "speed"]),
+                     ["reveal", "smooth", "fade", "instant", "macos", "transition", "style", "speed"]),
             behavior("iconSpacing", String(localized: "Space between icons"),
                      ["gap", "padding", "spacing", "tight", "wide"]),
             behavior("hoverReveal", String(localized: "Reveal on hover"),

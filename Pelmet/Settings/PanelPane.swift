@@ -361,7 +361,7 @@ private struct PanelPreviewStage: View {
     private var hiddenWidth: CGFloat { CGFloat(Self.hiddenDots) * Self.dot + CGFloat(Self.hiddenDots - 1) * Self.gap }
 
     private var hiddenOffset: CGFloat {
-        guard appState.settings.revealAnimation == .smooth, !barRevealed else { return 0 }
+        guard [.smooth, .system].contains(appState.settings.revealAnimation), !barRevealed else { return 0 }
         return hiddenWidth  // parked behind the chevron
     }
 

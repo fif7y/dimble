@@ -424,10 +424,31 @@ public enum StatusIconStyle: String, Codable, CaseIterable, Sendable, Identifiab
 public enum RevealAnimation: String, Codable, CaseIterable, Sendable {
     /// No animation — icons appear in place once the swap lands.
     case instant
-    /// The agent's own slide-in (the OS default).
+    /// Dimble's slide over pictures of the bar (needs Screen Recording;
+    /// without it, the agent's own slide shows).
     case smooth
     /// Fade in place — a cover over the strip fades away after the swap.
     case fade
+    /// Shown as "macOS": the agent's own slide, no pictures over the bar,
+    /// even with Screen Recording on.
+    case system
+
+    /// The ordinary reveal and conceal play over pictures of the bar.
+    public var animatesOverPictures: Bool {
+        switch self {
+        case .instant, .smooth, .fade: true
+        case .system: false
+        }
+    }
+
+    /// With no empty-bar picture ready, the reveal captures its cover on the
+    /// spot. Smooth lets the agent's slide show instead.
+    public var capturesCoverLive: Bool {
+        switch self {
+        case .instant, .fade: true
+        case .smooth, .system: false
+        }
+    }
 }
 
 /// Defaults shared beyond the store itself (the engine boots with the same

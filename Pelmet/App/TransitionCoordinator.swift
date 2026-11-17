@@ -35,6 +35,8 @@ struct AnimationRecipe {
         case .instant: AnimationRecipe(entrance: .pop, exit: .pop)
         case .fade: AnimationRecipe(entrance: .fade(AppTiming.fadeRevealDuration), exit: .fade(AppTiming.fadeExitDuration))
         case .smooth: AnimationRecipe(entrance: .slide(dx: 96, AppTiming.smoothRevealDuration), exit: .slide(dx: 64, AppTiming.smoothExitDuration))
+        // The ordinary reveal and conceal skip pictures for macOS; anchored, held and live covers still need a move, so Smooth's.
+        case .system: recipe(for: .smooth)
         }
     }
 }
@@ -337,7 +339,9 @@ final class TransitionCoordinator {
             PelmetLog.log("cover: the conceal's picture is still settling — the reveal goes on without it")
             return
         }
-        guard revealCoverSnapshot.isEmpty, precaptureInFlight || (revealCoverWanted && style != .smooth) else { return }
+        // macOS takes no cover, so there is nothing to wait for.
+        guard style.animatesOverPictures else { return }
+        guard revealCoverSnapshot.isEmpty, precaptureInFlight || (revealCoverWanted && style.capturesCoverLive) else { return }
         if !precaptureInFlight {
             PelmetLog.log("cover: retaking at the reveal")
             scheduleRevealCoverPrecapture(afterConceal: false)
@@ -773,12 +777,13 @@ final class TransitionCoordinator {
             // signal of its own: look once more before trusting the picture.
             backdropMayHaveChanged()
             await awaitCoverRetake(style: style)
-            let emptyBar = freshEmptyBarSnapshots()
+            // macOS: no cover and so no finished picture — the agent's own slide shows, as without Screen Recording.
+            let emptyBar = style.animatesOverPictures ? freshEmptyBarSnapshots() : []
             // Read now, not at the mark: the awaits below let another
             // caller of freshEmptyBarSnapshots overwrite it.
-            let coverMiss = lastCoverMiss
+            let coverMiss = style.animatesOverPictures ? lastCoverMiss : "macOS style"
             await hold(appState.barsKeptConcealed)
-            var coverSource = !emptyBar.isEmpty ? "precaptured" : style != .smooth ? "live capture" : "none"
+            var coverSource = !emptyBar.isEmpty ? "precaptured" : style.capturesCoverLive ? "live capture" : "none"
             if emptyBar.isEmpty, let coverMiss { coverSource += ", \(coverMiss)" }
             if !emptyBar.isEmpty {
                 // The still shows the collapsed glyph; a hole over the
@@ -788,7 +793,7 @@ final class TransitionCoordinator {
                     from: punchedCover(emptyBar, columns: chevronPunch.map { ($0.lowerBound + 6)...($0.upperBound - 6) }),
                     safety: AppTiming.transitionCoverSafety
                 )
-            } else if style != .smooth {
+            } else if style.capturesCoverLive {
                 cover = await ConcealGhostOverlay.begin(over: revealCoverRect, safety: AppTiming.transitionCoverSafety)
             }
             trace.mark("cover", detail: coverSource)
@@ -956,10 +961,12 @@ final class TransitionCoordinator {
             // its finished picture, and every reveal after paid the
             // cover-only path — 0.6s from the click to the icons on each
             // toggle (#35). The strip is still up and at rest: take it now.
-            if lastRevealedSections == [.hidden], released.isEmpty, let why = revealedStripProblem {
+            // macOS never uses that picture, so it isn't taken here either.
+            if style.animatesOverPictures, lastRevealedSections == [.hidden], released.isEmpty, let why = revealedStripProblem {
                 await takeRevealedStripPicture(reason: "conceal (\(why))")
             }
-            let emptyBar = freshEmptyBarSnapshots()
+            // macOS: no empty bar means Smooth's slide exit takes no cover and no strip — the agent's fade shows.
+            let emptyBar = style.animatesOverPictures ? freshEmptyBarSnapshots() : []
             var cover: ConcealGhostOverlay.GhostSet?
             var strip: ConcealGhostOverlay.GhostSet?
             // No chevron hole on the way out: the empty-bar still already
@@ -2143,6 +2150,8 @@ final class TransitionCoordinator {
                 try? await Task.sleep(for: AppTiming.precaptureGhostClearance)
             }
             guard !Task.isCancelled, appState.currentRevealedSections == [.hidden] else { return }
+            // macOS plays no finished picture: taking one only lights the capture indicator.
+            guard appState.settings.revealAnimation.animatesOverPictures else { return }
             // An icon Show in Menu Bar has out on top of the section would
             // be in the picture, and the next reveal would flash it. One a
             // show rule has out is on the bar for every reveal while the
@@ -2268,6 +2277,8 @@ final class TransitionCoordinator {
     /// picture is skipped then.
     func takeBootPicture(from snap: EngineSnapshot) async {
         guard let appState, seedStripAtBoot(from: snap), let rect = revealCoverRect else { return }
+        // macOS plays no finished picture: the strip is seeded above, the picture isn't needed.
+        guard appState.settings.revealAnimation.animatesOverPictures else { return }
         let model = appState.settings.sectionModel
         let primaryMaxX = primaryMaxX
         var hidden: CGRect?

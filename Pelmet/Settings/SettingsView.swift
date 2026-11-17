@@ -1196,10 +1196,11 @@ private struct BehaviorPane: View {
 
     var body: some View {
         // Every style plays over pictures of the bar: without Screen
-        // Recording macOS's own slide shows whichever is picked.
+        // Recording macOS's own slide shows whichever is picked, so the card
+        // shows macOS picked then; the saved style comes back with the grant.
         let recording = appState.screenRecordingGranted
         SettingsCard(title: "Animation") {
-            AnimationShowcase(selection: binding(\.revealAnimation))
+            AnimationShowcase(selection: recording ? binding(\.revealAnimation) : .constant(.system))
                 .disabled(!recording)
                 .opacity(recording ? 1 : 0.5)
                 .screenRecordingHelp("Needs Screen Recording. Dimble animates the icons over a picture of the menu bar.", when: !recording)
@@ -1960,14 +1961,14 @@ struct ChipLabel<Icon: View>: View {
 
 // MARK: - Animation showcase
 
-/// Three picture cards in Panel's recipe, one per style: a sketch of the bar
+/// Four picture cards in Panel's recipe, one per style: a sketch of the bar
 /// with the name under it, the pick on the accent ring and fill. A card plays
 /// its own reveal once while the pointer is on it, never with Reduce Motion.
 struct AnimationShowcase: View {
     @Binding var selection: RevealAnimation
 
     private static let styles: [(RevealAnimation, LocalizedStringKey)] = [
-        (.instant, "Instant"), (.smooth, "Smooth"), (.fade, "Fade"),
+        (.instant, "Instant"), (.smooth, "Smooth"), (.fade, "Fade"), (.system, "macOS"),
     ]
 
     var body: some View {
@@ -2090,7 +2091,8 @@ struct MockBar: View {
     }
 
     private var hiddenOffset: CGFloat {
-        guard case .smooth = style, !revealed else { return 0 }
+        // macOS previews as Smooth (placeholder).
+        guard style == .smooth || style == .system, !revealed else { return 0 }
         return Self.hiddenWidth  // parked behind the chevron
     }
 
@@ -2099,7 +2101,7 @@ struct MockBar: View {
         switch style {
         case .instant:
             nil
-        case .smooth:
+        case .smooth, .system:
             revealed
                 ? .timingCurve(0.16, 1, 0.3, 1, duration: AppTiming.smoothRevealDuration)
                 : .timingCurve(0.55, 0, 0.8, 0.4, duration: AppTiming.smoothExitDuration)
