@@ -1117,6 +1117,14 @@ final class ConcealGhostOverlay {
         guard !finished else { return }
         var frame = window.frame
         guard x < frame.maxX, x > frame.minX else { return }
+        // An end on the move is cut where the window now ends.
+        if movingEnd != nil || endRider != nil {
+            endGeneration += 1
+            movingEnd = nil
+            dropEndMask(imageView.layer?.mask, after: Self.endMaskLinger)
+            endRider?.removeFromSuperlayer()
+            endRider = nil
+        }
         frame.size.width = x - frame.minX
         window.setFrame(frame, display: true)
         catcher?.setFrame(frame, display: false)
@@ -1127,6 +1135,152 @@ final class ConcealGhostOverlay {
             syncTwin()
             scheduleTwinShape()
         }
+    }
+
+    /// A cover's end on the move: the stretch of the picture's mask past
+    /// the end that stays, fading.
+    private var movingEnd: CALayer?
+    private var endGeneration = 0
+    /// A picture moving over the stretch a cut is waiting on (`clip(toMaxX:after:removing:)`).
+    private var endRider: CALayer?
+    /// The mask stays this long after the window took its new frame: gone
+    /// in the same beat, the stretch it hid could show whole for a frame.
+    private static let endMaskLinger: TimeInterval = 0.1
+
+    /// How much of an end on the move covers now (1 all of it, 0 none), nil
+    /// when none is moving.
+    var tailCover: CGFloat? {
+        guard !finished, let tail = movingEnd else { return nil }
+        return CGFloat((tail.presentation() ?? tail).opacity)
+    }
+
+    /// The picture right of `x` (global) fades from covering `start` to
+    /// `target` (1 whole, 0 gone) over the move's time: the icons under a
+    /// live cover stand in place already, so the cover over them is what
+    /// fades (#154). Ending at 0 the window ends at `x`, as `clip(toMaxX:)`
+    /// leaves it, and the clicks and the twin go at once (what shows is the
+    /// bar's from the first frame). An end already moving goes on from where
+    /// it is, in a time cut to what is left. Returns that time, 0 for a cut.
+    @discardableResult
+    func moveEnd(
+        pastX x: CGFloat, from start: CGFloat? = nil, to target: CGFloat,
+        as move: AnimationRecipe.Move, curve: CAMediaTimingFunction
+    ) -> CFTimeInterval {
+        guard !finished else { return 0 }
+        let from = start ?? tailCover ?? (1 - target)
+        let frame = window.frame
+        let whole: CFTimeInterval
+        switch move {
+        case .pop: whole = 0
+        case .fade(let d), .slide(_, let d): whole = d
+        }
+        let scale = max(window.backingScaleFactor, 1)
+        let kept = ((x - frame.minX) * scale).rounded() / scale
+        let width = frame.width - kept
+        let duration = whole * Double(abs(target - from))
+        endGeneration += 1
+        let generation = endGeneration
+        movingEnd = nil
+        endRider?.removeFromSuperlayer()
+        endRider = nil
+        guard duration > 0.02, kept > 0, width > 0.5, let picture = imageView.layer else {
+            endSettled(generation, at: x, cut: target == 0, mask: imageView.layer?.mask)
+            return 0
+        }
+        if target == 0 { endClicks(at: x) }
+        let mask = CALayer(), stays = CALayer(), tail = CALayer()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock { [weak self] in
+            self?.endSettled(generation, at: x, cut: target == 0, mask: mask)
+        }
+        mask.frame = picture.bounds
+        stays.backgroundColor = CGColor(gray: 0, alpha: 1)
+        stays.frame = CGRect(x: 0, y: 0, width: kept, height: frame.height)
+        tail.backgroundColor = CGColor(gray: 0, alpha: 1)
+        tail.frame = CGRect(x: kept, y: 0, width: width, height: frame.height)
+        mask.addSublayer(stays)
+        mask.addSublayer(tail)
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = from
+        anim.toValue = target
+        anim.duration = duration
+        anim.timingFunction = curve
+        tail.add(anim, forKey: "pelmetEnd")
+        tail.opacity = Float(target)
+        picture.mask = mask
+        CATransaction.commit()
+        movingEnd = tail
+        return duration
+    }
+
+    /// The clicks and the twin end at `x` now, ahead of the window: what a
+    /// move uncovers is the bar's from its first frame.
+    private func endClicks(at x: CGFloat) {
+        var short = window.frame
+        guard x < short.maxX, x > short.minX else { return }
+        short.size.width = x - short.minX
+        catcher?.setFrame(short, display: false)
+        twin?.setFrame(short, display: false)
+        if twin != nil {
+            twinCovers = false
+            syncTwin()
+            scheduleTwinShape()
+        }
+    }
+
+    /// The window ends at `x` once the picture moving over the stretch past
+    /// it has arrived, `delay` from now: `layer` is that picture (the icons
+    /// under a live cover, sliding out from behind the «), and it goes with
+    /// the stretch. The cover stays whole beneath it until then, so the
+    /// icons are seen once, in the picture, and the real ones take over in
+    /// place.
+    func clip(toMaxX x: CGFloat, after delay: CFTimeInterval, removing layer: CALayer) {
+        guard !finished else { layer.removeFromSuperlayer(); return }
+        endGeneration += 1
+        let generation = endGeneration
+        movingEnd = nil
+        dropEndMask(imageView.layer?.mask, after: 0)
+        endRider?.removeFromSuperlayer()
+        endRider = layer
+        endClicks(at: x)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, generation == self.endGeneration, !self.finished else { return }
+            self.endRider = nil
+            self.clip(toMaxX: x)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.endMaskLinger) { layer.removeFromSuperlayer() }
+        }
+    }
+
+    /// A layer over the picture and under everything else on it (the pills'
+    /// mirrors), in the picture's own coordinates.
+    func insertLayer(_ layer: CALayer) {
+        guard let root = window.contentView?.layer else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        if let picture = imageView.layer, picture.superlayer === root {
+            root.insertSublayer(layer, above: picture)
+        } else {
+            root.insertSublayer(layer, at: 0)
+        }
+        CATransaction.commit()
+    }
+
+    /// The end has arrived: the window takes its frame, then the mask goes.
+    private func endSettled(_ generation: Int, at x: CGFloat, cut: Bool, mask: CALayer?) {
+        guard generation == endGeneration, !finished else { return }
+        movingEnd = nil
+        if cut { clip(toMaxX: x) }
+        dropEndMask(mask, after: cut ? Self.endMaskLinger : 0)
+    }
+
+    private func dropEndMask(_ mask: CALayer?, after delay: TimeInterval) {
+        guard let mask else { return }
+        let drop = { [weak self] in
+            guard let self, self.movingEnd == nil, let picture = self.imageView.layer, picture.mask === mask else { return }
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            picture.mask = nil
+            CATransaction.commit()
+        }
+        if delay > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: drop) } else { drop() }
     }
 
     /// Directly below another cover: the one above stays what is seen while
