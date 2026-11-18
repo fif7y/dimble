@@ -424,7 +424,9 @@ public enum StatusIconStyle: String, Codable, CaseIterable, Sendable, Identifiab
 public enum RevealAnimation: String, Codable, CaseIterable, Sendable {
     /// No animation — icons appear in place once the swap lands.
     case instant
-    /// The agent's own slide-in (the OS default).
+    /// The icons slide in from the chevron: Dimble's own slide, performed
+    /// by pictures over a covered bar. Without Screen Recording there are
+    /// no pictures, and macOS's own slide shows.
     case smooth
     /// Fade in place — a cover over the strip fades away after the swap.
     case fade

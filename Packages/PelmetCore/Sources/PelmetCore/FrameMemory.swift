@@ -56,6 +56,30 @@ public struct FrameMemory: Equatable, Sendable {
         return stale
     }
 
+    /// The icons among `keys` remembered right of the chevron as it stood
+    /// with them. macOS pins some there (Apple's Siri, in SystemUIServer,
+    /// Control Center), and one Apply has yet to drag sits there too.
+    /// Hidden, such an icon leaves the bar and the chevron and every icon
+    /// between close the gap: a reveal that brings it back moves them all
+    /// over again, by its width (#157).
+    ///
+    /// An icon not read in its slot since launch has only its frame from
+    /// the launch walk (`launchFrames`: every icon out, before the first
+    /// conceal), and a frame read with no chevron on the bar has nothing to
+    /// stand against. Both are judged against `chevronNow`, the chevron of
+    /// the concealed bar: it stands as far right as it ever does there, so
+    /// an icon wholly past it was right of it revealed too (Control Center,
+    /// first reveal of a launch, 2026-11-18).
+    public func rightOfChevron(
+        among keys: some Sequence<ItemID>, chevronNow: CGRect? = nil, launchFrames: [ItemID: CGRect] = [:]
+    ) -> [ItemID] {
+        keys.filter { key in
+            if let frame = frames[key], let chevron = chevronMidX[key] { return frame.midX > chevron }
+            guard let frame = frames[key] ?? launchFrames[key], let chevronNow else { return false }
+            return frame.minX >= chevronNow.maxX - 1
+        }.sorted { $0.rawValue < $1.rawValue }
+    }
+
     /// Always Hidden is seen only in a full reveal, Hidden in every hover,
     /// and the chevron alone does not re-anchor one against the other: the
     /// separator remembered at launch, before Siri joined Hidden, read

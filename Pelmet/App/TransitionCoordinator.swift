@@ -772,15 +772,26 @@ final class TransitionCoordinator {
             // A wallpaper or appearance change between two mouse-ups has no
             // signal of its own: look once more before trusting the picture.
             backdropMayHaveChanged()
-            await awaitCoverRetake(style: style)
-            let emptyBar = freshEmptyBarSnapshots()
+            // An icon macOS keeps right of the « (Apple's Siri) comes back
+            // there, and the « and every icon between move over by its
+            // width. Both pictures are of a bar where they stand still: the
+            // cover showed Wi-Fi where it was while the hole for the « let
+            // the shifted one through beside it, and the finished picture,
+            // read as a bar that had moved, slid in 31pt off (#157). No
+            // picture can perform that reveal: macOS's own slide does.
+            let aside = comingOutRightOfChevron(sections)
+            if aside.isEmpty { await awaitCoverRetake(style: style) }
+            let emptyBar = aside.isEmpty ? freshEmptyBarSnapshots() : []
             // Read now, not at the mark: the awaits below let another
             // caller of freshEmptyBarSnapshots overwrite it.
             let coverMiss = lastCoverMiss
             await hold(appState.barsKeptConcealed)
             var coverSource = !emptyBar.isEmpty ? "precaptured" : style != .smooth ? "live capture" : "none"
             if emptyBar.isEmpty, let coverMiss { coverSource += ", \(coverMiss)" }
-            if !emptyBar.isEmpty {
+            if !aside.isEmpty {
+                coverSource = "none, \(aside.count) right of the «"
+                PelmetLog.log("cover: \(aside.map(\.rawValue)) come\(aside.count == 1 ? "s" : "") out right of the « and move\(aside.count == 1 ? "s" : "") the icons beside it — no pictures, macOS's own slide shows")
+            } else if !emptyBar.isEmpty {
                 // The still shows the collapsed glyph; a hole over the
                 // glyph's core lets the live chevron (flipped at the swap)
                 // show through without exposing a neighbor's edge.
@@ -804,7 +815,7 @@ final class TransitionCoordinator {
                     let keep: ClosedRange<CGFloat>? = revealedStripSnapshot.first.map { ($0.windowFrame.minX)...(then - 1) }
                     picture = cutOutPicture(revealedStripSnapshot, background: emptyBar, punch: punch, keep: keep)?
                         .map { ConcealGhostOverlay.BarSnapshot(image: $0.image, windowFrame: $0.windowFrame.offsetBy(dx: shift, dy: 0), takenAt: $0.takenAt) }
-                    PelmetLog.log("finished: bar moved since the picture (chevron \(then) → \(then + shift)) — \(picture == nil ? "cut-out failed, cover only" : "icons cut out and shifted \(Int(shift))pt")")
+                    PelmetLog.log("finished: bar moved since the picture (chevron \(then) → \(then + shift), read off \(revealedStripMove?.by ?? "«")) — \(picture == nil ? "cut-out failed, cover only" : "icons cut out and shifted \(Int(shift))pt")")
                 } else if recipe.entrance.needsCutOut || revealedStripCutOut {
                     // Against the empty bar the picture was taken over: the
                     // fresh cover when nothing moved (and for the boot
@@ -2041,14 +2052,33 @@ final class TransitionCoordinator {
     }
     /// The anchor's x now, and how far it moved since the picture. An
     /// anchor gone from the bar (a media control that stopped) falls back
-    /// to the chevron, which does read a real move then.
-    private var revealedStripMove: (then: CGFloat, now: CGFloat)? {
+    /// to the chevron, which does read a real move then. `by` names what
+    /// was read, for the log.
+    private var revealedStripMove: (then: CGFloat, now: CGFloat, by: String)? {
         if let anchor = revealedStripAnchor,
            let now = appState?.snapshot?.items.first(where: { $0.id == anchor.id })?.frame?.minX {
-            return (anchor.minX, now)
+            return (anchor.minX, now, anchor.id.rawValue)
         }
         guard let then = revealedStripChevronX, let now = liveChevronMinX else { return nil }
-        return (then, now)
+        return (then, now, revealedStripAnchor.map { "« (\($0.id.rawValue) gone)" } ?? "«")
+    }
+
+    /// Where the launch walk read each concealable icon, every one still
+    /// out: all the first reveal of a launch has to go by.
+    private var launchFrames: [ItemID: CGRect] = [:]
+
+    /// The concealed icons a reveal of `sections` brings back right of the
+    /// «, where the bar last read them (`FrameMemory.rightOfChevron`).
+    private func comingOutRightOfChevron(_ sections: Set<PelmetCore.Section>) -> [ItemID] {
+        guard let appState, let concealed = appState.snapshot?.concealed else { return [] }
+        let model = appState.settings.sectionModel
+        let primaryMaxX = primaryMaxX
+        let chevron = appState.snapshot?.items.first(where: { $0.id == AppState.chevronItemID })?.frame
+            .flatMap { MenuBarGeometry.isInPrimaryBand($0, primaryMaxX: primaryMaxX) ? $0 : nil }
+        return appState.frameMemory.rightOfChevron(
+            among: Set(concealed.map(\.sectionKey)).filter { sections.contains(model.section(of: $0)) },
+            chevronNow: chevron, launchFrames: launchFrames
+        )
     }
 
     private var hiddenSectionSignature: [ItemID] {
@@ -2075,8 +2105,8 @@ final class TransitionCoordinator {
         guard revealedStripUnderPanel == ClockClickRelay.notificationCenterIsOpen() else {
             return "picture taken with the panel \(revealedStripUnderPanel ? "open" : "closed")"
         }
-        if let (then, now) = revealedStripMove, abs(then - now) > 1, freshEmptyBarSnapshots().isEmpty {
-            return "bar moved since the picture (\(then) → \(now)) and no cover to cut out against"
+        if let (then, now, by) = revealedStripMove, abs(then - now) > 1, freshEmptyBarSnapshots().isEmpty {
+            return "bar moved since the picture (\(by) \(then) → \(now)) and no cover to cut out against"
         }
         return nil
     }
@@ -2089,7 +2119,7 @@ final class TransitionCoordinator {
     /// much and land where the bar puts them (2026-09-21 — before, every
     /// such reveal dropped the picture and ran cover-only).
     private var revealedStripShift: CGFloat {
-        guard let (then, now) = revealedStripMove, abs(then - now) > 1 else { return 0 }
+        guard let (then, now, _) = revealedStripMove, abs(then - now) > 1 else { return 0 }
         return now - then
     }
 
@@ -2249,6 +2279,7 @@ final class TransitionCoordinator {
             else { continue }
             count += 1
             union = union.map { $0.union(frame) } ?? frame
+            launchFrames[item.id.sectionKey] = frame
         }
         concealableCount = count
         guard let union else { return false }

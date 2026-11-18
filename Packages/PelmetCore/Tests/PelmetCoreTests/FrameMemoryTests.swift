@@ -150,4 +150,62 @@ import Testing
         #expect(FrameMemory.alwaysHiddenApart(in: frames, remembered: [], concealed: [], section: section).isEmpty)
         #expect(FrameMemory.alwaysHiddenApart(in: frames, remembered: [], concealed: [velja], section: section).isEmpty)
     }
+
+    @Test func anIconRememberedRightOfTheChevronIsNamed() {
+        // #157: Apple's Siri is in Hidden and macOS keeps it right of the
+        // chevron. Revealed, the bar read a, Snib, «, v1, Siri.
+        let siri = ItemID.bundleKey("com.apple.systemuiserver")
+        var memory = FrameMemory()
+        memory.remember(
+            [a: frame(100), snib: frame(130), chevron: frame(200), v1: frame(230), siri: frame(260)],
+            chevronMidX: 210, atRest: true
+        )
+        #expect(memory.rightOfChevron(among: [a, snib, siri]) == [siri])
+        // Only the icons asked about: v1 is right of it too, and visible.
+        #expect(memory.rightOfChevron(among: [a, snib]) == [])
+    }
+
+    @Test func anIconNeverReadIsNotCalledRightOfTheChevron() {
+        // No frame, or a frame read with no chevron on the bar and none
+        // now: unknown, and a reveal keeps its pictures.
+        var memory = FrameMemory()
+        memory.remember([a: frame(260)], chevronMidX: nil, atRest: true)
+        #expect(memory.rightOfChevron(among: [a, snib]) == [])
+    }
+
+    @Test func aFrameReadWithNoChevronIsJudgedAgainstTheConcealedBars() {
+        // The launch walk read every icon out and no chevron (it sat behind
+        // macOS's own «). Concealed, the chevron stands at 200…220: Control
+        // Center at 230 is past it, Snib at 130 is not, and an icon on the
+        // chevron's own spot (a glyphless chevron reads there) is not.
+        let center = ItemID(rawValue: "status:com.apple.MenuBarAgent::com.apple.menuextra.controlcenter")
+        var memory = FrameMemory()
+        memory.remember([snib: frame(130), a: frame(195), center: frame(230)], chevronMidX: nil, atRest: true)
+        #expect(memory.rightOfChevron(among: [snib, a, center], chevronNow: frame(200)) == [center])
+        // Read again with the chevron on the bar, that reading decides.
+        memory.remember([center: frame(230)], chevronMidX: 250, atRest: true)
+        #expect(memory.rightOfChevron(among: [center], chevronNow: frame(200)) == [])
+    }
+
+    @Test func anIconNotReadSinceLaunchIsJudgedByItsLaunchFrame() {
+        // First reveal of a launch: nothing read Control Center in its slot
+        // yet, the launch walk's frame is all there is.
+        let center = ItemID(rawValue: "status:com.apple.MenuBarAgent::com.apple.menuextra.controlcenter")
+        let launch = [snib: frame(130), center: frame(230)]
+        let memory = FrameMemory()
+        #expect(memory.rightOfChevron(among: [snib, center], chevronNow: frame(200), launchFrames: launch) == [center])
+        #expect(memory.rightOfChevron(among: [snib, center], launchFrames: launch) == [])
+        // Once the bar has read it beside the chevron, the launch frame is not asked.
+        var read = FrameMemory()
+        read.remember([center: frame(150)], chevronMidX: 210, atRest: true)
+        #expect(read.rightOfChevron(among: [center], chevronNow: frame(200), launchFrames: launch) == [])
+    }
+
+    @Test func anIconDraggedBackLeftOfTheChevronIsNoLongerNamed() {
+        var memory = FrameMemory()
+        memory.remember([a: frame(260)], chevronMidX: 210, atRest: true)
+        #expect(memory.rightOfChevron(among: [a]) == [a])
+        memory.remember([a: frame(100)], chevronMidX: 210, atRest: true)
+        #expect(memory.rightOfChevron(among: [a]) == [])
+    }
 }
