@@ -3123,6 +3123,9 @@ final class AppState {
         defer { applying = false }
         let report = await ApplyPass.run(appState: self, scope: .ownItem(id))
         PelmetLog.log("apply: own \(id.rawValue) applied=\(report.applied.count) failed=\(report.failed.count) skipped=\(report.skipped.count)")
+        // Put off for a held mouse button (#159): again shortly, until the
+        // button is up or the item has left the bar.
+        guard !report.abandoned else { return placeOwnItemSoon(id, after: AppTiming.ownItemRetryDelay) }
         if !report.applied.isEmpty { await engine.writeOrderHint() }
         // Not laid out yet: a brand-new item reaches the bar's AX tree on
         // the agent's beat, and a shortcut added on a concealed bar was not

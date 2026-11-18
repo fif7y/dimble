@@ -321,13 +321,24 @@ enum ApplyPass {
         CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
     }
 
-    private static func waitForIdlePointer(upTo wait: TimeInterval = AppTiming.applyIdleMaxWait) async {
+    /// False when the drag is put off: a mouse button is held and the pass
+    /// is not one the user asked for (`PointerBorrow`, #159).
+    private static func waitForIdlePointer(upTo wait: TimeInterval = AppTiming.applyIdleMaxWait, askedByUser: Bool) async -> Bool {
         let deadline = Date.now.addingTimeInterval(wait)
-        while Date.now < deadline {
-            if secondsSincePointerActivity() >= AppTiming.applyIdleGap { return }
-            try? await Task.sleep(for: .milliseconds(100))
+        while true {
+            let verdict = PointerBorrow.verdict(
+                quietFor: secondsSincePointerActivity(), gap: AppTiming.applyIdleGap,
+                buttonDown: NSEvent.pressedMouseButtons != 0, waitedOut: Date.now >= deadline, askedByUser: askedByUser
+            )
+            switch verdict {
+            case .now: return true
+            case .putOff: return false
+            case .shielded:
+                PelmetLog.log("apply: pointer never went idle — proceeding shielded")
+                return true
+            case .wait: try? await Task.sleep(for: .milliseconds(100))
+            }
         }
-        PelmetLog.log("apply: pointer never went idle — proceeding shielded")
     }
 
     /// Post-drag read that waits for the moved item to stop animating.
@@ -614,8 +625,17 @@ enum ApplyPass {
             // A quiet pass (a drop on the panel) runs under a cover, and the
             // pointer is the user's, still on the panel: 8s of waiting for it
             // to rest held the bar frozen for 10s (2026-10-12).
-            await waitForIdlePointer(upTo: appState.transitions.quietApplyInFlight
-                ? AppTiming.quietApplyIdleMaxWait : AppTiming.applyIdleMaxWait)
+            // An own item's pass is Pelmet's idea, whatever started the item.
+            var askedByUser = true
+            if case .ownItem = scope { askedByUser = false }
+            guard await waitForIdlePointer(
+                upTo: appState.transitions.quietApplyInFlight ? AppTiming.quietApplyIdleMaxWait : AppTiming.applyIdleMaxWait,
+                askedByUser: askedByUser
+            ) else {
+                PelmetLog.log("apply: a mouse button is held — the drag is put off")
+                report.abandoned = true
+                return report
+            }
         }
         let holdsSettings = appState.settingsWindowVisible
         if holdsSettings { SettingsWindowController.shared.holdAboveDrag() }
