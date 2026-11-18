@@ -574,8 +574,12 @@ final class LiveMirror {
         /// Hidden run's left edge when they were filmed.
         /// `chevron` is where the « stood in that film: the icons ride the «,
         /// so the picture is placed by how far the « has moved since.
-        var icons: (picture: ConcealGhostOverlay.BarSnapshot, edge: CGFloat, chevron: CGFloat, generation: Int)?
+        /// `out`: filmed with Hidden out, at a reveal that had no picture
+        /// (an icon may stand pressed in it): the next settle films again.
+        var icons: (picture: ConcealGhostOverlay.BarSnapshot, edge: CGFloat, chevron: CGFloat, generation: Int, out: Bool)?
         var iconsTask: Task<Void, Never>?
+        /// A film is under way: nothing calls it off (`scheduleIcons`).
+        var filming = false
         /// The picture of the icons on its way back behind the «.
         var leavingIcons: CALayer?
         /// The copy of the icons out on their own stays up until then: a
@@ -758,6 +762,11 @@ final class LiveMirror {
     private var remembered: [CGDirectDisplayID: Memory] = [:]
     private struct KeptPicture { var picture: ConcealGhostOverlay.BarSnapshot; var generation: Int; var at: Date }
     private var keptPictures: [CGDirectDisplayID: KeptPicture] = [:]
+    /// The picture of the icons outlives a reveal as well: the same icons
+    /// come back under the cover, and the first hover after a click on the
+    /// « or "Show Always Hidden Too" slid nothing and faded (#154).
+    /// `iconsLayer` checks it against the bar it finds.
+    private var keptIcons: [CGDirectDisplayID: (picture: ConcealGhostOverlay.BarSnapshot, edge: CGFloat, chevron: CGFloat, generation: Int, out: Bool)] = [:]
     /// A kept picture of the bare bar serves a return this long (the
     /// backdrop's changes it can know of are counted by `backdropGeneration`).
     static let pictureMaxAge: TimeInterval = 180
@@ -832,6 +841,11 @@ final class LiveMirror {
             PelmetLog.log("livemirror: pills turned off [\(off.sorted().joined(separator: ", "))]")
             applyHiddenActivities()
             if isActive { for side in sides { layoutMirrors(side) } }
+        }
+        // Smooth just chosen with live mode up: the icons are filmed for
+        // it now, not at the next cover.
+        if isActive, case .slide = AnimationRecipe.recipe(for: appState?.settings.revealAnimation ?? .smooth).entrance {
+            for side in sides where side.icons == nil && !side.showsAll { scheduleIcons(side) }
         }
         let running = enabled && reported.running
         guard running != wanted else { return }
@@ -1055,10 +1069,12 @@ final class LiveMirror {
     private func rememberAll() {
         remembered = [:]
         keptPictures = [:]
+        keptIcons = [:]
         for side in sides {
             if let picture = side.picture, side.pictureGeneration == backdropGeneration {
                 keptPictures[side.id] = KeptPicture(picture: picture, generation: side.pictureGeneration, at: side.pictureAt)
             }
+            if let icons = side.icons, icons.generation == backdropGeneration { keptIcons[side.id] = icons }
             guard let chevron = lastChevron else { continue }
             let pills = side.mirrors.filter { !$0.dropped && $0.visual != nil && $0.base.contents != nil }.map { m -> Remembered in
                 let v = m.visual!
@@ -1781,6 +1797,7 @@ final class LiveMirror {
             // Hidden icons, the pills): a cover over that alone, from the
             // left limit to the Hidden icons, with the mirrors in it.
             let side = Side(id: id, screen: screen, scDisplay: display)
+            if let icons = keptIcons[id], Date().timeIntervalSince(icons.picture.takenAt) < Self.pictureMaxAge { side.icons = icons }
             if appState.settings.behavior(forDisplayUUID: screen.displayUUIDString) == .alwaysShowAll {
                 side.showsAll = true
                 PelmetLog.log("livemirror: display \(id) always shows — covers Always Hidden only (the Hidden icons stay out), live")
@@ -2071,6 +2088,7 @@ final class LiveMirror {
            right < side.coverMaxX - 0.5, right > side.coverMinX + 40 {
             // Hidden comes out the way the user chose (#154), and a pill
             // it pushes moves in the same time.
+            var played = ""
             if why == "hidden out", let end = endMove(entering: true) {
                 var slid: CFTimeInterval = 0, took: CFTimeInterval
                 side.leavingIcons?.removeFromSuperlayer()
@@ -2086,12 +2104,18 @@ final class LiveMirror {
                         current.clip(toMaxX: right, after: whole, removing: icons)
                         slid = whole
                         took = whole
+                        played = ", slid"
                     } else {
+                        // No picture to slide: this one fades, and the icons
+                        // are filmed now, as they stand out, so the next
+                        // slides whenever it comes.
                         took = current.moveEnd(pastX: right, to: 0, as: .fade(whole), curve: Self.fadeCurve)
-                        scheduleIcons(side)
+                        scheduleIcons(side, out: true)
+                        played = ", faded for want of the icons' picture"
                     }
                 } else {
                     took = current.moveEnd(pastX: right, to: 0, as: end.move, curve: end.curve)
+                    if took > 0 { played = ", faded" }
                 }
                 side.coverMaxX = right
                 layoutMirrors(side, shift: slid > 0 ? (slid, end.curve) : nil, hold: took)
@@ -2101,7 +2125,7 @@ final class LiveMirror {
                 layoutMirrors(side)
                 if why != "hidden out" { scheduleIcons(side) }
             }
-            if why != "enter" { PelmetLog.log("livemirror: cover #\(current.id) on display \(side.id) \(Int(side.coverMinX))..\(Int(side.coverMaxX)) (\(why), ended in place)") }
+            if why != "enter" { PelmetLog.log("livemirror: cover #\(current.id) on display \(side.id) \(Int(side.coverMinX))..\(Int(side.coverMaxX)) (\(why), ended in place\(played))") }
             return true
         }
         let shift = side.screen.frame.maxX - primaryMaxX
@@ -2254,13 +2278,19 @@ final class LiveMirror {
     }
 
     /// The icons under `side`'s cover are filmed once it has stood a moment
-    /// (the latest call wins).
-    private func scheduleIcons(_ side: Side) {
+    /// (the latest call wins), or at once and with Hidden out (`out`) after
+    /// a reveal that had no picture to slide. A film under way is left to
+    /// finish: called off by each hover, a few quick ones in a row kept
+    /// Smooth fading (#154).
+    private func scheduleIcons(_ side: Side, out: Bool = false) {
+        guard !side.filming else { return }
         side.iconsTask?.cancel()
         side.iconsTask = Task { [weak self, weak side] in
-            try? await Task.sleep(for: .seconds(1.2))
+            if !out { try? await Task.sleep(for: .seconds(1.2)) }
             guard !Task.isCancelled, let self, let side else { return }
-            await self.takeIcons(side)
+            side.filming = true
+            defer { side.filming = false }
+            await self.takeIcons(side, out: out)
         }
     }
 
@@ -2270,10 +2300,11 @@ final class LiveMirror {
     /// needs them. Taken when a cover settles, not at the reveal: a capture
     /// there would cost the reveal its time and light the capture
     /// indicator at every hover.
-    private func takeIcons(_ side: Side) async {
+    private func takeIcons(_ side: Side, out: Bool = false) async {
         // Not while Hidden is out: the film lights the capture indicator and
-        // walks the bar, and the cover's return asks again.
-        guard case .slide = AnimationRecipe.recipe(for: appState?.settings.revealAnimation ?? .smooth).entrance, !side.showsAll, !isOut(side) else { return }
+        // walks the bar, and the cover's return asks again. Unless asked
+        // (`out`): the reveal had no picture, and the next one needs it.
+        guard case .slide = AnimationRecipe.recipe(for: appState?.settings.revealAnimation ?? .smooth).entrance, !side.showsAll, out || !isOut(side) else { return }
         guard isActive, assertionDropped, !entering, !exiting, !handingOver, !missionControlUp, !coverLifted, let picture = side.picture else {
             PelmetLog.log("livemirror: display \(side.id) icons under the cover not filmed — active \(isActive), assertion down \(assertionDropped), entering \(entering), exiting \(exiting), handing over \(handingOver), Mission Control \(missionControlUp), lifted \(coverLifted)")
             return
@@ -2283,12 +2314,12 @@ final class LiveMirror {
         // where the icons stood, and against what, in the frame the film
         // takes next.
         await measureRunEdge(side, fresh: true)
-        guard !Task.isCancelled, isActive, !exiting, !handingOver, !isOut(side), let edge = side.runEdge,
+        guard !Task.isCancelled, isActive, !exiting, !handingOver, out || !isOut(side), let edge = side.runEdge,
               let stood = appState?.chevronWindowFrame?.minX else { return }
         // One just taken is kept: a film lights the capture indicator, so
         // nothing that asks for one over and over gets more than this. Read
         // against the «: the same bar 3pt over is the same picture.
-        if let have = side.icons, have.generation == generation, abs((have.edge - have.chevron) - (edge - stood)) < 0.5,
+        if let have = side.icons, !have.out, have.generation == generation, abs((have.edge - have.chevron) - (edge - stood)) < 0.5,
            Date().timeIntervalSince(have.picture.takenAt) < Self.iconsFresh { return }
         let shift = side.screen.frame.maxX - primaryMaxX
         let rect = CGRect(x: picture.windowFrame.minX - shift, y: 0, width: picture.windowFrame.width, height: 40)
@@ -2318,8 +2349,8 @@ final class LiveMirror {
             return
         }
         let filmedEdge = edge + (chevron - stood)
-        side.icons = (cut, filmedEdge, chevron, generation)
-        PelmetLog.log("livemirror: display \(side.id) icons under the cover filmed \(Int(cut.windowFrame.minX))..\(Int(cut.windowFrame.maxX)), Hidden from \(Int(filmedEdge)), « at \(Int(chevron))")
+        side.icons = (cut, filmedEdge, chevron, generation, out)
+        PelmetLog.log("livemirror: display \(side.id) icons under the cover filmed \(Int(cut.windowFrame.minX))..\(Int(cut.windowFrame.maxX)), Hidden from \(Int(filmedEdge)), « at \(Int(chevron))\(out ? " (Hidden out)" : "")")
     }
 
     /// A picture of the icons this old is taken again when a cover next
