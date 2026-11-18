@@ -84,20 +84,11 @@ public enum EngineEvent: Equatable, Sendable {
     case convergeFailed(String)
 }
 
-public enum HideGranularity: Sendable {
-    case bundleID
-    case item
-}
-
 public struct EngineCapabilities: Sendable {
     public let canHide: Bool
-    public let hideGranularity: HideGranularity
-    public let canReorder: Bool
 
-    public init(canHide: Bool, hideGranularity: HideGranularity, canReorder: Bool) {
+    public init(canHide: Bool) {
         self.canHide = canHide
-        self.hideGranularity = hideGranularity
-        self.canReorder = canReorder
     }
 }
 
