@@ -122,8 +122,10 @@ public struct RehideStateMachine: Equatable, Sendable {
             return [.none]
 
         case (.revealed(let current, _), .revealRequested(let sections, let reason))
-            where !sections.subtracting(current).isEmpty:
+            where !sections.subtracting(current).isEmpty && reason != .hover:
             // Widen the reveal (e.g. hidden already out, now always-hidden too).
+            // Never for a hover: with Always Hidden out on its own (#149) the
+            // pointer resting on the bar would bring Hidden out beside it.
             let union = current.union(sections)
             state = .transitioning(target: .reveal(union, reason), queued: nil)
             return [.cancelTimer, .reveal(union)]
@@ -149,7 +151,27 @@ public struct RehideStateMachine: Equatable, Sendable {
             state = .transitioning(target: .reveal(sections, reason), queued: nil)
             return [.cancelTimer, .reveal(sections)]
 
+        case (.revealed(let current, let by), .toggleRequested(let sections, let reason))
+            where !current.isEmpty && !sections.isSubset(of: current) && reason != .click:
+            // A click on the empty bar (`.click`) is not one of these: it
+            // closes whatever is out, below.
+            // Something that isn't out was asked for: the bar ends at exactly
+            // that (#149), never at it stacked on what was out. More than what
+            // is out widens in one reveal. Anything else switches: what is out
+            // goes back, then the ask comes out, each through the path a click
+            // on a collapsed bar takes. A display policy's Hidden is not the
+            // user's to swap away (the policy would bring it straight back),
+            // so an ask there widens.
+            if by == .displayPolicy || sections.isSuperset(of: current) {
+                let union = current.union(sections)
+                state = .transitioning(target: .reveal(union, reason), queued: nil)
+                return [.cancelTimer, .reveal(union)]
+            }
+            state = .transitioning(target: .conceal, queued: .reveal(sections, reason))
+            return [.cancelTimer, .conceal]
+
         case (.revealed, .toggleRequested):
+            // Everything asked for is out: the same press puts it all away.
             state = .transitioning(target: .conceal, queued: nil)
             return [.cancelTimer, .conceal]
 
@@ -202,6 +224,12 @@ public struct RehideStateMachine: Equatable, Sendable {
             if reason == .hover, Self.bringsIconsOnly(target: target, queued: queued) {
                 return [.none]
             }
+            // Nor into sections on their way out: the pointer is on the bar
+            // through a switch (#149), and its hover would turn "Always
+            // Hidden instead" back into both, or replace the queued half.
+            if reason == .hover, Self.bringsSections(target: target, queued: queued) {
+                return [.none]
+            }
             // A reveal landing mid-reveal must never NARROW what's in flight
             // or queued: the engine's reveal is additive, so settling a queued
             // [hidden] right after a double-click [hidden, alwaysHidden]
@@ -233,6 +261,13 @@ public struct RehideStateMachine: Equatable, Sendable {
                 )
                 return [.none]
             }
+            // A reveal queued behind a conceal (a switch's second half) is
+            // added to, never replaced: an Apply or Show in Menu Bar landing
+            // in those 450ms would otherwise drop the section the user asked for.
+            if case .reveal(let next, _)? = queued {
+                state = .transitioning(target: target, queued: .reveal(next.union(sections), reason))
+                return [.none]
+            }
             state = .transitioning(target: target, queued: .reveal(sections, reason))
             return [.none]
 
@@ -244,12 +279,28 @@ public struct RehideStateMachine: Equatable, Sendable {
             // is on its way, so the toggle opens one, as on a settled bar. A
             // second toggle there heads for that section, so it queues the
             // conceal: two presses cancel out, as on a settled bar.
+            //
+            // Asked for sections that are not on their way (#149, a middle
+            // click for Always Hidden as a hover brings Hidden out), it
+            // queues those: the settle below switches to them.
             let queued: State.Target = {
-                if case .reveal(let inFlight, _) = target {
-                    guard inFlight.isEmpty && !sections.isEmpty else { return .conceal }
+                if case .reveal(let inFlight, _) = target, inFlight.isEmpty {
+                    guard !sections.isEmpty else { return .conceal }
                     if case .reveal(let next, _)? = alreadyQueued, !next.isEmpty { return .conceal }
                     return .reveal(sections, reason)
                 }
+                // The sections the bar is heading for: the queued reveal's,
+                // else the one in flight. None while it only closes.
+                let heading: Set<Section> = switch (target, alreadyQueued) {
+                case (_, .reveal(let next, _)?): next
+                case (.reveal(let inFlight, _), _): inFlight
+                case (.conceal, _): []
+                }
+                // All of it is on its way (a second press of the same thing,
+                // also through a switch's closing half): the opposite is to
+                // close. So is a click on the empty bar, whatever is coming.
+                if !heading.isEmpty, sections.isSubset(of: heading) || reason == .click { return .conceal }
+                if case .reveal(let inFlight, .displayPolicy) = target { return .reveal(inFlight.union(sections), reason) }
                 return .reveal(sections, reason)
             }()
             state = .transitioning(target: target, queued: queued)
@@ -276,6 +327,11 @@ public struct RehideStateMachine: Equatable, Sendable {
             case (.conceal, nil):
                 state = .concealed
                 return [.none]
+            case (.reveal(let inFlight, _), .reveal(let sections, let reason)) where !inFlight.isSubset(of: sections):
+                // A switch asked mid-reveal: the engine's reveal only adds,
+                // so what just came out goes back first.
+                state = .transitioning(target: .conceal, queued: .reveal(sections, reason))
+                return [.conceal]
             case (_, .reveal(let sections, let reason)):
                 state = .transitioning(target: .reveal(sections, reason), queued: nil)
                 return [.reveal(sections)]
@@ -312,6 +368,15 @@ public struct RehideStateMachine: Equatable, Sendable {
         case (.reveal(let sections, _), nil): sections.isEmpty
         case (.reveal(let sections, _), .reveal(let next, _)?): sections.isEmpty && next.isEmpty
         case (.conceal, .reveal(let next, _)?): next.isEmpty
+        default: false
+        }
+    }
+
+    /// A transition that ends with sections out.
+    private static func bringsSections(target: State.Target, queued: State.Target?) -> Bool {
+        switch (target, queued) {
+        case (_, .reveal(let next, _)?): !next.isEmpty
+        case (.reveal(let sections, _), nil): !sections.isEmpty
         default: false
         }
     }

@@ -208,19 +208,27 @@ final class PelmetStatusItem {
         else { return false }
         lastLeftClickAt = nil
         let out = sections.isSubset(of: appState.revealedSectionsForExtras)
-        PelmetLog.log("statusItem middle-click → \(out ? "conceal" : "reveal") \(sections.map(\.rawValue).sorted().joined(separator: "+"))")
-        // A reveal unions and never narrows, which is what ⌥-click and the
-        // double-click use to widen: a middle click 63ms into a hover reveal
-        // of Hidden was read as that hover's own reveal and Always Hidden
-        // never came (measured 2026-11-16). Once they are all out the same
-        // click puts them away.
-        if out {
-            appState.toggle(reason: .statusItem, sections: sections)
-        } else {
+        PelmetLog.log("statusItem middle-click → \(out ? "conceal" : "show") \(sections.map(\.rawValue).sorted().joined(separator: "+"))")
+        // A toggle shows exactly what the row names (#149): Always Hidden
+        // alone takes Hidden's place when Hidden is out, it is not added
+        // beside it. Once they are all out the same click puts them away.
+        // (A middle click 63ms into a hover reveal of Hidden used to be read
+        // as that hover's own reveal, measured 2026-11-16: `toggle` now only
+        // does that for a click asking for what the hover brings.)
+        //
+        // On a display that shows all icons Hidden is the policy's, not a
+        // reveal to switch away from: the ask goes on top of it, where that
+        // display's "Show hidden icons in" says, as it always did.
+        if !out, appState.pointerDisplayBehavior == .alwaysShowAll {
             appState.reveal(sections, reason: .statusItem)
+        } else {
+            appState.toggle(reason: .statusItem, sections: sections)
         }
         return true
     }
+
+    /// How wide the chevron is drawn, for the section divider beside it.
+    var glyphWidth: CGFloat? { item.button?.image?.size.width }
 
     func updateSymbol(revealed: Bool) {
         revealedFace = revealed

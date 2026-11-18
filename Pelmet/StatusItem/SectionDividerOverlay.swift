@@ -18,20 +18,29 @@ final class SectionDividerOverlay {
         for window in windows.values { window.orderOut(nil) }
     }
 
-    func update(model: SectionModel, copies: [ItemID: [CGRect]]) {
+    /// `inkWidth`: how wide an item's icon is drawn, nil where no picture says.
+    func update(model: SectionModel, copies: [ItemID: [CGRect]], inkWidth: (ItemID) -> CGFloat?) {
         frames.removeAll()
         for screen in NSScreen.screens {
             guard let id = screen.directDisplayID else { continue }
             let display = CGDisplayBounds(id)
+            var keyed: [(key: ItemID, frame: CGRect)] = []
             let items = copies.compactMap { key, copies -> (section: PelmetCore.Section, frame: CGRect)? in
                 guard let frame = MenuBarGeometry.copy(onDisplay: display, among: copies) else { return nil }
+                keyed.append((key, frame))
                 return (model.section(of: key), frame)
             }
-            frames[id] = MenuBarGeometry.alwaysHiddenDivider(items: items)
-            // The icons either side, so a divider that looks off-centre can be
-            // read against the slots it was centred in.
-            gaps[id] = MenuBarGeometry.alwaysHiddenNeighbours(items: items).map {
+            let neighbours = MenuBarGeometry.alwaysHiddenNeighbours(items: items)
+            func measured(_ slot: CGRect?) -> CGFloat? {
+                keyed.first { $0.frame == slot }.flatMap { inkWidth($0.key) }
+            }
+            let ink = (left: measured(neighbours?.left), right: measured(neighbours?.right))
+            frames[id] = MenuBarGeometry.alwaysHiddenDivider(items: items, ink: ink)
+            // The icons either side and their measured ink, so a divider that
+            // looks off-centre can be read against what it was centred in.
+            gaps[id] = neighbours.map {
                 " between \(Int($0.left.minX))…\(Int($0.left.maxX)) and \(Int($0.right.minX))…\(Int($0.right.maxX))"
+                    + ", ink \(ink.left.map { "\(Int($0))" } ?? "?")/\(ink.right.map { "\(Int($0))" } ?? "?")"
             }
             if frames[id] == nil {
                 report(id, "no boundary (\(items.filter { $0.section == .alwaysHidden }.count) always-hidden, \(items.count) frames)")

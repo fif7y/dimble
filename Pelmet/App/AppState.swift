@@ -1175,7 +1175,9 @@ final class AppState {
             default: nil
             }
         }()
-        if let hoverSections, let started = hoverRevealStartedAt,
+        // Only a click for what the hover is bringing: one for other
+        // sections (a middle click for Always Hidden, #149) is its own ask.
+        if let hoverSections, sections.isSubset(of: hoverSections), let started = hoverRevealStartedAt,
            Date().timeIntervalSince(started) < AppTiming.hoverRevealClickGrace {
             PelmetLog.log("toggle(\(reason)) \(Int(Date().timeIntervalSince(started) * 1000))ms into a hover reveal — taken as the same reveal")
             dispatch(rehide.handle(.revealRequested(hoverSections, reason)))
@@ -1183,7 +1185,16 @@ final class AppState {
             if panelShowsReveal { panelPresenter.makeDeliberate() }
             return
         }
-        let effects = rehide.handle(.toggleRequested(sections, reason))
+        // Anchored, Hidden is out whatever the machine tracks: with Always
+        // Hidden out too, an ask for both is an ask for what is out, and
+        // closes. Asked for both, the machine would widen to a Hidden that
+        // is there already: a dead click.
+        var asked = sections
+        if transitions.anchored, case .revealed(let current, _) = rehide.state, !current.isEmpty {
+            let rest = sections.subtracting(transitions.anchoredSections)
+            if !rest.isEmpty { asked = rest }
+        }
+        let effects = rehide.handle(.toggleRequested(asked, reason))
         PelmetLog.log("toggle(\(reason)) state=\(rehide.state) effects=\(effects)")
         dispatch(effects)
         // A deliberate conceal under a hovering pointer must STAY concealed:
@@ -3966,7 +3977,7 @@ final class AppState {
     private func refreshSectionDivider(snapshot fresh: EngineSnapshot? = nil) {
         sectionDividerRefresh?.cancel()
         guard !isTransitioning, !panelShowsReveal, picturePassSections == nil,
-              currentRevealedSections.contains(.alwaysHidden),
+              MenuBarGeometry.showsSectionDivider(revealed: currentRevealedSections),
               let snap = fresh ?? snapshot, snap.itemsAtRest else {
             sectionDivider.hide()
             return
@@ -3977,7 +3988,18 @@ final class AppState {
             guard !Task.isCancelled else { return }
             // Individually revealed items and concealed copies must not create a false section boundary.
             for id in snap.concealed.union(snap.shownAlone) { copies.removeValue(forKey: id) }
-            sectionDivider.update(model: settings.sectionModel, copies: copies)
+            // How wide each icon is drawn, so the line goes midway between
+            // the ink, not the slots: the chevron's own glyph, else the
+            // item's kept picture. Not a highlighted picture (the item's
+            // capsule is not in it) or an old one (a meter's width moves).
+            let pictures = panelPresenter.pictures
+            let chevron = statusItem?.glyphWidth
+            sectionDivider.update(model: settings.sectionModel, copies: copies) {
+                if MenuBarPolicy.isChevronID($0, pelmetBundleID: PelmetBundle.mainID) { return chevron }
+                guard let picture = pictures.picture(for: $0.sectionKey),
+                      !picture.isHighlighted, !pictures.isStale(picture) else { return nil }
+                return picture.size.width
+            }
         }
     }
 

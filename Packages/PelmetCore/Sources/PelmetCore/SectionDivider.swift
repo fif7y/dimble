@@ -20,17 +20,48 @@ extension MenuBarGeometry {
     }
 
     /// The bar orders Always Hidden before Hidden and Visible; draw only between adjacent icons.
-    public static func alwaysHiddenDivider(items: [(section: Section, frame: CGRect)]) -> CGRect? {
+    /// The line tells Always Hidden from Hidden, so it needs both out. With
+    /// Always Hidden out on its own (a middle click, #149) it stood between
+    /// the last icon and the chevron, dividing nothing.
+    public static func showsSectionDivider(revealed: Set<Section>) -> Bool {
+        revealed.isSuperset(of: [.hidden, .alwaysHidden])
+    }
+
+    /// Shorter than any icon. Half a slot was 12pt on a 24pt bar and 18.5pt
+    /// on a notched display's 37pt one, taller than the icons beside it (#149).
+    static let dividerHeight: CGFloat = 10
+
+    /// The bar orders Always Hidden before Hidden and Visible; draw only between adjacent icons.
+    ///
+    /// `ink`: how wide each neighbour's icon is drawn, where a picture of it
+    /// says. The line goes midway between the two icons' ink, not between
+    /// their slots: a slot is as wide as its host asked for and the icon sits
+    /// in the middle of it, so a wide glyph beside a narrow one (a folder
+    /// beside the chevron) put a line on the slot edge hard against the wide
+    /// one. With no measure an icon is taken to fill its slot up to 22pt,
+    /// which centres two unmeasured neighbours the way their slots' middles
+    /// do (measured 2026-11-17: a 23pt battery beside a 24pt glyph in a 42pt
+    /// slot, 8pt and 9pt either side).
+    ///
+    /// A picture is not the whole truth (the capsule behind an item in use
+    /// is not in it, and an icon is not always dead centre), so the line
+    /// goes at most 4pt into a measured neighbour's slot, and never into one
+    /// that was not measured.
+    public static func alwaysHiddenDivider(
+        items: [(section: Section, frame: CGRect)], ink: (left: CGFloat?, right: CGFloat?) = (nil, nil)
+    ) -> CGRect? {
         guard let (left, right) = alwaysHiddenNeighbours(items: items) else { return nil }
-        let height = min(left.height, right.height) * 0.5
+        let height = min(dividerHeight, min(left.height, right.height) * 0.5)
         guard height > 0 else { return nil }
-        // Between the two icons, not between their slots. A slot is as wide as
-        // its host asked for and the icon sits in the middle of it, so a 38pt
-        // slot holding a 14pt glyph leaves the slot's edge nowhere near the
-        // icon: centring on that edge put the line hard against its left
-        // neighbour. Icon centres carry the padding on both sides, and the
-        // clamp keeps the line out of a slot however lopsided the pair is.
-        let centre = min(max((left.midX + right.midX) / 2, left.maxX), right.minX)
+        func inkWidth(_ measured: CGFloat?, in slot: CGRect) -> CGFloat {
+            min(measured ?? min(max(slot.width - 4, 0), 22), slot.width)
+        }
+        let leftEdge = left.midX + inkWidth(ink.left, in: left) / 2
+        let rightEdge = right.midX - inkWidth(ink.right, in: right) / 2
+        // Ink that overlaps is a bad measurement: the middle of the slot gap.
+        let between = rightEdge >= leftEdge ? (leftEdge + rightEdge) / 2 : (left.maxX + right.minX) / 2
+        let reach: (CGFloat?) -> CGFloat = { $0 == nil ? 0 : 4 }
+        let centre = min(max(between, left.maxX - reach(ink.left)), right.minX + reach(ink.right)).rounded()
         return CGRect(x: centre - 1,
                       y: (left.midY + right.midY) / 2 - height / 2, width: 2, height: height)
     }
