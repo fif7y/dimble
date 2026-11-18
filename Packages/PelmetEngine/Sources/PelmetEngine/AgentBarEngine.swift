@@ -41,11 +41,7 @@ public struct ConvergeTiming: Sendable {
 }
 
 public actor AgentBarEngine: MenuBarEngine {
-    public nonisolated let capabilities = EngineCapabilities(
-        canHide: AssessmentMode.isAvailable,
-        hideGranularity: .bundleID,
-        canReorder: true
-    )
+    public nonisolated let capabilities = EngineCapabilities(canHide: AssessmentMode.isAvailable)
 
     public nonisolated var events: AsyncStream<EngineEvent> { eventStream }
     private nonisolated let eventStream: AsyncStream<EngineEvent>

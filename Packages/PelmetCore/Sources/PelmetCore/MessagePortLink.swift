@@ -52,10 +52,4 @@ public enum MessagePortLink {
         defer { CFMessagePortInvalidate(remote) }
         return CFMessagePortSendRequest(remote, 0, data as CFData, 0.25, 0, nil, nil) == kCFMessagePortSuccess
     }
-
-    public static func isListening(_ name: String) -> Bool {
-        guard let remote = CFMessagePortCreateRemote(nil, name as CFString) else { return false }
-        CFMessagePortInvalidate(remote)
-        return true
-    }
 }
