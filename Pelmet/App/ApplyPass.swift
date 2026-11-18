@@ -144,8 +144,12 @@ enum ApplyPass {
             if roster.section(of: key) == .alwaysHidden { rememberedAlwaysHidden.insert(key) }
         }
         let hiddenLeft = frames.filter { roster.section(of: $0.key) == .hidden }.map(\.value.minX).min()
+        let apart = FrameMemory.alwaysHiddenApart(
+            in: frames, remembered: rememberedAlwaysHidden, concealed: Set(snap.concealed.map(\.sectionKey)),
+            section: { roster.section(of: $0) }
+        )
         return FrameMemory.alwaysHiddenLeftOfHidden(
-            frames, alwaysHidden: rememberedAlwaysHidden, hiddenLeft: hiddenLeft, chevronMidX: chevronNow
+            frames, alwaysHidden: apart, hiddenLeft: hiddenLeft, chevronMidX: chevronNow
         )
     }
 

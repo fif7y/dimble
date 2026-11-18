@@ -78,4 +78,17 @@ public struct FrameMemory: Equatable, Sendable {
         for key in group { shifted[key] = frames[key]?.offsetBy(dx: hiddenLeft - groupRight, dy: 0) }
         return shifted
     }
+
+    /// The Always Hidden icons `alwaysHiddenLeftOfHidden` keeps apart: the
+    /// remembered ones, and the ones on the bar while a Hidden icon is
+    /// concealed. Out alone (#149's middle click) they sit where Hidden
+    /// was, and no reading has both: 8 of them read beside Hidden's
+    /// remembered frames counted 3 moves, and "Apply (3)" came back at
+    /// every reveal (2026-11-17 20:56:16).
+    public static func alwaysHiddenApart(
+        in frames: [ItemID: CGRect], remembered: Set<ItemID>, concealed: Set<ItemID>, section: (ItemID) -> Section
+    ) -> Set<ItemID> {
+        guard frames.keys.contains(where: { concealed.contains($0) && section($0) == .hidden }) else { return remembered }
+        return remembered.union(frames.keys.filter { section($0) == .alwaysHidden })
+    }
 }

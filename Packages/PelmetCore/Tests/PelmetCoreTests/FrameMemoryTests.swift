@@ -109,4 +109,45 @@ import Testing
         )
         #expect(group[battery] == frame(100 - 20) && group[velja] == frame(110 - 160))
     }
+
+    // MARK: Always Hidden out alone (#149)
+
+    /// The bar of 2026-11-17 20:56:16: Always Hidden out by a middle click,
+    /// Hidden concealed and read from memory, three icons each.
+    @Test func alwaysHiddenOutAloneKeepsLeftOfTheHiddenItCovers() {
+        let wifi = ItemID(rawValue: "status:com.apple.MenuBarAgent::com.apple.menuextra.wifi")
+        let sconce = ItemID.bundleKey("com.gab.Sconce")
+        let battery = ItemID(rawValue: "status:com.apple.MenuBarAgent::com.apple.menuextra.battery")
+        let bitwarden = ItemID.bundleKey("com.bitwarden.desktop")
+        let vorssaint = ItemID.bundleKey("com.vorssaint.utils")
+        let chevron = self.chevron
+        let section: (ItemID) -> PelmetCore.Section = {
+            [wifi, sconce, battery].contains($0) ? .alwaysHidden : $0 == chevron ? .visible : .hidden
+        }
+        func f(_ x: CGFloat, _ w: CGFloat) -> CGRect { CGRect(x: x, y: 0, width: w, height: 24) }
+        let frames = [
+            wifi: f(1421, 22), sconce: f(1451, 38), battery: f(1497, 26), chevron: f(1531, 38),
+            bitwarden: f(1306, 32), vorssaint: f(1418, 42), snib: f(1460, 33),
+        ]
+        func order(_ frames: [ItemID: CGRect]) -> [ItemID] { frames.sorted { $0.value.minX < $1.value.minX }.map(\.key) }
+        // Read as they are, Vorssaint and Snib land among Always Hidden.
+        #expect(order(frames) == [bitwarden, vorssaint, wifi, sconce, snib, battery, chevron])
+
+        let apart = FrameMemory.alwaysHiddenApart(
+            in: frames, remembered: [], concealed: [bitwarden, vorssaint, snib], section: section
+        )
+        #expect(apart == [wifi, sconce, battery])
+        let out = FrameMemory.alwaysHiddenLeftOfHidden(frames, alwaysHidden: apart, hiddenLeft: 1306, chevronMidX: 1550)
+        #expect(order(out) == [wifi, sconce, battery, bitwarden, vorssaint, snib, chevron])
+    }
+
+    /// With Hidden on the bar too it is one reading: an Always Hidden icon
+    /// among Hidden's is drift, and stays where it reads.
+    @Test func alwaysHiddenBesideHiddenOnTheBarIsReadAsItIs() {
+        let velja = ItemID.bundleKey("com.sindresorhus.Velja")
+        let section: (ItemID) -> PelmetCore.Section = { $0 == velja ? .alwaysHidden : .hidden }
+        let frames = [a: frame(100), velja: frame(130), snib: frame(160)]
+        #expect(FrameMemory.alwaysHiddenApart(in: frames, remembered: [], concealed: [], section: section).isEmpty)
+        #expect(FrameMemory.alwaysHiddenApart(in: frames, remembered: [], concealed: [velja], section: section).isEmpty)
+    }
 }
