@@ -194,8 +194,11 @@ final class SeparatorManager {
         return attached
     }
 
+    /// A spacer comes back at its own width: this was 14 from before the
+    /// width control, so every show (each launch, each reveal) put a spacer
+    /// back at 14pt until the slider moved again (#155).
     private static func shownLength(for spec: SeparatorSpec) -> CGFloat {
-        spec.style == .space ? 14 : NSStatusItem.variableLength
+        spec.style == .space ? spec.width : NSStatusItem.variableLength
     }
 
     private func setVisible(_ visible: Bool, for id: UUID, item: NSStatusItem, spec: SeparatorSpec) {

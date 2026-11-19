@@ -153,7 +153,11 @@ public struct SeparatorSpec: Codable, Equatable, Identifiable, Sendable {
     public var width: Double
 
     public static let defaultWidth: Double = 14
-    public static let widthRange: ClosedRange<Double> = 4...48
+    /// From 1pt (#155): macOS takes it (measured 2026-11-19, a status item's
+    /// window is its length plus 16 of macOS's own padding at the default
+    /// icon spacing, so 1pt takes 17 of the bar and 4pt takes 20). 0 buys one
+    /// more point and reads as "off".
+    public static let widthRange: ClosedRange<Double> = 1...48
 
     public init(
         id: UUID = UUID(),
