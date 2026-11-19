@@ -46,12 +46,20 @@ final class ItemPictures {
     /// The write after a store, held a moment so a pass's batches go as one.
     private var saveTask: Task<Void, Never>?
 
+    /// Whether a picture can be retaken (Screen Recording). Without it the
+    /// kept ones are never checked or replaced: an old picture stayed up as
+    /// a fragment of the bar for as long as the grant was off (#156), so
+    /// none is handed out and the tiles draw their stand-ins. The pictures
+    /// stay kept for when the grant is back.
+    var canRetake: () -> Bool = { true }
+
     init() {
         load()
     }
 
     /// The latest picture, however old: `isStale` says when to retake it.
     func picture(for key: ItemID) -> Picture? {
+        guard canRetake() else { return nil }
         dropColouredOnAppearanceChange()
         return pictures[key]
     }

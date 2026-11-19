@@ -210,6 +210,7 @@ final class PanelPresenter: RevealPresenter {
 
     init(appState: AppState) {
         self.appState = appState
+        pictures.canRetake = { [weak appState] in appState?.screenRecordingGranted ?? true }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
