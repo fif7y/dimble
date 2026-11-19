@@ -533,7 +533,7 @@ final class MenuBarBandMonitor {
     private var tooltipHoldLogged = false
 
     func rehideDeferReason() -> DeferReason? {
-        if pointerInBand { return .band }
+        if pointerStillInBand(askedBy: "a hold check") { return .band }
         if cmdDragActive || dropAdoptionPending || appState?.dropAdoptionInFlight == true { return .drag }
         // Pelmet frontmost only holds the bar for the layout editor and the
         // onboarding demo — the General tab is not a reason to stay revealed.
@@ -653,6 +653,25 @@ final class MenuBarBandMonitor {
                 return true
             }
         }
+        return false
+    }
+
+    /// The flag, after asking the pointer itself when it says yes. The tap
+    /// wakes `pointerMoved` for exactly one move after the pointer leaves the
+    /// bar (`PointerMoveTap`), and a pointer that is warped away sends no move
+    /// at all, so an exit can go unheard. The flag then stays up until the
+    /// next visit, and the reveal with it: 70 s through 15 clicks elsewhere,
+    /// the countdown re-arming on `band=band` (#162). A pointer found off the
+    /// band gets its exit now, late. Geometry only: a window over the bar is
+    /// `pointerMoved`'s to judge.
+    @discardableResult
+    private func pointerStillInBand(askedBy asker: String) -> Bool {
+        guard pointerInBand else { return false }
+        let location = NSEvent.mouseLocation
+        if let geometry = screenGeometry(containing: location), isInMenuBarBand(location, of: geometry) { return true }
+        pointerMoved()
+        guard !pointerInBand else { return true }
+        PelmetLog.log("band: the pointer left the bar unheard, now at (\(Int(location.x)),\(Int(location.y))) — its exit runs late (\(asker))")
         return false
     }
 
@@ -810,6 +829,10 @@ final class MenuBarBandMonitor {
         var accepted = false
         defer { if !accepted { acceptedClickSequence.reset() } }
 
+        // A click off the bar while the flag says the pointer is on it. No
+        // countdown runs once the pointer has come back to a revealed bar, so
+        // the hold check alone would never be asked (#162).
+        if !inBand { pointerStillInBand(askedBy: "a click off the bar") }
         if inBand {
             // Synthetic placement drags post real ⌘-mouse-downs in the band —
             // the hit-test can read one as an empty-area click (a trapped
