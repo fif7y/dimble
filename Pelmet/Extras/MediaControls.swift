@@ -1717,10 +1717,17 @@ final class ExtrasManager {
             ?? activity.bundleID.flatMap { LiveActivityNames.name(for: $0) }
     }
 
-    /// Its icon, by the same order; the platter where the Mac has no app.
+    /// Its icon, by the same order, from an app the user knows (the "+ App"
+    /// picker's rule): an OS agent's icon says nothing about its pill, and
+    /// macOS 27.3's "System & App Protection Override" comes from
+    /// AXVisualSupportAgent, which carries Accessibility's icon. The
+    /// platter where there's none.
     private func liveActivityIcon(_ activity: LiveActivity, size: CGFloat) -> NSImage? {
         func icon(_ bundle: String?) -> NSImage? {
-            bundle.flatMap { Self.appIcon(for: ExtraItemSpec(kind: .liveActivity, bundleID: $0), size: size) }
+            guard let bundle else { return nil }
+            let spec = ExtraItemSpec(kind: .liveActivity, bundleID: bundle)
+            guard let url = Self.appURL(for: spec), Self.isUserFacingApp(url) else { return nil }
+            return Self.appIcon(for: spec, size: size)
         }
         return icon(activity.bundleID) ?? icon(activity.hostBundleID)
     }

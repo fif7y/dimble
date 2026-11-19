@@ -530,6 +530,11 @@ public struct SettingsStore: Codable, Equatable, Sendable {
     /// outlives the activity that ran.
     public var hiddenLiveActivities: Set<String> = []
 
+    /// Pills (AX identifiers) whose off-by-default was applied: turned off
+    /// in `hiddenLiveActivities` once, the first time they showed
+    /// (`LiveActivityDefaults`). From then on the switch is the user's.
+    public var seededLiveActivityDefaults: Set<String> = []
+
     /// A found update posts a user notification instead of Sparkle's window
     /// interrupting whatever the user is doing. Off: only the About pane
     /// shows it. (Auto-download is Sparkle's own preference.)
@@ -628,7 +633,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         case notifyOnUpdates, barRightClickMenu, betaUpdates
         case statusIconStyle
         case chevronMenu, notificationCenterHotkey
-        case showLiveActivities, hiddenLiveActivities
+        case showLiveActivities, hiddenLiveActivities, seededLiveActivityDefaults
         case orderEdits
         case hiddenIconsIn, panel
         case showRules
@@ -669,6 +674,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         notificationCenterHotkey = c.field(HotkeySpec?.self, .notificationCenterHotkey, defaults.notificationCenterHotkey) ?? defaults.notificationCenterHotkey
         showLiveActivities = c.field(Bool.self, .showLiveActivities, defaults.showLiveActivities)
         hiddenLiveActivities = c.field(Set<String>.self, .hiddenLiveActivities, defaults.hiddenLiveActivities)
+        seededLiveActivityDefaults = c.field(Set<String>.self, .seededLiveActivityDefaults, defaults.seededLiveActivityDefaults)
         orderEdits = c.field(OrderEdits.self, .orderEdits, defaults.orderEdits)
         hiddenIconsIn = c.field(RevealTarget.self, .hiddenIconsIn, defaults.hiddenIconsIn)
         panel = c.field(PanelOptions.self, .panel, defaults.panel)

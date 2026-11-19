@@ -48,6 +48,9 @@ nonisolated struct PillCopy: @unchecked Sendable {
     /// macOS's own pill, not an app's activity: mirrored like the rest, but
     /// never listed in Settings and never turned off there.
     var system = false
+    /// The pill's AX identifier (`live-activity-pill-<bundle>`): what an
+    /// off-by-default pill is known by (`LiveActivityDefaults`).
+    var identifier = ""
 }
 
 
@@ -458,7 +461,7 @@ nonisolated enum PillProbe {
             if let read = read(element) {
                 let name = (attribute(element, kAXDescriptionAttribute) as? String) ?? id
                 found.append(PillCopy(element: element, frame: read.frame, text: read.text, name: name,
-                                      bar: bar, system: id.hasPrefix(systemPillPrefix)))
+                                      bar: bar, system: id.hasPrefix(systemPillPrefix), identifier: id))
             }
             return
         }
@@ -660,6 +663,13 @@ final class LiveMirror {
     /// What the watcher last said, whatever the setting: turning the setting
     /// on picks it up (`settingChanged`).
     private var reported = (running: false, count: 0)
+    /// Set while live mode stands down because every pill it drew is turned
+    /// off in Settings (`PillsOffStandDown`); `wanted` stays false until it
+    /// ends.
+    private var pillsOff: PillsOffStandDown?
+    /// How long every pill has been off: the stand-down waits `noPillGrace`
+    /// of it, so a new activity's late pill lands first.
+    private var allOffClock = PillsOffStandDown.Clock()
     private var loop: Task<Void, Never>?
     private var lastChevron: NSRect?
     private var coverLifted = false
@@ -824,9 +834,15 @@ final class LiveMirror {
 
     func activitiesChanged(running: Bool, count: Int = 0) {
         reported = (running, count)
+        if let down = pillsOff {
+            pillsOff = down.after(running: running, count: count)
+            if pillsOff == nil {
+                PelmetLog.log("livemirror: \(running ? "another activity started" : "no activity runs") — the stand-down for pills turned off ends")
+            }
+        }
         // With the setting off the watcher may still run (the item follows
         // it): live mode takes no part.
-        follow(running: running && enabled, count: enabled ? count : 0, why: "activity ended")
+        follow(running: running && enabled && pillsOff == nil, count: enabled ? count : 0, why: "activity ended")
     }
 
     /// The setting changed (`AppState.settingsChanged`, so often): turned
@@ -835,7 +851,8 @@ final class LiveMirror {
     func settingChanged() {
         // A pill turned on or off changes no `wanted`: the mirrors take the
         // list and the layout drops or picks the pill up again. Only when the
-        // list itself moved — this runs on every toggle in Settings.
+        // list itself moved — this runs on every toggle in Settings. (One
+        // turned back on while live mode stands down for them does, below.)
         let off = appState?.settings.hiddenLiveActivities ?? []
         if off != appliedHidden {
             PelmetLog.log("livemirror: pills turned off [\(off.sorted().joined(separator: ", "))]")
@@ -847,9 +864,17 @@ final class LiveMirror {
         if isActive, case .slide = AnimationRecipe.recipe(for: appState?.settings.revealAnimation ?? .smooth).entrance {
             for side in sides where side.icons == nil && !side.showsAll { scheduleIcons(side) }
         }
-        let running = enabled && reported.running
+        var standDownEnded = false
+        if let down = pillsOff {
+            pillsOff = enabled ? down.after(hidden: off) : nil
+            if pillsOff == nil, enabled {
+                standDownEnded = true
+                PelmetLog.log("livemirror: a pill turned off is back on — the stand-down ends")
+            }
+        }
+        let running = enabled && reported.running && pillsOff == nil
         guard running != wanted else { return }
-        PelmetLog.log("livemirror: the setting turned \(enabled ? "on" : "off")")
+        if !standDownEnded { PelmetLog.log("livemirror: the setting turned \(enabled ? "on" : "off")") }
         follow(running: running, count: enabled ? reported.count : 0, why: "setting turned off")
     }
 
@@ -862,6 +887,7 @@ final class LiveMirror {
             if isActive { PelmetLog.log("livemirror: activities \(activityCount) → \(count), looking for the pills") }
             if count > activityCount { retryNotBefore = .distantPast; emptyStrikes = 0; noPillStrikesAwake = 0; abortStrikes = 0 }
             activityCount = count
+            allOffClock.reset()
             lookEagerlyUntil = Date().addingTimeInterval(3)
         }
         // (Nothing runs and no loop: nothing to start, or to stop again.)
@@ -1277,12 +1303,22 @@ final class LiveMirror {
                         if why != self.lastBlockedWhy { self.lastBlockedWhy = why; PelmetLog.log("livemirror: waiting to enter — \(why)") }
                     } else {
                         self.lastBlockedWhy = ""
+                        self.allOffClock.reset()
                         await self.enter()
                     }
                 } else if !desired, self.isActive {
                     await self.exit(self.enabled ? "activity ended" : "setting turned off")
                 } else if self.isActive {
                     await self.tick()
+                    // Every pill off for the whole grace, not one tick: right
+                    // after a start the only pill up can be one turned off
+                    // while the new activity's pill is still on its way.
+                    let allOff = self.isActive && !self.entering && !self.exiting && !self.handingOver
+                        && self.hiddenOut == nil && self.pendingReveal == nil && self.everyPillOff()
+                    if self.allOffClock.due(allOff: allOff, now: Date(), grace: Self.noPillGrace) {
+                        self.standDownForPillsOff()
+                        await self.exit("every pill is turned off")
+                    }
                 }
                 try? await Task.sleep(for: self.nextPoll())
             }
@@ -2944,9 +2980,7 @@ final class LiveMirror {
     }
 
     nonisolated private static func displayText(_ value: String, width: CGFloat, font: NSFont) -> String {
-        let full = (value as NSString).size(withAttributes: [.font: font]).width
-        if full <= width * 1.6 { return value }
-        return value.split(separator: " ").last.map(String.init) ?? value
+        PillText.shown(value, slot: width) { ($0 as NSString).size(withAttributes: [.font: font]).width }
     }
 
     /// The mirrors in the cover, right to left from the « (from the icons
@@ -3125,6 +3159,7 @@ final class LiveMirror {
     /// first). Called whenever the mirrors change and whenever the setting
     /// does, so one turned off goes within a tick.
     private func applyHiddenActivities() {
+        seedDefaults()
         let off = appState?.settings.hiddenLiveActivities ?? []
         appliedHidden = off
         var names: [String] = []
@@ -3141,6 +3176,42 @@ final class LiveMirror {
         noteSystemPill(sides.contains { side in
             side.mirrors.contains { $0.copy.system && $0.misses < 3 }
         })
+    }
+
+    /// An off-by-default pill showing for the first time is turned off in
+    /// Settings, once (`LiveActivityDefaults`): from then on the switch is
+    /// the user's. Its name is macOS's, so whatever the language.
+    private func seedDefaults() {
+        guard let appState else { return }
+        let seen = sides.flatMap(\.mirrors).map { (identifier: $0.copy.identifier, name: $0.copy.name) }
+        let new = LiveActivityDefaults.toTurnOff(seen: seen, seeded: appState.settings.seededLiveActivityDefaults)
+        guard !new.isEmpty else { return }
+        for pill in new {
+            appState.settings.hiddenLiveActivities.insert(pill.name)
+            appState.settings.seededLiveActivityDefaults.insert(pill.identifier)
+        }
+        PelmetLog.log("livemirror: off by default, turned off once [\(new.map(\.name).joined(separator: ", "))]")
+        appState.settingsChanged()
+    }
+
+    /// Every pill live mode has here is one Settings turned off. Not
+    /// filtered on `dropped`: the layout drops every turned-off mirror too,
+    /// and one dropped for room alone is still a pill wanted.
+    private func everyPillOff() -> Bool {
+        PillsOffStandDown.everyPillOff(pillsUp.map { (off: $0.hidden, system: $0.copy.system) })
+    }
+
+    /// The pills live mode has here, settled ones only.
+    private var pillsUp: [PillMirror] { sides.flatMap(\.mirrors).filter { !$0.provisional && $0.misses < 3 } }
+
+    /// Live mode leaves and stays down for the activities running now: a
+    /// cover with no pill on it holds the bar for nothing.
+    private func standDownForPillsOff() {
+        let seen = Set(pillsUp.map(\.copy.name))
+        pillsOff = PillsOffStandDown(count: activityCount, seen: seen)
+        allOffClock.reset()
+        PelmetLog.log("livemirror: every pill is turned off for \(Int(Self.noPillGrace))s [\(seen.sorted().joined(separator: ", "))] — it stands down until another activity starts or one of those is turned back on")
+        wanted = false
     }
 
     /// Whether macOS's own pill was mirrored the last time it was looked at.
@@ -3732,8 +3803,8 @@ final class LiveMirror {
         // The assertion is down for the pill's sake: with no pill to mirror
         // (the log said an activity runs, the bar shows none) live mode has
         // nothing to do and leaves, and waits longer each time in a row. A
-        // pill turned off counts: the cover over it is the whole point, so
-        // live mode stays even when it draws nothing.
+        // pill turned off counts here: when every pill is off, the loop's
+        // stand-down (`PillsOffStandDown`) is what lets live mode go.
         let anyPill = sides.contains { $0.mirrors.contains { ($0.hidden || !$0.dropped) && $0.misses < 3 && !$0.provisional } }
         if anyPill {
             noPillSince = nil
