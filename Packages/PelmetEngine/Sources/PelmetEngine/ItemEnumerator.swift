@@ -590,7 +590,9 @@ public actor ItemEnumerator {
             // of them (#152, #153). The leftmost keeps the id it already had,
             // so its assignment survives; the ones right of it take theirs by
             // rank.
-            guard groups.count > 1 else { return groups.map { _ in name } }
+            // Two at one x are one icon twice (see `.unread`): they keep the
+            // one name, as they always did.
+            guard groups.count > 1, !sharePlace(groups) else { return groups.map { _ in name } }
             return ranksByX(groups).map { $0 == 0 ? name : "Item-\($0)" }
         case .unread:
             // With no extras bar to count by, a lone group is the app's one
@@ -603,11 +605,7 @@ public actor ItemEnumerator {
             // or another bar's copy, and naming those would invent items, so
             // they stay unnamed.
             guard groups.count > 1 else { return groups.count == 1 ? ["Item-0"] : [] }
-            // The same 0.5pt the stand-in match calls one place: a live echo
-            // read 1362 and 1362.5 (2026-11-10).
-            let xs = groups.map(\.minX)
-            let shared = xs.indices.contains { i in xs.indices.contains { $0 != i && abs(xs[$0] - xs[i]) <= 0.5 } }
-            guard !shared else { return groups.map { _ in nil } }
+            guard !sharePlace(groups) else { return groups.map { _ in nil } }
             return ranksByX(groups).map { "Item-\($0)" }
         case .byPosition:
             // Every untitled entry was "Item-0", the same collapse one layer
@@ -617,6 +615,13 @@ public actor ItemEnumerator {
             return StandInMatch.items(forGroups: groups, items: items.map(\.frame))
                 .map { $0.map { items[$0].title ?? "Item-\(untitled[$0] ?? 0)" } }
         }
+    }
+
+    /// Whether two groups stand at one place: the same 0.5pt the stand-in
+    /// match calls one place, a live echo read 1362 and 1362.5 (2026-11-10).
+    private static func sharePlace(_ groups: [CGRect]) -> Bool {
+        let xs = groups.map(\.minX)
+        return xs.indices.contains { i in xs.indices.contains { $0 != i && abs(xs[$0] - xs[i]) <= 0.5 } }
     }
 
     /// Each group's place on the bar, left to right.

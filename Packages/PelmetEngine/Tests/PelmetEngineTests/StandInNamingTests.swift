@@ -120,6 +120,16 @@ import Testing
             == ["T", "Item-0"])
     }
 
+    /// Two groups at one x under one name are a stand-in over its own
+    /// button or another bar's copy: they stay that one item, as before
+    /// #152 split named groups by place.
+    @Test func aNameAtOnePlaceStaysOneItem() {
+        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1492, 1492]), naming: .named("T"), items: [])
+            == ["T", "T"])
+        #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1362, 1362.5]), naming: .named("T"), items: [])
+            == ["T", "T"])
+    }
+
     @Test func aNameNamesALoneGroup() {
         #expect(ItemEnumerator.standInTitles(forGroups: Self.groups([1]), naming: .named("T"), items: []) == ["T"])
     }
