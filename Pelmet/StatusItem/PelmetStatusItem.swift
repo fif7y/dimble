@@ -190,10 +190,13 @@ final class PelmetStatusItem {
         // A click on our own chevron is delivered to us, so the local
         // monitor is the one that fires; the global one is there for a
         // click macOS hands to whoever is in front instead.
+        // The middle button only: a mouse's back and forward buttons come
+        // as `otherMouseUp` too, and must stay theirs.
         if let local = NSEvent.addLocalMonitorForEvents(matching: .otherMouseUp, handler: { [weak self] event in
-            self?.middleClicked(at: NSEvent.mouseLocation) == true ? nil : event
+            event.buttonNumber == 2 && self?.middleClicked(at: NSEvent.mouseLocation) == true ? nil : event
         }) { middleClickMonitors.append(local) }
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: .otherMouseUp, handler: { [weak self] _ in
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .otherMouseUp, handler: { [weak self] event in
+            guard event.buttonNumber == 2 else { return }
             self?.middleClicked(at: NSEvent.mouseLocation)
         }) { middleClickMonitors.append(global) }
     }
