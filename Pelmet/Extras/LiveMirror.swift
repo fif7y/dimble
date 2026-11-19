@@ -29,6 +29,7 @@
 
 import AppKit
 import ApplicationServices
+import notify
 import PelmetCore
 import PelmetEngine
 import QuartzCore
@@ -842,7 +843,45 @@ final class LiveMirror {
         }
     }
 
+    /// macOS's word that something started or stopped playing (`notify.h`),
+    /// asked for once the watcher first reports.
+    private var playbackToken = NOTIFY_TOKEN_INVALID
+    /// The hold-off running is the one for no pill, and the start it ended
+    /// for was playback's (it counts no strike toward the missing-pills
+    /// verdict: a pause asks for it as much as a play).
+    private var noPillHold = false, playbackTry = false
+
+    private func watchPlayback() {
+        guard playbackToken == NOTIFY_TOKEN_INVALID else { return }
+        notify_register_dispatch("com.apple.MediaRemote.nowPlayingApplicationIsPlayingDidChange", &playbackToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.playbackChanged() }
+        }
+    }
+
+    /// Something started or paused playing (macOS says so for both, with no
+    /// word on which). Under the assertion a resumed Now Playing draws no
+    /// pill and changes no count, so nothing else tells live mode to look
+    /// again: it stayed away for the whole hold-off, or for good once it
+    /// stood down for the pills turned off (#156). The start this asks for
+    /// finds the pill, or leaves the way it did before.
+    private func playbackChanged() {
+        guard enabled, reported.running else { return }
+        if let down = pillsOff {
+            // Every activity had its pill up, all off: none can come back.
+            guard down.pillMayReturn else { return }
+            pillsOff = nil
+            PelmetLog.log("livemirror: playback changed — the stand-down for pills turned off ends")
+            follow(running: true, count: reported.count, why: "activity ended")
+        } else if noPillHold, Date() < retryNotBefore {
+            retryNotBefore = .distantPast
+            noPillHold = false
+            playbackTry = true
+            PelmetLog.log("livemirror: playback changed — the hold-off for no pill ends")
+        }
+    }
+
     func activitiesChanged(running: Bool, count: Int = 0) {
+        watchPlayback()
         reported = (running, count)
         if let down = pillsOff {
             pillsOff = down.after(running: running, count: count)
@@ -895,7 +934,7 @@ final class LiveMirror {
         // a few seconds (its pill shows a moment after the log line).
         if count != activityCount {
             if isActive { PelmetLog.log("livemirror: activities \(activityCount) → \(count), looking for the pills") }
-            if count > activityCount { retryNotBefore = .distantPast; emptyStrikes = 0; noPillStrikesAwake = 0; abortStrikes = 0 }
+            if count > activityCount { retryNotBefore = .distantPast; noPillHold = false; emptyStrikes = 0; noPillStrikesAwake = 0; abortStrikes = 0 }
             activityCount = count
             allOffClock.reset()
             lookEagerlyUntil = Date().addingTimeInterval(3)
@@ -1767,6 +1806,7 @@ final class LiveMirror {
             abortStrikes += 1
             let hold = min(120, 5 * pow(2, Double(abortStrikes - 1)))
             retryNotBefore = Date().addingTimeInterval(hold)
+            noPillHold = false
             holdOffWhy = "the last start was called off (\(why)) — holding off \(Int(hold))s (a new activity ends the hold-off)"
         }
         for side in sides { side.cover?.dismiss() }
@@ -3346,7 +3386,7 @@ final class LiveMirror {
     /// cover with no pill on it holds the bar for nothing.
     private func standDownForPillsOff() {
         let seen = Set(pillsUp.map(\.copy.name))
-        pillsOff = PillsOffStandDown(count: activityCount, seen: seen)
+        pillsOff = PillsOffStandDown(count: activityCount, seen: seen, pills: pillsUp.count)
         allOffClock.reset()
         PelmetLog.log("livemirror: every pill is turned off for \(Int(Self.noPillGrace))s [\(seen.sorted().joined(separator: ", "))] — it stands down until another activity starts or one of those is turned back on")
         wanted = false
@@ -3962,13 +4002,16 @@ final class LiveMirror {
             noPillSince = nil
             emptyStrikes = 0
             noPillStrikesAwake = 0
+            playbackTry = false
         } else if let since = noPillSince {
             if Date().timeIntervalSince(since) > Self.noPillGrace {
                 emptyStrikes += 1
-                if !AppState.sessionAway { noPillStrikesAwake += 1 }
+                if !AppState.sessionAway, !playbackTry { noPillStrikesAwake += 1 }
+                playbackTry = false
                 let hold = min(600, 60 * pow(2, Double(emptyStrikes - 1)))
                 retryNotBefore = Date().addingTimeInterval(hold)
-                holdOffWhy = "no pill was found last time — holding off (a new activity ends the hold-off)"
+                noPillHold = true
+                holdOffWhy = "no pill was found last time — holding off (a new activity or playback ends the hold-off)"
                 PelmetLog.log("livemirror: no pill to mirror for \(Int(Self.noPillGrace))s — leaving live mode, not trying again for \(Int(hold))s")
                 // Nothing came while the camera or mic was live: on 27.3
                 // Apple's pill would have been here, so this macOS is one

@@ -33,8 +33,21 @@ import Testing
 
     @Test func oneEndingKeepsItDown() {
         let two = PillsOffStandDown(count: 2, seen: down.seen)
-        #expect(two.after(running: true, count: 1) == PillsOffStandDown(count: 1, seen: down.seen))
+        // Which one ended isn't known: its pill is taken as the one up.
+        #expect(two.after(running: true, count: 1) == PillsOffStandDown(count: 1, seen: down.seen, pills: 0))
         #expect(down.after(running: true, count: 1) == down)
+    }
+
+    @Test func anActivityWithNoPillUpMayBringOneBack() {
+        // Now Playing paused beside the protection pill (08:21:35, 2026-11-19:
+        // 2 running, 1 pill up, and the resume never brought live mode back).
+        #expect(PillsOffStandDown(count: 2, seen: down.seen, pills: 1).pillMayReturn)
+    }
+
+    @Test func everyActivityWithItsPillUpBringsNoneBack() {
+        // Both pills up and off: a play or a pause can't change what's drawn.
+        #expect(!PillsOffStandDown(count: 2, seen: ["System & App Protection Override", "Now Playing"], pills: 2).pillMayReturn)
+        #expect(!down.pillMayReturn)
     }
 
     @Test func aPillThatWasUpTurnedBackOnEndsIt() {

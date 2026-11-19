@@ -12,11 +12,20 @@ public struct PillsOffStandDown: Equatable, Sendable {
     /// The pills that were up then, every one turned off, by the name macOS
     /// gives them.
     public let seen: Set<String>
+    /// How many pills were up then. Fewer than `count` means an activity ran
+    /// with no pill on the bar (Now Playing, paused): its pill can come back
+    /// with no change in the count.
+    public let pills: Int
 
-    public init(count: Int, seen: Set<String>) {
+    public init(count: Int, seen: Set<String>, pills: Int? = nil) {
         self.count = count
         self.seen = seen
+        self.pills = pills ?? seen.count
     }
+
+    /// Whether a running activity has no pill up, so one may come back with
+    /// nothing reported: playback resuming is the only word of it (#156).
+    public var pillMayReturn: Bool { pills < count }
 
     /// Whether every pill drawn is one Settings turned off. macOS's own pill
     /// (Camera & mic) has no switch, so it always keeps live mode up.
@@ -28,7 +37,9 @@ public struct PillsOffStandDown: Equatable, Sendable {
     /// runs. One ending leaves the rest off as they were.
     public func after(running: Bool, count: Int) -> PillsOffStandDown? {
         guard running, count <= self.count else { return nil }
-        return PillsOffStandDown(count: count, seen: seen)
+        // Which activity ended isn't known: its pill is taken as one of those
+        // up, so a pill that may still come back isn't ruled out.
+        return PillsOffStandDown(count: count, seen: seen, pills: max(0, pills - (self.count - count)))
     }
 
     /// After Settings changes which pills are off: nil once one of the pills
