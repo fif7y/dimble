@@ -748,6 +748,13 @@ final class LiveMirror {
     /// Counts what makes a picture of the bare bar untrue (a Space, the
     /// appearance, the displays), also while live mode is off.
     private var backdropGeneration = 0
+    /// The wallpaper and appearance (`ConcealGhostOverlay.surfaceSignature`)
+    /// at the last look. The bar is translucent, so a picture taken over one
+    /// wallpaper is a lighter or darker band over another, and macOS sends
+    /// nothing when a wallpaper turns: the cover kept a picture from before
+    /// the switch to dark until Dimble quit (#165).
+    private var lastSurface: [Int]?
+    private var surfaceCheckedAt = Date.distantPast
     /// The mirrors are on their way out (an exit, a hand-over): a layout
     /// leaves their visibility alone.
     private var mirrorsLeaving = false
@@ -1862,6 +1869,7 @@ final class LiveMirror {
     /// pills' own take them over as they come back).
     private func goLive(chevron first: NSRect, started: Date, retake: Bool) async {
         guard let appState else { return }
+        if surfaceChanged() { PelmetLog.log("livemirror: the wallpaper or appearance changed since the last pictures — none kept") }
         var chevron = first
         func ms() -> Int { Int(-started.timeIntervalSinceNow * 1000) }
 
@@ -2860,7 +2868,10 @@ final class LiveMirror {
         try? await Task.sleep(for: .milliseconds(120))
         if let again = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) {
             let scale = side.scale
-            let holes = shown.flatMap { $0.tree.texts.map { node in
+            // Logos and glyphs are left out too: Now Playing's waveform
+            // moves for as long as it plays (#164). A slide still shows,
+            // as the pill's black between and around them moving.
+            let holes = shown.flatMap { ($0.tree.texts + $0.tree.images).map { node in
                 CGRect(x: (node.frame.minX - union.minX) * scale, y: (node.frame.minY - union.minY) * scale,
                        width: node.frame.width * scale, height: node.frame.height * scale).insetBy(dx: -3, dy: -3)
             } }
@@ -3716,6 +3727,17 @@ final class LiveMirror {
     /// carry on from their kept stills and last texts, and the new stills
     /// replace the old ones in place (a still carries the backdrop in its
     /// rounded corners, so a Space's stills are always taken again).
+    /// Whether the wallpaper or appearance changed since the last look: a
+    /// change makes every picture of the bare bar untrue, kept ones too.
+    private func surfaceChanged() -> Bool {
+        surfaceCheckedAt = Date()
+        let now = ConcealGhostOverlay.surfaceSignature()
+        defer { lastSurface = now }
+        guard let last = lastSurface, last != now else { return false }
+        backdropGeneration += 1
+        return true
+    }
+
     private func backdropMayHaveChanged(_ reason: String) async {
         try? await Task.sleep(for: .milliseconds(300))
         guard isActive, !handingOver, !entering, !exiting else { return }
@@ -3889,6 +3911,9 @@ final class LiveMirror {
                 if side.showsAll { noteRun(side) }
             }
             if short { Task { @MainActor [weak self] in await self?.backdropMayHaveChanged("the « moved past the picture") } }
+        }
+        if Date().timeIntervalSince(surfaceCheckedAt) >= 2, surfaceChanged() {
+            Task { @MainActor [weak self] in await self?.backdropMayHaveChanged("the wallpaper or appearance changed") }
         }
         for side in sides {
             // The pills are looked for every 2 s (an activity starting or ending),
