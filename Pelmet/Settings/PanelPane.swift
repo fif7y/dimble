@@ -12,7 +12,9 @@ import SwiftUI
 struct PanelPane: View {
     @Environment(AppState.self) private var appState
 
-    private var target: RevealTarget { appState.revealTarget }
+    /// "Show hidden icons in" as the display this window is on uses it: its
+    /// own from Settings › Displays, else this tab's (`settingsDisplay`).
+    private var target: RevealTarget { appState.revealTarget(onDisplay: appState.settingsDisplay) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -181,7 +183,9 @@ struct PanelPane: View {
 
     /// Picked here, the layout is the setting: the dev override gives way.
     private var targetBinding: Binding<RevealTarget> {
-        Binding(get: { appState.revealTarget }, set: { appState.panelPresenter.setTarget($0) })
+        // A pick sets what that display uses, the way the chevron's menu
+        // does: its own choice when it has one, this tab's otherwise.
+        Binding(get: { target }, set: { appState.panelPresenter.pick($0, onDisplay: appState.settingsDisplay) })
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<PanelOptions, T>) -> Binding<T> {

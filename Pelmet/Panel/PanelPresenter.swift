@@ -2017,11 +2017,12 @@ final class PanelPresenter: RevealPresenter {
     /// The mock's panel menu: the layout, names, Always Hidden, Settings.
     /// `shown` is what the panel it opens on draws, `toggleFold` its fold.
     /// `onPanel`: the open panel's, whose Layout is its display's; else
-    /// Settings' preview, whose Layout is the Panel tab's.
+    /// Settings' preview, whose Layout is the Settings window's display's,
+    /// as the Panel tab shows it.
     func panelMenu(shown: PanelContent?, onPanel: Bool = false, toggleFold: @escaping () -> Void) -> [PanelMenuRow] {
         guard let appState else { return [] }
-        let layout = onPanel ? self.layout : appState.revealTarget.panelLayout ?? .panel
-        let display = onPanel ? openScreen : nil
+        let display = onPanel ? openScreen : appState.settingsDisplay
+        let layout = onPanel ? self.layout : appState.revealTarget(onDisplay: display).panelLayout ?? .panel
         let alwaysShown = shown?.showsAlwaysHidden ?? false
         let hasAlways = shown?.hasAlwaysHidden ?? false
         return [
@@ -2050,9 +2051,10 @@ final class PanelPresenter: RevealPresenter {
         ]
     }
 
-    /// The layout picked from the panel's menu, or the bar's, is the setting
-    /// from then on: the display's own when it was picked on one that has
-    /// its own (Settings › Displays), the Panel tab's otherwise.
+    /// The layout picked from the panel's menu, the bar's, or the Panel
+    /// tab's cards (for the Settings window's display) is the setting from
+    /// then on: the display's own when it was picked on one that has its
+    /// own (Settings › Displays), the Panel tab's otherwise.
     func pick(_ target: RevealTarget, onDisplay display: CGDirectDisplayID?) {
         let uuid = display.flatMap(NSScreen.uuid(ofDisplay:))
         let own = appState?.settings.ownRevealTarget(forDisplayUUID: uuid) != nil

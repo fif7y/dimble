@@ -85,6 +85,11 @@ final class AppState {
         }
     }
 
+    /// The display the Settings window is on. The Panel tab shows and sets
+    /// that display's "Show hidden icons in", its own when Settings ›
+    /// Displays gave it one, so the two tabs never disagree there.
+    var settingsDisplay: CGDirectDisplayID?
+
     /// Per-display behavior is "the display the pointer is on wins" — this is
     /// that display's setting. Every path that could conceal the bar must
     /// consult it; reveal-side crossings live in MenuBarBandMonitor.

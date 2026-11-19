@@ -19,6 +19,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         appState.settingsTab = tab
         if let window {
             bringToFront(window)
+            appState.settingsDisplay = window.screen?.directDisplayID
             appState.settingsWindowVisible = true
             return
         }
@@ -44,7 +45,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.delegate = self
         self.window = window
         bringToFront(window)
+        appState.settingsDisplay = window.screen?.directDisplayID
         appState.settingsWindowVisible = true
+    }
+
+    /// Dragged to another display: the Panel tab follows it.
+    func windowDidChangeScreen(_ notification: Notification) {
+        appState?.settingsDisplay = window?.screen?.directDisplayID
     }
 
     /// Cooperative activation (macOS 14+) can refuse a status-item app
