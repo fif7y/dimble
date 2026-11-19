@@ -978,7 +978,18 @@ final class TransitionCoordinator {
             // shifts as Pelmet's extras collapse the hole ended up over the
             // last hidden icon, showing a sliver of it fading (Gab).
             let emptyCover = emptyBar
-            switch recipe.exit {
+            // The mirror of the reveal's (#157): an icon macOS keeps right of
+            // the « leaves from there, and the « and every icon between close
+            // its gap. The pictures hold them where they stood, beside the
+            // moved live ones: icons doubled as they hid (beta.3). macOS's
+            // own animation performs it.
+            let aside = goingAwayRightOfChevron()
+            if !aside.isEmpty {
+                PelmetLog.log("cover: \(aside.map(\.rawValue)) go\(aside.count == 1 ? "es" : "") away right of the « and move\(aside.count == 1 ? "s" : "") the icons beside it — no pictures, macOS's own animation")
+            }
+            switch aside.isEmpty ? recipe.exit : nil {
+            case nil:
+                break
             case .pop:
                 cover = ConcealGhostOverlay.begin(from: emptyCover, safety: AppTiming.transitionCoverSafety)
             case .fade:
@@ -2078,6 +2089,21 @@ final class TransitionCoordinator {
         return appState.frameMemory.rightOfChevron(
             among: Set(concealed.map(\.sectionKey)).filter { sections.contains(model.section(of: $0)) },
             chevronNow: chevron, launchFrames: launchFrames
+        )
+    }
+
+    /// The icons out now that the conceal takes away from right of the «:
+    /// the reveal's `comingOutRightOfChevron`, read off the bar as it is.
+    private func goingAwayRightOfChevron() -> [ItemID] {
+        guard let appState, let snap = appState.snapshot else { return [] }
+        let model = appState.settings.sectionModel
+        let primaryMaxX = primaryMaxX
+        let chevron = snap.items.first(where: { $0.id == AppState.chevronItemID })?.frame
+            .flatMap { MenuBarGeometry.isInPrimaryBand($0, primaryMaxX: primaryMaxX) ? $0 : nil }
+        let out = snap.items.filter { $0.frame != nil && $0.id != AppState.chevronItemID }.map(\.id.sectionKey)
+        return appState.frameMemory.rightOfChevron(
+            among: Set(out).filter { model.section(of: $0) != .visible && lastRevealedSections.contains(model.section(of: $0)) },
+            chevronNow: chevron
         )
     }
 
