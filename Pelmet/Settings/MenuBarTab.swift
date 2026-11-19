@@ -208,15 +208,17 @@ struct MenuBarTab: View {
                 .animation(.easeOut(duration: 0.2), value: appState.applying)
 
                 // The dashed "New" tile in the strips IS the new-icons
-                // destination, and separators are edited on their own tiles:
-                // nothing sits between the strips and the launchers.
-                AppLaunchersStrip()
-
-                PelmetItemsStrip()
+                // destination, and separators are edited on their own tiles.
+                // Under the strips, what the bar shows on its own first
+                // (Live Activities, Show when it matters), then what you add
+                // to it (Gab, 2026-11-18).
+                LiveActivitiesCard()
 
                 ShowWhenCard()
 
-                LiveActivitiesCard()
+                AppLaunchersStrip()
+
+                PelmetItemsStrip()
         }
         .animation(.spring(duration: 0.3), value: appState.settings.sectionModel)
         .environment(dragSession)
