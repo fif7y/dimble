@@ -631,6 +631,9 @@ final class LiveMirror {
         var pictureGeneration = 0
         /// The last still of any kind: the slow graphic refresh counts from it.
         var lastSnapshotAt = Date()
+        /// Since when stills have been dropped for a screen still moving
+        /// (`snapshot`): past 2.5 s the pill animates for good and is taken.
+        var screenMovingSince: Date?
         /// Whether this display held the focused window when that still was
         /// taken. macOS draws the menu bar's contents dimmed on every display
         /// without it, and a still keeps whichever look it caught.
@@ -2835,13 +2838,52 @@ final class LiveMirror {
         for ((mirror, tree), now) in zip(shown, after) {
             guard let now else { continue }
             let moved = abs(now.frame.minX - tree.frame.minX) > 1.5 || abs(now.frame.minY - tree.frame.minY) > 1.5
-            if let why = now.look.change(from: tree.look) ?? (moved ? "moved \(Int(tree.frame.minX)) → \(Int(now.frame.minX))" : nil) {
+            // The capsule can stand still while its logos and numbers move
+            // inside it: the texts would be blanked where they no longer are.
+            let slid = !PillSettle.alike(Self.shape(of: now), Self.shape(of: tree))
+            if let why = now.look.change(from: tree.look)
+                ?? (moved ? "moved \(Int(tree.frame.minX)) → \(Int(now.frame.minX))" : nil)
+                ?? (slid ? "its texts or logos slid" : nil) {
                 PelmetLog.log("livemirror: snapshot dropped — \"\(mirror.key)\" moved during the capture (\(why)), again once it stands still")
                 mirror.placeCandidate = (now.frame, Date(), mirror.placeCandidate?.first ?? Date())
                 mirror.lookCandidate = nil
                 return false
             }
         }
+        // AX has a pill at its new place at once while the screen slides it
+        // there. For ~2.5 s after the pills come back at a relaunch macOS
+        // rebuilds them, and a still taken in a slide passed every AX check
+        // with its numbers half-way: blanked where AX had them, they stayed
+        // in the still beside the live ones ("103 103 99", Gab, 2026-11-18).
+        // A second capture must show the same pixels, texts left out (a
+        // timer ticking is no slide).
+        try? await Task.sleep(for: .milliseconds(120))
+        if let again = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) {
+            let scale = side.scale
+            let holes = shown.flatMap { $0.tree.texts.map { node in
+                CGRect(x: (node.frame.minX - union.minX) * scale, y: (node.frame.minY - union.minY) * scale,
+                       width: node.frame.width * scale, height: node.frame.height * scale).insetBy(dx: -3, dy: -3)
+            } }
+            let changed = Self.changedPixels(image, again, outside: holes)
+            if changed > Self.slidePixels {
+                let since = side.screenMovingSince ?? Date()
+                if Date().timeIntervalSince(since) < 2.5 {
+                    if side.screenMovingSince == nil {
+                        PelmetLog.log("livemirror: snapshot dropped — the pills are still moving on screen (\(changed) pixels changed in 120ms), again once they stand still")
+                    }
+                    side.screenMovingSince = since
+                    for (mirror, tree) in shown {
+                        mirror.placeCandidate = (tree.frame, Date(), mirror.placeCandidate?.first ?? Date())
+                        mirror.lookCandidate = nil
+                    }
+                    return false
+                }
+                PelmetLog.log("livemirror: the pills kept moving on screen for 2.5 s (\(changed) pixels) — taken as they are")
+            } else if let since = side.screenMovingSince {
+                PelmetLog.log("livemirror: the pills stood still on screen after \(Int(Date().timeIntervalSince(since) * 1000))ms")
+            }
+        }
+        side.screenMovingSince = nil
         side.snapshots += 1
         side.lastSnapshotAt = Date()
         side.activeAtSnapshot = Self.activeDisplayID() == side.id
@@ -2908,6 +2950,40 @@ final class LiveMirror {
 
     /// The still with each rect (pixels, top-left origin) painted over from
     /// the bar above and below it, column by column.
+    /// Pixels changed between two captures of one rect beyond this: a slide.
+    /// A logo moving 2 pt changes ~80 at 2x.
+    static let slidePixels = 24
+
+    /// How many pixels differ (a channel by more than 40) between two
+    /// captures of the same rect, the `holes` (image pixels, top-left
+    /// origin) left out.
+    nonisolated private static func changedPixels(_ a: CGImage, _ b: CGImage, outside holes: [CGRect]) -> Int {
+        guard a.width == b.width, a.height == b.height else { return Int.max }
+        let width = a.width, height = a.height, rowBytes = width * 4
+        func bytes(_ image: CGImage) -> [UInt8]? {
+            var data = [UInt8](repeating: 0, count: rowBytes * height)
+            let drawn = data.withUnsafeMutableBytes { buffer -> Bool in
+                guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: rowBytes,
+                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+                else { return false }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                return true
+            }
+            return drawn ? data : nil
+        }
+        guard let pa = bytes(a), let pb = bytes(b) else { return 0 }
+        var changed = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = y * rowBytes + x * 4
+                guard abs(Int(pa[i]) - Int(pb[i])) > 40 || abs(Int(pa[i + 1]) - Int(pb[i + 1])) > 40 || abs(Int(pa[i + 2]) - Int(pb[i + 2])) > 40 else { continue }
+                let point = CGPoint(x: Double(x) + 0.5, y: Double(y) + 0.5)
+                if !holes.contains(where: { $0.contains(point) }) { changed += 1 }
+            }
+        }
+        return changed
+    }
+
     nonisolated private static func blanked(_ image: CGImage, rects: [CGRect]) -> CGImage {
         let width = image.width, height = image.height
         guard let space = image.colorSpace,
@@ -3189,7 +3265,13 @@ final class LiveMirror {
         let gone = side.mirrors.filter { $0.absent >= 2 }
         for mirror in gone { retire(mirror) }
         side.mirrors.removeAll { $0.absent >= 2 }
-        side.mirrors.sort { $0.copy.frame.minX < $1.copy.frame.minX }
+        // A read that missed a pill leaves its mirror at the old place, and
+        // the others may have slid past it meanwhile: sorting then swapped
+        // two mirrors for one read and back on the next (2026-11-18). The
+        // order changes only on a read that saw every pill.
+        if !side.mirrors.contains(where: { $0.absent > 0 }) {
+            side.mirrors.sort { $0.copy.frame.minX < $1.copy.frame.minX }
+        }
         applyHiddenActivities()
         let after = side.mirrors.map(\.key)
         if before != after {
