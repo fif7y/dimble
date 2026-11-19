@@ -637,7 +637,15 @@ enum ApplyPass {
                 return report
             }
         }
-        let holdsSettings = appState.settingsWindowVisible
+        // Settings is held above the drag and re-fronted after it only when
+        // it is the window the user is in (an edit dragged there, Apply
+        // pressed there). Open behind another app it stays there: the order
+        // keeper's pass re-fronted it over Mail while the user was typing
+        // (#159, 2026-11-18).
+        let holdsSettings = appState.settingsWindowVisible && SettingsWindowController.shared.isFront
+        if appState.settingsWindowVisible {
+            PelmetLog.log("apply: Settings \(holdsSettings ? "held above the drag" : "left where it is, not in front")")
+        }
         if holdsSettings { SettingsWindowController.shared.holdAboveDrag() }
         defer {
             if holdsSettings {

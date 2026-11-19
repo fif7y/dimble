@@ -80,6 +80,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// The window is the one the user is in: Dimble active, the window key.
+    var isFront: Bool { NSApp.isActive && window?.isKeyWindow == true }
+
     /// Re-front the window after a synthetic menubar drag — the drag's
     /// mouse-down lands outside Pelmet, so macOS deactivates us mid-edit.
     func refocus() {
