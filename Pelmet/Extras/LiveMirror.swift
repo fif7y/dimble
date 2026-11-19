@@ -201,13 +201,6 @@ nonisolated enum PillProbe {
         return here.filter { $0.bar == bar }.sorted { $0.frame.minX < $1.frame.minX }
     }
 
-    /// A pill's identity is its AXDescription ("Sports", "myVW"), the one
-    /// thing that names the activity in AX; a second pill with the same
-    /// description gets " #2" (`PillKeys`, in bar order).
-    static func keys(of pills: [PillCopy]) -> [String] {
-        PillKeys.keys(for: pills.map(\.name))
-    }
-
     /// Every element read gets its own short messaging timeout: the one set on
     /// the application element is not inherited by the children (the default
     /// is 6 s), and a stalled MenuBarAgent must not hold a read for minutes.
@@ -380,7 +373,10 @@ nonisolated enum PillProbe {
         // `named` is a mirror's key, so two activities of one app each press
         // their own pill; a bare description (an open card's owner is one)
         // still finds the first pill of that name.
-        let fresh = named.flatMap { want in PillKeys.index(of: want, in: all.map(\.name)).map { all[$0] } }
+        // The mirror's own element when it is still on the bar: a mirror's
+        // key follows its pill (`PillMatch`), not always bar order.
+        let fresh = kept.flatMap { kept in all.first { CFEqual($0.element, kept) } }
+            ?? named.flatMap { want in PillKeys.index(of: want, in: all.map(\.name)).map { all[$0] } }
             ?? (named == nil ? all.first : nil)
         var notes: [String] = []
         if let fresh {
@@ -517,6 +513,8 @@ final class LiveMirror {
         /// has no still: the first still waits until it has stood there 0.2 s,
         /// a pill still sliding in was caught half-way by the first capture.
         var placeCandidate: (frame: CGRect, since: Date, first: Date)?
+        /// A read is drawn once the pill stands still (`PillSettle`).
+        var settle = PillSettle()
         var misses = 0
         /// Discovery passes that did not find it (two in a row end it).
         var absent = 0
@@ -598,6 +596,8 @@ final class LiveMirror {
         /// (left to right).
         var mirrors: [PillMirror] = []
         var needsDiscovery = false
+        /// The last pills kept off bar order by `PillMatch`, logged once.
+        var offRankNote = ""
         var droppedNote = ""
         var placedNote = ""
         var snapping = false
@@ -2038,7 +2038,9 @@ final class LiveMirror {
         for r in memory.pills {
             guard let still = kept[keptKey(side, key: r.key)],
                   now.timeIntervalSince(still.at) < (still.look.items.isEmpty ? 900 : Self.graphicRefresh) else { continue }
-            let mirror = PillMirror(key: r.key, copy: PillCopy(element: AXUIElementCreateSystemWide(), frame: r.visual, text: "", name: r.name, bar: 0, system: r.system))
+            // Its last texts: what tells its pill from another of the same name.
+            let words = r.bits.map { $0.value }.joined(separator: " ")
+            let mirror = PillMirror(key: r.key, copy: PillCopy(element: AXUIElementCreateSystemWide(), frame: r.visual, text: words, name: r.name, bar: 0, system: r.system))
             mirror.provisional = true
             mirror.visual = r.visual
             mirror.base.contents = still.image
@@ -2540,6 +2542,11 @@ final class LiveMirror {
             guard side.mirrors.contains(where: { $0 === mirror }) else { continue }
             guard let tree else {
                 mirror.misses += 1
+                // macOS rebuilds a pill's element when its content changes
+                // (a Sports pill, every couple of seconds before a game): the
+                // fresh one is looked for at once, before three misses take
+                // the mirror off the bar and the next discovery puts it back.
+                if mirror.misses == 1 { side.needsDiscovery = true }
                 if mirror.misses == 3 {
                     PelmetLog.log("livemirror: display \(side.id) pill \"\(mirror.key)\" unreadable — looking again")
                     side.needsDiscovery = true
@@ -2554,6 +2561,15 @@ final class LiveMirror {
                 continue
             }
             mirror.misses = 0
+            // macOS slides a pill's logos and numbers when they change, and
+            // AX reports them half-way: numbers outside the pill, a width
+            // jumping 68 → 178 pt and back. Such a read is not drawn; the
+            // pill is read every tick until two reads agree.
+            let wasMoving = mirror.settle.moving
+            guard mirror.settle.read(Self.shape(of: tree), now: readAt) else {
+                if !wasMoving { PelmetLog.log("livemirror: display \(side.id) \"\(mirror.key)\" is moving — drawn once it stands still") }
+                continue
+            }
             mirror.tree = tree
             mirror.visual = tree.visual
             live.append((mirror, tree))
@@ -2920,11 +2936,19 @@ final class LiveMirror {
         return context.makeImage() ?? image
     }
 
+    /// What `PillSettle` watches: the pill's visual, and where each text sits in it.
+    nonisolated private static func shape(of tree: PillTree) -> [Double] {
+        let v = tree.visual
+        return ([v.minX, v.width, v.height] + tree.textNodes.flatMap { [$0.frame.minX - v.minX, $0.frame.width] }).map(Double.init)
+    }
+
     /// One pill's texts, drawn by Dimble at their AX frames. A value that
     /// names a team ("Senators 1") shows its last word when the frame is
     /// the width of that alone. `readAt` is when the pill was read.
-    private func drawTexts(_ mirror: PillMirror, bits nodes: [TextBit], side: Side, why: String, readAt: Date = Date(), bridge: Bool = false) {
+    private func drawTexts(_ mirror: PillMirror, bits all: [TextBit], side: Side, why: String, readAt: Date = Date(), bridge: Bool = false) {
         guard let visual = mirror.visual else { return }
+        // A text outside the pill was caught sliding: never drawn there.
+        let nodes = all.filter { $0.frame.midX >= visual.minX - 1 && $0.frame.midX <= visual.maxX + 1 }
         let values = nodes.map(\.value)
         if !bridge { noteClock(mirror, new: values, at: readAt) }
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -3123,22 +3147,43 @@ final class LiveMirror {
             if let tree, !tree.texts.isEmpty || !tree.images.isEmpty { usable.append(copy) }
         }
         usable.sort { $0.frame.minX < $1.frame.minX }
-        let keys = PillProbe.keys(of: usable)
         let before = side.mirrors.map(\.key)
+        // Each pill to its own mirror (`PillMatch`): two games of one app
+        // share a name and an identifier, and bar order alone gave one
+        // game's pill to the other's mirror whenever a read missed one.
+        let held = side.mirrors
+        let matches = PillMatch.assign(
+            usable.map { copy in
+                PillMatch.Found(name: copy.name, text: copy.text, midX: copy.frame.midX,
+                                same: held.firstIndex { !$0.provisional && CFEqual($0.copy.element, copy.element) })
+            },
+            to: held.map { PillMatch.Held(name: $0.copy.name, text: $0.copy.text, midX: $0.copy.frame.midX) })
+        let rank = PillKeys.keys(for: usable.map(\.name))
+        var keys = Set(held.map(\.key))
         var seen = Set<String>()
-        for (copy, key) in zip(usable, keys) {
-            seen.insert(key)
-            if let mirror = side.mirrors.first(where: { $0.key == key }) {
-                mirror.copy = copy
-                mirror.absent = 0
-                if mirror.provisional {
-                    mirror.provisional = false
-                    mirror.tree = nil
-                    PelmetLog.log("livemirror: display \(side.id) pill \"\(key)\" is back — its mirror, drawn from memory, takes it over")
-                }
-            } else {
+        var offRank: [String] = []
+        for (i, (copy, match)) in zip(usable, matches).enumerated() {
+            guard let match else {
+                let key = PillMatch.newKey(copy.name, taken: keys)
+                keys.insert(key); seen.insert(key)
                 side.mirrors.append(PillMirror(key: key, copy: copy))
+                continue
             }
+            let mirror = held[match]
+            seen.insert(mirror.key)
+            if mirror.key != rank[i] { offRank.append("pill \(i + 1) of \(usable.count) (\"\(copy.text)\") stays \"\(mirror.key)\", not \"\(rank[i])\"") }
+            mirror.copy = copy
+            mirror.absent = 0
+            if mirror.provisional {
+                mirror.provisional = false
+                mirror.tree = nil
+                PelmetLog.log("livemirror: display \(side.id) pill \"\(mirror.key)\" is back — its mirror, drawn from memory, takes it over")
+            }
+        }
+        let note = offRank.joined(separator: "; ")
+        if note != side.offRankNote {
+            side.offRankNote = note
+            if !note.isEmpty { PelmetLog.log("livemirror: display \(side.id) off bar order — \(note)") }
         }
         for mirror in side.mirrors where !seen.contains(mirror.key) && !mirror.provisional { mirror.absent += 1 }
         let gone = side.mirrors.filter { $0.absent >= 2 }
@@ -3772,7 +3817,7 @@ final class LiveMirror {
             // not here.
             let moving = side.mirrors.contains { m in
                 guard !m.provisional else { return false }
-                return (m.clock.next == nil && (m.textChangedAt.map { now.timeIntervalSince($0) < 5 } ?? false)) || m.lookCandidate != nil || m.placeCandidate != nil
+                return (m.clock.next == nil && (m.textChangedAt.map { now.timeIntervalSince($0) < 5 } ?? false)) || m.lookCandidate != nil || m.placeCandidate != nil || m.settle.moving
             }
             // Quick reads (the frame and the texts) every 2 s as the net, the
             // pills looked for every 4 s, the whole tree read every 10 s.
