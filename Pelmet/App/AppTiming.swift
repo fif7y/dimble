@@ -134,6 +134,14 @@ enum AppTiming {
     /// 2026-09-11: placed within a frame of the attach; the lead only needs
     /// to clear that).
     static let ownItemAttachLead: Duration = .milliseconds(50)
+    /// The cover over a Show in Menu Bar reveal of Pelmet's own items only,
+    /// counted after the lead. The agent slides the icons left of the new
+    /// one over ~430ms, but filmed at 120fps (2026-11-20, Time Machine) the
+    /// last 130ms move under 1pt: lifting at ~0.3s shows the icon at rest
+    /// without waiting out the full entrance hold. At 0.1s the slide's last
+    /// 12pt showed and the icon drifted 7pt under its own menu. A press
+    /// waits for this lift before opening the item's menu (#167).
+    static let ownItemCoverHold: TimeInterval = 0.25
     /// How long the cover over a Show in Menu Bar conceal outlasts one of
     /// Pelmet's own extras: its ghost fades over 0.22s and the width
     /// collapses at 0.26s (StatusItemFader).

@@ -291,8 +291,10 @@ final class TransitionCoordinator {
     /// the pictures lift ~500ms later. A transition started under them
     /// captured and covered on top of a moving picture: the icons vanished
     /// in two frames and the next reveal drew stale copies beside the real
-    /// ones (#61, 60fps burst 2026-09-24). Wait them out, bounded.
-    private func awaitPreviousLift() async {
+    /// ones (#61, 60fps burst 2026-09-24). Wait them out, bounded. A press
+    /// on one of Pelmet's own items waits too, before its menu takes the
+    /// main thread (#167).
+    func awaitPreviousLift() async {
         guard liftsInFlight > 0 else { return }
         let started = Date()
         while liftsInFlight > 0, Date().timeIntervalSince(started) < AppTiming.previousLiftWait {
@@ -1099,11 +1101,18 @@ final class TransitionCoordinator {
             appState.updateSnapshot(await engine.snapshot())
             if let cover {
                 // Same hold as a section's entrance: swap-quiet, then the
-                // agent's slide and the reflow beneath are over.
-                let liftAt = Date().addingTimeInterval(AppTiming.entranceCoverHold)
+                // agent's slide and the reflow beneath are over. Own items
+                // alone: the engine moved nothing, so the picture lifts as
+                // the agent's slide comes to rest (`ownItemCoverHold`). A
+                // press opens the item's menu right after, and the menu
+                // holds the main thread, so it waits for this lift (#167).
+                let ownOnly = own.count == live.count
+                let liftAt = Date().addingTimeInterval(ownOnly ? AppTiming.ownItemCoverHold : AppTiming.entranceCoverHold)
                 liftsInFlight += 1
                 Task { @MainActor in
-                    await appState.waitUntilQuiesced(interval: 0.15, deadline: 2, poll: .milliseconds(30))
+                    if !ownOnly {
+                        await appState.waitUntilQuiesced(interval: 0.15, deadline: 2, poll: .milliseconds(30))
+                    }
                     let remaining = liftAt.timeIntervalSinceNow
                     if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
                     cover.dismiss()

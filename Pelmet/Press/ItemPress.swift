@@ -436,6 +436,11 @@ final class ItemPress {
                     try? await Task.sleep(for: .milliseconds(30))
                 }
                 await appState.waitUntilQuiesced(interval: 0.15, deadline: 2, poll: .milliseconds(30))
+                // The picture over the item's entrance lifts on the main
+                // thread, which a menu holds until it closes: opened first,
+                // the menu hung under a picture of the bar without its icon
+                // (#167, 25 of 25 presses in the reporter's log).
+                await appState.transitions.awaitPreviousLift()
                 guard !run.yielded else {
                     PelmetLog.log("press: \(key.rawValue) — superseded before it started, \(ms())ms")
                     return
