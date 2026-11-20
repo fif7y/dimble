@@ -192,14 +192,26 @@ nonisolated enum PillProbe {
     static let systemPillPrefix = "av-module-pill-"
     /// Every distinct pill on a display, left to right: macOS shows one pill
     /// per running activity, each with its own AX element (and a copy per bar).
-    static func pills(in bounds: CGRect) -> [PillCopy] {
+    /// `held`: the elements live mode's mirrors hold, so a slot's stack keeps
+    /// the newcomer (`PillStack`).
+    static func pills(in bounds: CGRect, held: [AXUIElement] = []) -> [PillCopy] {
         let here = copies().filter { bounds.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }
         // Every bar holds its own element for the same pill, and they don't all
         // keep up: one bar window's copy opened a card macOS never drew, and
         // stayed 38 pt behind after a move, a second mirror for 9 s. The list
         // of one bar decides, the first in `copies`' order.
         let bar = here.first?.bar
-        return here.filter { $0.bar == bar }.sorted { $0.frame.minX < $1.frame.minX }
+        let listed = here.filter { $0.bar == bar }
+        // A bar window keeps a swapped-out pill's element for 1-4 s at the
+        // frame of the one that replaced it: one slot, not two pills.
+        let kept = PillStack.keep(listed.map { copy in
+            PillStack.Copy(minX: copy.frame.minX, width: copy.frame.width,
+                           held: held.contains { CFEqual($0, copy.element) })
+        }).map { listed[$0] }
+        if kept.count < listed.count {
+            PelmetLog.log("livemirror: \(listed.count - kept.count) stacked pill copy(ies) dropped on the display at x=\(Int(bounds.minX)) — \(listed.count) listed, \(kept.count) slot(s)")
+        }
+        return kept.sorted { $0.frame.minX < $1.frame.minX }
     }
 
     /// Every element read gets its own short messaging timeout: the one set on
@@ -3261,7 +3273,8 @@ final class LiveMirror {
     private func discoverPills(_ side: Side) async {
         side.needsDiscovery = false
         let bounds = side.bounds
-        let found = await Task.detached(priority: .userInitiated) { PillProbe.pills(in: bounds) }.value
+        let heldBox = ElementBox(list: side.mirrors.map(\.copy.element))
+        let found = await Task.detached(priority: .userInitiated) { PillProbe.pills(in: bounds, held: heldBox.list) }.value
         // A pill already mirrored is counted by its name: its tree is not read
         // again every pass. One not seen before is read, and counts when it
         // shows a text or a logo (a copy with neither is no pill to mirror).
