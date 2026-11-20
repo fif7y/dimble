@@ -1495,8 +1495,7 @@ final class LiveMirror {
         // (Folder Peek 1144..1181, the « 1163..1181, AV Controls 1102..1148),
         // and a reveal ended the cover inside that pill: its right cap showed
         // past the cover (2026-11-20).
-        let toggles = await Task.detached { OverflowToggle.listedToggles().map(\.frame) }.value
-            .filter { $0.width > 0 && bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) }
+        let toggles = await Task.detached { OverflowToggle.toggleFrames(onDisplay: bounds) }.value
         for (id, rects) in copies {
             guard var r = rects.first(where: { bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) && $0.midX >= from }) else { continue }
             if let held = toggles.first(where: { min($0.maxX, r.maxX) - max($0.minX, r.minX) > 4 }) {

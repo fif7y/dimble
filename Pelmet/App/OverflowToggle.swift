@@ -104,6 +104,35 @@ enum OverflowToggle {
         return listed(in: app, all: true)
     }
 
+    /// Every « on the bar of the display at `bounds`, by its label. The
+    /// AXMenuBar is the focused display's: with the LG's app in front it
+    /// listed no « for the built-in's bar, while the built-in's two bar
+    /// windows still did (2026-11-20). So both are read, the windows only
+    /// when they sit on that display.
+    nonisolated static func toggleFrames(onDisplay bounds: CGRect) -> [CGRect] {
+        guard let agent = NSRunningApplication.runningApplications(withBundleIdentifier: PelmetBundle.agentID).first
+        else { return [] }
+        let app = AXUIElementCreateApplication(agent.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        let onDisplay = { (f: CGRect) in bounds.contains(CGPoint(x: f.midX, y: f.midY)) }
+        var frames = listed(in: app, all: true).map(\.frame).filter { $0.width > 0 && onDisplay($0) }
+        var windowsV: CFTypeRef?
+        axCopyAttribute(app, kAXChildrenAttribute as CFString, &windowsV)
+        for window in (windowsV as? [AXUIElement]) ?? [] {
+            AXUIElementSetMessagingTimeout(window, 0.25)
+            guard let wf = currentFrame(of: window), onDisplay(wf) else { continue }
+            var kidsV: CFTypeRef?
+            axCopyAttribute(window, kAXChildrenAttribute as CFString, &kidsV)
+            for kid in (kidsV as? [AXUIElement]) ?? [] {
+                AXUIElementSetMessagingTimeout(kid, 0.25)
+                guard state(of: kid) != nil, let f = currentFrame(of: kid), f.width > 0, onDisplay(f),
+                      !frames.contains(f) else { continue }
+                frames.append(f)
+            }
+        }
+        return frames
+    }
+
     /// The agent lists the « with its extras. The sweep below stops 200pt
     /// short of the right edge, and on a bar with few icons the « sits
     /// nearer the clock than that (x=1614 on the 1800pt built-in, #81).
