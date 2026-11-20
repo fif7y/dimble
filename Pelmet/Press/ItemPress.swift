@@ -234,7 +234,18 @@ final class ItemPress {
         // expanded and its copy there clicked, as always.
         let behindMain = onBar != nil && ApplyPass.trapped(snap, appState: appState).contains(key)
         var trapped = behindMain && aim?.onPressDisplay != true
-        PelmetLog.log("press: \(key.rawValue) (\(button == .secondary ? "secondary" : "primary")) — \(revealsItem ? "concealed, revealed alone" : trapped ? "behind the «" : behindMain ? "behind the main bar's «, not the press display's" : "on the bar")")
+        // With no copy on the press display, another display's bar that
+        // draws it is clicked, the « left shut. Docked, the built-in's «
+        // came and went with its pills while the LG's bar drew Folder Peek
+        // and Stats, and expanded it left the walk on the «'s phantom: 0 of
+        // 6 presses opened anything (2026-11-20).
+        var clickDisplay = aimDisplay
+        if trapped, let elsewhere = await drawnElsewhere(onBar, besides: aimDisplay) {
+            aim = elsewhere.aim
+            clickDisplay = elsewhere.display
+            trapped = false
+        }
+        PelmetLog.log("press: \(key.rawValue) (\(button == .secondary ? "secondary" : "primary")) — \(revealsItem ? "concealed, revealed alone" : trapped ? "behind the «" : behindMain && clickDisplay != aimDisplay ? "behind the main bar's «, display \(clickDisplay.map(String.init) ?? "?")'s copy clicked" : behindMain ? "behind the main bar's «, not the press display's" : "on the bar")")
 
         // Only a bar that is about to change needs hiding: an item at rest
         // on the bar is clicked as it is. The transitions are told the bar
@@ -265,6 +276,11 @@ final class ItemPress {
                 if let found {
                     snap = found.snap
                     trapped = !found.aim.onPressDisplay && ApplyPass.trapped(snap, appState: appState).contains(key)
+                    if trapped, let elsewhere = await drawnElsewhere(found.item, besides: aimDisplay) {
+                        aim = elsewhere.aim
+                        clickDisplay = elsewhere.display
+                        trapped = false
+                    }
                 }
                 let unsettled = found?.settled != false ? ""
                     : aimDisplay != nil && found?.aim.onPressDisplay == false ? ", no copy on the press display's bar by the cap"
@@ -304,7 +320,7 @@ final class ItemPress {
             clickedElsewhere = aim.onPressDisplay
             // Anchored, the item is out under that bar's held picture (#88).
             let unheld = transitions.unholdForPress(
-                display: (clickedElsewhere ? aimDisplay : nil) ?? CGMainDisplayID(), at: frame.midX)
+                display: (clickedElsewhere ? clickDisplay : nil) ?? CGMainDisplayID(), at: frame.midX)
             defer { if unheld { transitions.reholdAfterPress() } }
             // The held pictures carry the same catcher, and the one this
             // press lifted is still fading while the others stay up, so a
@@ -330,7 +346,7 @@ final class ItemPress {
             )
             if passed { appState.liveMirror.takeClicksAfterPress() }
             ConcealGhostOverlay.everyCoverPassesClicks(false)
-            let bar = aimDisplay.map {
+            let bar = clickDisplay.map {
                 clickedElsewhere ? ", on display \($0)'s bar" : ", on the main bar (display \($0)'s had no copy to click)"
             } ?? ""
             PelmetLog.log("press: \(key.rawValue) clicked at \(ms())ms\(toggle == nil ? "" : " (« expanded)")\(bar)")
@@ -484,6 +500,18 @@ final class ItemPress {
     /// copy on that display's bar in the last walk, paired by full id
     /// (`PressAim`), else its main copy. `awaitingDisplay`: that bar lists
     /// icons, so a missing copy may still come (a stand-in mid-swap).
+    /// The first other display whose bar draws the item, the main display
+    /// and `skip` aside: a copy the « holds there is no copy (`PressAim.aim`).
+    private func drawnElsewhere(_ item: ObservedItem?, besides skip: CGDirectDisplayID?) async -> (aim: PressAim, display: CGDirectDisplayID)? {
+        guard let item, let frame = item.frame, let appState else { return nil }
+        let copies = await appState.engine.barCopies()
+        for id in NSScreen.screens.compactMap(\.directDisplayID) where id != CGMainDisplayID() && id != skip {
+            let aim = PressAim.aim(id: item.id, main: frame, display: CGDisplayBounds(id), copies: copies)
+            if aim.onPressDisplay { return (aim, id) }
+        }
+        return nil
+    }
+
     private func aimed(_ item: ObservedItem?, display: CGDirectDisplayID?) async -> (aim: PressAim, awaitingDisplay: Bool)? {
         guard let item, let frame = item.frame else { return nil }
         guard let display, let appState else { return (PressAim(frame: frame, onPressDisplay: false), false) }
