@@ -1490,8 +1490,18 @@ final class LiveMirror {
         // notch, shown by it, and their edge there (572, the cover from 1012)
         // left every reveal covered until the « shut (2026-11-20).
         let from = !side.showsAll && side.cover != nil ? side.coverMinX : -CGFloat.greatestFiniteMagnitude
+        // An icon behind macOS's « is shown by it, so it stands at the «.
+        // Its frame is a stack that reaches left into the pill before the «
+        // (Folder Peek 1144..1181, the « 1163..1181, AV Controls 1102..1148),
+        // and a reveal ended the cover inside that pill: its right cap showed
+        // past the cover (2026-11-20).
+        let toggles = await Task.detached { OverflowToggle.listedToggles().map(\.frame) }.value
+            .filter { $0.width > 0 && bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) }
         for (id, rects) in copies {
-            guard let r = rects.first(where: { bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) && $0.midX >= from }) else { continue }
+            guard var r = rects.first(where: { bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) && $0.midX >= from }) else { continue }
+            if let held = toggles.first(where: { min($0.maxX, r.maxX) - max($0.minX, r.minX) > 4 }) {
+                r = CGRect(x: held.minX, y: r.minY, width: held.width, height: r.height)
+            }
             switch model.section(of: id) {
             case .hidden: hidden = min(hidden ?? r.minX, r.minX)
             case .visible: visible = min(visible ?? r.minX, r.minX)
