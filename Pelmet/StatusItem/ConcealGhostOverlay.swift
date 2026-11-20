@@ -997,7 +997,11 @@ final class ConcealGhostOverlay {
             catcher.backgroundColor = .clear
             catcher.level = .statusBar
             catcher.hasShadow = false
-            catcher.ignoresMouseEvents = false
+            // Born while the covers pass a click (a « click, a press), it
+            // passes it too: live mode's settled cover went up 10-80ms before
+            // the « click and swallowed it, 4 of 8 first-click misses (#150).
+            catcher.ignoresMouseEvents = Self.everyCoverPassing
+            if Self.everyCoverPassing { PelmetLog.log("ghost: a cover went up while the covers pass a click, it passes too") }
             self.catcher = catcher
         } else {
             window = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -1090,6 +1094,7 @@ final class ConcealGhostOverlay {
     /// 7 of 9 presses that went through a held picture showed nothing,
     /// against 0 of 11 on live mode's path, which already passes clicks.
     static func everyCoverPassesClicks(_ through: Bool) {
+        everyCoverPassing = through
         for cover in registry.allObjects where !cover.finished {
             cover.passClicks(through)
         }
@@ -1348,6 +1353,8 @@ final class ConcealGhostOverlay {
     /// finished picture), weakly: the live-mode rule keeps all of them below
     /// the foreign surfaces, whoever made them.
     private static let registry = NSHashTable<ConcealGhostOverlay>.weakObjects()
+    /// `everyCoverPassesClicks` is holding: a cover made now starts passing.
+    private static var everyCoverPassing = false
     static func register(_ overlay: ConcealGhostOverlay) { registry.add(overlay); onNewCover?() }
     /// Told whenever a cover is made: the live mirror checks the order at
     /// once and again shortly after, not at its next idle tick.

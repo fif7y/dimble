@@ -306,15 +306,16 @@ final class ItemPress {
             let unheld = transitions.unholdForPress(
                 display: (clickedElsewhere ? aimDisplay : nil) ?? CGMainDisplayID(), at: frame.midX)
             defer { if unheld { transitions.reholdAfterPress() } }
-            // Live mode's cover takes every click on the bar: this one goes through it.
-            let passed = await appState.liveMirror.passClicksForPress()
             // The held pictures carry the same catcher, and the one this
             // press lifted is still fading while the others stay up, so a
             // held bar ate the click and the item showed nothing (#142).
-            // Every cover passes clicks for the press. The window server
-            // commits the change a frame or two late, so a press that
-            // live mode has not already waited for waits here.
+            // Every cover passes clicks for the press, from before live
+            // mode's wait below: a cover it puts up meanwhile passes too (#150).
             ConcealGhostOverlay.everyCoverPassesClicks(true)
+            // Live mode's cover takes every click on the bar: this one goes through it.
+            let passed = await appState.liveMirror.passClicksForPress()
+            // The window server commits the change a frame or two late, so a
+            // press that live mode has not already waited for waits here.
             if !passed { try? await Task.sleep(for: .milliseconds(40)) }
             let geometry = Self.geometry(at: frame)
             let before = await Self.counts(pid: target.pid, geometry: geometry)
