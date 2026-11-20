@@ -272,7 +272,7 @@ final class ConcealGhostOverlay {
     /// same dynamic wallpaper keeps the path (Gab, 2026-09-22 14:21: the
     /// store changed, the URL did not, and the parked picture of the old
     /// wallpaper was restored a second later).
-    private static let wallpaperStoreIndex = FileManager.default.homeDirectoryForCurrentUser
+    static let wallpaperStoreIndex = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/com.apple.wallpaper/Store/Index.plist").path
     static func surfaceSignature() -> [Int] {
         var hasher = Hasher()

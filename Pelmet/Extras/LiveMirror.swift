@@ -716,6 +716,7 @@ final class LiveMirror {
     enum Replay { case toggle, reveal, toggleAll }
     private var pendingReveal: (reason: RevealReason, sections: Set<PelmetCore.Section>, how: Replay)?
     private var themeObserver: NSObjectProtocol?
+    private var wallpaperWatch: DispatchSourceFileSystemObject?
     private var activateObserver: NSObjectProtocol?
     /// Before the assertion drops nothing is held: a reveal that comes then
     /// goes first and the start stands down (`standDown`). After it, the
@@ -1340,6 +1341,7 @@ final class LiveMirror {
                 forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
             ) { [weak self] _ in Task { @MainActor in self?.backdropGeneration += 1; await self?.backdropMayHaveChanged("the appearance changed") } }
         }
+        if wallpaperWatch == nil { watchWallpaperIndex() }
         if activateObserver == nil {
             // The menus on the left are the frontmost app's: a longer set
             // under a cover would be a picture of nothing.
@@ -1405,6 +1407,7 @@ final class LiveMirror {
         if let o = spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(o); spaceObserver = nil }
         if let o = activateObserver { NSWorkspace.shared.notificationCenter.removeObserver(o); activateObserver = nil }
         if let o = themeObserver { DistributedNotificationCenter.default().removeObserver(o); themeObserver = nil }
+        wallpaperWatch?.cancel(); wallpaperWatch = nil
         clockLoop?.cancel(); clockLoop = nil
         kept = [:]; remembered = [:]; keptPictures = [:]
         resetRunState()
@@ -3791,6 +3794,37 @@ final class LiveMirror {
         return true
     }
 
+    /// macOS rewrites the wallpaper store's index when a wallpaper turns (its
+    /// contents, its date, or a new file in its place). Watched while the loop
+    /// runs, the retake starts at once instead of at the next 2 s look, which
+    /// left FontMe's lighter band up for about 3 s (#165). The look stays, for
+    /// a change the watch misses.
+    private func watchWallpaperIndex() {
+        wallpaperWatch?.cancel()
+        wallpaperWatch = nil
+        let fd = open(ConcealGhostOverlay.wallpaperStoreIndex, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: [.write, .extend, .attrib, .delete, .rename], queue: .main
+        )
+        source.setEventHandler { [weak self, weak source] in
+            // Saved by replacing the file: the watch follows the new one.
+            let replaced = source.map { !$0.data.isDisjoint(with: [.delete, .rename]) } ?? false
+            Task { @MainActor in
+                guard let self else { return }
+                if replaced { self.watchWallpaperIndex() }
+                guard self.isActive, self.surfaceChanged() else { return }
+                // A wallpaper still fading in needs no second look: the
+                // stand-in goes up 0.1-0.4s in, and the retake's own pictures
+                // replace it 1.8s in (measured 2026-11-20).
+                await self.backdropMayHaveChanged("the wallpaper changed")
+            }
+        }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        wallpaperWatch = source
+    }
+
     private func backdropMayHaveChanged(_ reason: String) async {
         try? await Task.sleep(for: .milliseconds(300))
         guard isActive, !handingOver, !entering, !exiting else { return }
@@ -3965,6 +3999,7 @@ final class LiveMirror {
             }
             if short { Task { @MainActor [weak self] in await self?.backdropMayHaveChanged("the « moved past the picture") } }
         }
+        if wallpaperWatch == nil { watchWallpaperIndex() }
         if Date().timeIntervalSince(surfaceCheckedAt) >= 2, surfaceChanged() {
             Task { @MainActor [weak self] in await self?.backdropMayHaveChanged("the wallpaper or appearance changed") }
         }
