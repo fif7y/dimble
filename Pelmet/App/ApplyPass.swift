@@ -566,7 +566,13 @@ enum ApplyPass {
                 plan.skipped = plan.skipped.filter { $0.0 == key }
                 return plan
             }
-            trappedFor = { trapped($0, appState: appState).contains(key) ? [key] : [] }
+            // Never expands the «: an own item behind it waits for its
+            // drawing (`ownItemsBehindOverflow`), then a reveal, then Apply.
+            // On Gab's Mac all 24 expands were for own items, 11 of 11
+            // replanned 0 moves, and every « click raced live mode's enter
+            // (a cover born mid-click, a « still moving): 2-3s of shielded
+            // clicks for nothing, and the first one missed (#150).
+            trappedFor = { _ in [] }
         }
         var plan = planFor(snap)
         if case .ownItem(let own) = scope, plan.moves.isEmpty, plan.skipped.isEmpty {
