@@ -2236,11 +2236,11 @@ final class LiveMirror {
                     if took > 0 { played = ", faded" }
                 }
                 side.coverMaxX = right
-                layoutMirrors(side, shift: slid > 0 ? (slid, end.curve) : nil, hold: took)
+                layoutMirrors(side, shift: (slid, end.curve), hold: took)
             } else {
                 current.clip(toMaxX: right)
                 side.coverMaxX = current.windowFrame.maxX
-                layoutMirrors(side)
+                layoutMirrors(side, shift: why == "hidden out" ? (0, Self.enterCurve) : nil)
                 if why != "hidden out" { scheduleIcons(side) }
             }
             if why != "enter" { PelmetLog.log("livemirror: cover #\(current.id) on display \(side.id) \(Int(side.coverMinX))..\(Int(side.coverMaxX)) (\(why), ended in place\(played))") }
@@ -2305,9 +2305,17 @@ final class LiveMirror {
         }
         if pressPassesClicks { overlay.passClicks(true) }
         if !keepMirrors {
+            // The old cover stays until this one is on screen (below), with
+            // a still of each mirror where it stood: moved here at once, the
+            // pill was gone for a frame at every hover's hide (2026-11-20).
+            if let from = old?.members.first {
+                for mirror in side.mirrors where mirror.shown && mirror.attached && !mirror.container.isHidden {
+                    if let still = Self.still(of: mirror.container, scale: side.scale) { from.addLayer(still) }
+                }
+            }
             for mirror in side.mirrors { mirror.attached = false }
             side.aloneAttached = false
-            layoutMirrors(side, shift: ride)
+            layoutMirrors(side, shift: ride ?? (why == "hidden back" ? (0, Self.exitCurve) : nil))
         } else if let alone = side.alone, let run = side.aloneRun {
             // The icons out on their own leave with the mirrors: this cover
             // holds a copy where the picture had them, where the « is back
@@ -2335,6 +2343,11 @@ final class LiveMirror {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + leave + 0.06) { old.dismiss() }
         } else if let old {
+            // Beneath the new one, whatever that went below: put under a
+            // foreign surface in the strip (screencapture, filming), the new
+            // cover sat under the old, whose still of the moved mirror showed
+            // beside it for 120 ms (2026-11-20).
+            old.members.first?.order(beneath: overlay)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { old.dismiss() }
         }
         return true
@@ -3159,6 +3172,24 @@ final class LiveMirror {
         return NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
     }
 
+    /// A flat copy of a mirror as it stands, texts and all, for a cover on
+    /// its way out to hold while the mirror moves to the next one.
+    private static func still(of layer: CALayer, scale: CGFloat) -> CALayer? {
+        let size = layer.bounds.size
+        guard size.width > 0, size.height > 0,
+              let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale),
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        layer.render(in: ctx)
+        guard let image = ctx.makeImage() else { return nil }
+        let copy = CALayer()
+        copy.contents = image
+        copy.contentsScale = scale
+        copy.frame = layer.frame
+        return copy
+    }
+
     nonisolated private static func displayText(_ value: String, width: CGFloat, font: NSFont) -> String {
         PillText.shown(value, slot: width) { ($0 as NSString).size(withAttributes: [.font: font]).width }
     }
@@ -3169,7 +3200,11 @@ final class LiveMirror {
     /// (measured from their AX frames). When they do not all fit, the most
     /// recently started ones stay.
     /// `shift`: the time and curve of a cover's end on the move, for the
-    /// mirrors it displaces to keep beside it.
+    /// mirrors it displaces to keep beside it. A time of 0 puts them in
+    /// place at once: a reveal or its hide with no slide chosen ends the
+    /// cover at once, and a pill sliding 0.22 s after it went missing past
+    /// the cover's new end, then slid in from behind the « (Instant, filmed
+    /// 2026-11-20).
     /// `hold`: how long that move takes; the copy of the icons out on their
     /// own stays up for it (the cover still hides the real ones until then).
     private func layoutMirrors(_ side: Side, shift: (duration: CFTimeInterval, curve: CAMediaTimingFunction)? = nil, hold: CFTimeInterval = 0) {
@@ -3269,7 +3304,8 @@ final class LiveMirror {
             }
             // A mirror that moves on screen (the « shifted, a pill came or
             // went) slides to its place instead of jumping.
-            if let was, mirror.shown, !leaving, abs(was.minX - global.minX) > 0.5, abs(was.minX - global.minX) < 400 {
+            if let was, mirror.shown, !leaving, (shift?.duration ?? 1) > 0,
+               abs(was.minX - global.minX) > 0.5, abs(was.minX - global.minX) < 400 {
                 let slide = CABasicAnimation(keyPath: "position.x")
                 slide.isAdditive = true
                 slide.fromValue = was.minX - global.minX
