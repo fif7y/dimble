@@ -1485,8 +1485,13 @@ final class LiveMirror {
         let bounds = side.bounds
         var hidden: CGFloat?, visible: CGFloat?
         var always: ClosedRange<CGFloat>?
+        // A hiding bar's icon left of its cover is not in the run the cover
+        // hides. With macOS's own « open the Hidden icons stand left of the
+        // notch, shown by it, and their edge there (572, the cover from 1012)
+        // left every reveal covered until the « shut (2026-11-20).
+        let from = !side.showsAll && side.cover != nil ? side.coverMinX : -CGFloat.greatestFiniteMagnitude
         for (id, rects) in copies {
-            guard let r = rects.first(where: { bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) }) else { continue }
+            guard let r = rects.first(where: { bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) && $0.midX >= from }) else { continue }
             switch model.section(of: id) {
             case .hidden: hidden = min(hidden ?? r.minX, r.minX)
             case .visible: visible = min(visible ?? r.minX, r.minX)
