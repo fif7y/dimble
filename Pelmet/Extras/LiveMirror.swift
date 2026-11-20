@@ -3217,6 +3217,13 @@ final class LiveMirror {
         }
         // An icon next to the last pill keeps the gap pills keep from each other.
         right -= besideIcon ? gap : Self.gap
+        // The pill nearest the cover's end, standing just before that end on
+        // the real bar, is drawn where macOS draws it. A hover that ends the
+        // cover at macOS's « put it 3 pt off that tight-framed «, where
+        // macOS keeps 15 (2026-11-20).
+        if !besideIcon, let lead = placed.last?.visual, lead.maxX <= side.coverMaxX, lead.maxX > right - 30 {
+            right = lead.maxX
+        }
         let left = side.coverMinX + 4
         func need(_ list: [PillMirror]) -> CGFloat { list.reduce(0) { $0 + $1.visual!.width } + gap * CGFloat(max(0, list.count - 1)) }
         var fit = placed
