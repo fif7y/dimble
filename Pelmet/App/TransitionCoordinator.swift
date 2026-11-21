@@ -2497,11 +2497,16 @@ extension TransitionCoordinator {
         // Anchored, the idle picture isn't kept and the icons are out: the
         // bare bar (WindowServer's bar window left out) is the empty one.
         // Live, each film takes its own bare bar over its strip instead.
+        // The pictures are cut from the sharpest bar when the primary's is
+        // not it (#156): that display's bar is filmed beside the primary's,
+        // and its empty bar is wanted under it too.
+        let sharper = await sharperBarDisplay()
+        let bars = Self.filmedBars(sharper)
         var empty = anchoredPass || livePass ? [] : freshEmptyBarSnapshots(cropped: false)
         let emptySource = livePass ? "bare, with each film" : anchoredPass ? "captured bare" : empty.isEmpty ? "captured" : "precaptured"
         if empty.isEmpty, !livePass {
             empty = await ConcealGhostOverlay.snapshotSet(
-                of: precaptureRect, excludingOwnWindows: true, primaryOnly: true, bare: anchoredPass)
+                of: precaptureRect, excludingOwnWindows: true, primaryOnly: bars == nil, displays: bars, bare: anchoredPass)
         }
         PelmetLog.log("pass: empty bar \(emptySource) at \(ms())ms\(livePass ? "" : " (\(empty.count) display(s))")")
 
@@ -2620,7 +2625,7 @@ extension TransitionCoordinator {
         var movedWhileFilmed = Set<ItemID>()
         var liveCutAgainstEmpty = false
         if !shown.isEmpty {
-            let film = await filmAndCut(shown, empty: empty, dump: dump, live: livePass, ms: ms)
+            let film = await filmAndCut(shown, empty: empty, dump: dump, live: livePass, sharper: sharper, ms: ms)
             for (key, picture) in film.pictures {
                 pictures?[key] = picture
             }
@@ -2746,7 +2751,7 @@ extension TransitionCoordinator {
                     let ruled = now.solid.filter { !clearOfRule($0.value) }.count
                     PelmetLog.log("pass: batch \(followUps) left \(asked.count - cut.count) uncropped — \(asked.subtracting(onBar).count) not on the bar, \(behind) behind the «, \(ruled) under the rule")
                 }
-                let got = cut.isEmpty ? [:] : await filmAndCut(cut, empty: empty, dump: false, ms: ms).pictures
+                let got = cut.isEmpty ? [:] : await filmAndCut(cut, empty: empty, dump: false, sharper: sharper, ms: ms).pictures
                 for (key, picture) in got { pictures?[key] = picture }
                 lastPictured = got.count
                 // From every leftover, not only this round's ask: a capped
@@ -2879,7 +2884,8 @@ extension TransitionCoordinator {
     /// of it against `empty`. Nothing for an empty list.
     private func filmAndCut(
         _ items: [(key: ItemID, frame: CGRect)],
-        empty: [ConcealGhostOverlay.BarSnapshot], dump: Bool, live: Bool = false, ms: () -> Int
+        empty: [ConcealGhostOverlay.BarSnapshot], dump: Bool, live: Bool = false,
+        sharper: CGDirectDisplayID? = nil, ms: () -> Int
     ) async -> (pictures: [ItemID: ItemPictures.Picture], moved: Set<ItemID>, hadEmpty: Bool) {
         let frames = items.map(\.frame)
         guard let minX = frames.map(\.minX).min(), let maxX = frames.map(\.maxX).max(), let band = frames.first else { return ([:], [], !empty.isEmpty) }
@@ -2892,18 +2898,23 @@ extension TransitionCoordinator {
         // `live`: filmed through live mode's cover (Pelmet's own windows are
         // left out, looked up each frame: a retake raises a new cover),
         // against the bare bar over the same strip.
+        // `sharper`: that display's bar is filmed too (#156). The frames are
+        // judged on the primary's strip alone, as before, so the second bar
+        // costs a capture a frame and never adds a frame.
+        let bars = Self.filmedBars(sharper)
+        let copiesBefore = sharper == nil ? [:] : await engine.barCopies()
         let own = live ? nil : await ConcealGhostOverlay.ownWindows()
         let under = live
-            ? await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: true, bare: true, liveMirror: true)
+            ? await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: bars == nil, displays: bars, bare: true, liveMirror: true)
             : empty
-        var strip = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: true, liveMirror: live)
-        var decoded = strip.map(Self.decoded)
+        var strip = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: bars == nil, displays: bars, liveMirror: live)
+        var decoded = strip.filter(Self.isOnPrimary).map(Self.decoded)
         var filmed = 1
         var lastApart: Double = 1
         for _ in 0..<4 {
             try? await Task.sleep(for: .milliseconds(80))
-            let next = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: true, liveMirror: live)
-            let nextDecoded = next.map(Self.decoded)
+            let next = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, ownWindows: own, primaryOnly: bars == nil, displays: bars, liveMirror: live)
+            let nextDecoded = next.filter(Self.isOnPrimary).map(Self.decoded)
             filmed += 1
             if dump { Self.dumpPass(next, name: "_strip\(filmed)") }
             let apart = next.count == strip.count ? zip(decoded, nextDecoded).map { Self.pixelsApart($0, $1) }.max() ?? 1 : 1
@@ -2936,7 +2947,19 @@ extension TransitionCoordinator {
             PelmetLog.log("pass: \(behindMenus.count) behind the front app's menus (to \(Int(menusEnd))), not cut \(behindMenus.map(\.key.rawValue))")
         }
         let clear = still.filter { item in !behindMenus.contains { $0.key == item.key } }
-        return (Self.pictures(of: clear, strip: strip, empty: under, dump: dump), Set((moved + behindMenus).map(\.key)), !under.isEmpty)
+        // Where the sharper bar draws them, in the walk before the film and
+        // the one just taken: one that moved there was filmed at its old
+        // place, as on the primary above.
+        var copies: SharperCopies?
+        if let sharper {
+            let chevrons = await Self.chevrons(on: sharper)
+            let before = Self.frames(of: clear, on: sharper, among: copiesBefore, chevrons: chevrons)
+            let now = Self.frames(of: clear, on: sharper, among: await engine.barCopies(), chevrons: chevrons)
+            copies = SharperCopies(display: sharper, frames: now.filter { key, f in
+                before[key].map { abs($0.minX - f.minX) <= 1 && abs($0.maxX - f.maxX) <= 1 } == true
+            })
+        }
+        return (Self.pictures(of: clear, strip: strip, empty: under, dump: dump, sharper: copies), Set((moved + behindMenus).map(\.key)), !under.isEmpty)
     }
 
     /// Where the front app's menus end on the primary bar, read now. Nil when
@@ -2958,16 +2981,100 @@ extension TransitionCoordinator {
             return nil
         }
         let rect = CGRect(x: frame.minX - 8, y: frame.minY, width: frame.width + 16, height: frame.height)
+        let sharper = await sharperBarDisplay()
+        let bars = Self.filmedBars(sharper)
         // Anchored, no idle picture is kept: the bare bar there is the empty one.
         let empty = anchored
-            ? await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, primaryOnly: true, bare: true)
+            ? await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, primaryOnly: bars == nil, displays: bars, bare: true)
             : freshEmptyBarSnapshots(cropped: false)
         guard !empty.isEmpty else {
             PelmetLog.log("pass: no fresh empty-bar picture for \(key.rawValue)")
             return nil
         }
-        let strip = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, primaryOnly: true)
-        return Self.pictures(of: [(key, frame)], strip: strip, empty: empty, dump: false)[key]
+        let strip = await ConcealGhostOverlay.snapshotSet(of: rect, excludingOwnWindows: true, primaryOnly: bars == nil, displays: bars)
+        // The sharper bar's copy from a walk taken now: the relay's own last
+        // one can be from before the item came out.
+        var copies: SharperCopies?
+        if let sharper {
+            _ = await engine.freshSnapshot()
+            let chevrons = await Self.chevrons(on: sharper)
+            copies = SharperCopies(display: sharper, frames: Self.frames(of: [(key, frame)], on: sharper, among: await engine.barCopies(), chevrons: chevrons))
+        }
+        return Self.pictures(of: [(key, frame)], strip: strip, empty: empty, dump: false, sharper: copies)[key]
+    }
+
+    /// The display whose bar the pictures are cut from besides the
+    /// primary's: the sharpest one that lists icons, when it is sharper
+    /// than the primary (#156: a 1x main display's pictures, drawn
+    /// upscaled in the panel on a 2x built-in, read blurry). Nil when the
+    /// primary is the sharpest, and nothing changes there.
+    private func sharperBarDisplay() async -> CGDirectDisplayID? {
+        guard let primary = NSScreen.screens.first,
+              let sharpest = NSScreen.screens.dropFirst().max(by: { $0.backingScaleFactor < $1.backingScaleFactor }),
+              sharpest.backingScaleFactor > primary.backingScaleFactor,
+              let id = sharpest.directDisplayID,
+              PressAim.barListed(on: CGDisplayBounds(id), copies: await engine.barCopies())
+        else { return nil }
+        return id
+    }
+
+    /// The bars a picture is filmed on: nil for the primary's alone.
+    private static func filmedBars(_ sharper: CGDirectDisplayID?) -> Set<CGDirectDisplayID>? {
+        guard let sharper, let primary = NSScreen.screens.first?.directDisplayID else { return nil }
+        return [primary, sharper]
+    }
+
+    private static func isOnPrimary(_ snap: ConcealGhostOverlay.BarSnapshot) -> Bool {
+        NSScreen.screens.first.map { $0.frame.minX <= snap.windowFrame.midX && snap.windowFrame.midX <= $0.frame.maxX } ?? true
+    }
+
+    /// Each item's frame on the sharper display's bar, for those it draws.
+    private struct SharperCopies {
+        let display: CGDirectDisplayID
+        let frames: [ItemID: CGRect]
+    }
+
+    /// macOS's « on `display`'s bar, read now.
+    private static func chevrons(on display: CGDirectDisplayID) async -> [CGRect] {
+        let bounds = CGDisplayBounds(display)
+        return await Task.detached(priority: .userInitiated) { OverflowToggle.toggleFrames(onDisplay: bounds) }.value
+    }
+
+    /// Where `display`'s bar draws each item, by the walk's copies: the one
+    /// with the item's full id, found by its frame on the primary (an app's
+    /// icons share a key), never one behind that bar's «: stacked on a
+    /// neighbour (`PressAim`) or alone on the « itself, whose cut is the «
+    /// (#153). An item with none there is cut from the primary.
+    private static func frames(
+        of items: [(key: ItemID, frame: CGRect)], on display: CGDirectDisplayID, among copies: [ItemID: [CGRect]],
+        chevrons: [CGRect]
+    ) -> [ItemID: CGRect] {
+        let bounds = CGDisplayBounds(display)
+        let primary = CGDisplayBounds(CGMainDisplayID())
+        var out: [ItemID: CGRect] = [:]
+        for (key, f) in items {
+            let app = copies.filter { $0.key.sectionKey == key }
+            guard let id = app.first(where: { _, frames in
+                frames.contains {
+                    MenuBarGeometry.isInBand($0, ofDisplay: primary) && abs($0.minX - f.minX) <= 1 && abs($0.maxX - f.maxX) <= 1
+                }
+            })?.key else { continue }
+            var aim = PressAim.aim(id: id, main: f, display: bounds, copies: copies)
+            // On a bar without the focus an app's icon is a stand-in, named
+            // `Item-0` when its app has no extras bar to read, not by the
+            // main copy's title: OpenClip and Sconce, drawn clear on the
+            // built-in, were cut from the 1x main bar (2026-11-20). An app
+            // with one icon on each bar is that icon.
+            let all = app.values.flatMap { $0 }
+            let there = all.filter { MenuBarGeometry.isInBand($0, ofDisplay: bounds) }
+            if !aim.onPressDisplay, there.count == 1, all.filter({ MenuBarGeometry.isInBand($0, ofDisplay: primary) }).count == 1,
+               let lone = app.first(where: { $0.value.contains(there[0]) })?.key {
+                aim = PressAim.aim(id: lone, main: f, display: bounds, copies: copies)
+            }
+            guard aim.onPressDisplay, !PlacementGeometry.overflowTrapped([aim.frame] + chevrons).contains(0) else { continue }
+            out[key] = aim.frame
+        }
+        return out
     }
 
     /// One picture per item, cut from a strip filmed with the items drawn,
@@ -2975,76 +3082,127 @@ extension TransitionCoordinator {
     /// icon: on glass that reads as a dark box, so a strip that won't cut
     /// out (an animated wallpaper) gives none, and the tiles keep their app
     /// icons.
+    /// `sharper`: the items that display's bar draws, cut from its copy of
+    /// the bar under the same rules (#156). One that won't cut there is cut
+    /// from the primary's, as is every other.
     private static func pictures(
         of items: [(key: ItemID, frame: CGRect)],
-        strip: [ConcealGhostOverlay.BarSnapshot], empty: [ConcealGhostOverlay.BarSnapshot], dump: Bool
+        strip: [ConcealGhostOverlay.BarSnapshot], empty: [ConcealGhostOverlay.BarSnapshot], dump: Bool,
+        sharper: SharperCopies? = nil
     ) -> [ItemID: ItemPictures.Picture] {
-        guard let cut = ConcealGhostOverlay.iconsOnly(strip, background: empty) else { return [:] }
+        guard let raw = strip.first(where: isOnPrimary), let primary = CutCopy(raw, empty: empty) else { return [:] }
         if dump {
-            dumpPass(strip, name: "_strip")
+            dumpPass([raw], name: "_strip")
             dumpPass(empty, name: "_empty")
         }
-        let primary = NSScreen.screens.first?.frame
-        guard let index = cut.firstIndex(where: { snap in primary.map { $0.minX <= snap.windowFrame.midX && snap.windowFrame.midX <= $0.maxX } ?? true })
-        else { return [:] }
-        let base = cut[index]
-        // The strip as filmed and the empty bar under it: a one-colour glyph
-        // is un-blended from the two.
-        let raw = strip[index]
-        let under = empty.first { abs($0.windowFrame.minY - raw.windowFrame.minY) < 1 && $0.windowFrame.intersects(raw.windowFrame) }
-        let scale = CGFloat(base.image.width) / base.windowFrame.width
+        let sharp = sharper.flatMap { s in strip.first { $0.display == s.display } }.flatMap { CutCopy($0, empty: empty) }
+        if let sharper, sharp == nil {
+            PelmetLog.log("pass: no cut-out of display \(sharper.display)'s bar, all from the primary")
+        }
+        if dump, let sharp { dumpPass([sharp.raw], name: "_strip_sharper") }
         var pictures: [ItemID: ItemPictures.Picture] = [:]
         var contaminated: [(ItemID, Double)] = []
-        for (key, f) in items {
-            // Exactly the item's frame, less a point a side: neighbouring
-            // frames overlap by a point or two, and `cropped(toPrimaryX:)`
-            // pads, which let a neighbour's capsule (Velja's, Herd's) ride
-            // along. The band's last point stays out: it is no icon's, and a
-            // window under the bar that gained focus since the empty bar was
-            // taken draws its dark top edge there, with its shadow's darkest
-            // row above it, which read as ink: a line under every tile, and
-            // the icon pushed up its tile on a bright bar (#127).
-            guard f.minX >= base.windowFrame.minX, f.maxX <= base.windowFrame.maxX else { continue }
-            let rect = CGRect(
-                x: ((f.minX + 1 - base.windowFrame.minX) * scale).rounded(), y: 0,
-                width: ((f.width - 2) * scale).rounded(), height: CGFloat(base.image.height) - scale.rounded())
-            guard rect.width > 0, let image = base.image.cropping(to: rect) else { continue }
-            let column = ConcealGhostOverlay.BarSnapshot(
-                image: image,
-                windowFrame: NSRect(x: f.minX + 1, y: base.windowFrame.minY, width: rect.width / scale, height: base.windowFrame.height),
-                takenAt: base.takenAt)
-            let bgRect = under.map { rect.offsetBy(dx: ((base.windowFrame.minX - $0.windowFrame.minX) * scale).rounded(), dy: 0) }
-            let background = bgRect.flatMap { under?.image.cropping(to: $0) }
-            // The empty bar is only empty where no icon stayed. The icons
-            // move between this strip and the bar the reference was taken
-            // over, so a visible icon can stand in the column a hidden one
-            // was filmed in (#128). Both the keyed column and the mask come
-            // out of that subtraction, so there is nothing downstream to
-            // fall back to: the item keeps its app icon and pictures on a
-            // later pass, which is what an icon that won't cut out does.
-            let ink = background.flatMap { ItemPictures.referenceInk($0) }
-            // `pelmet.debug.picturePass` prints every column's share, not
-            // just the refused ones: the limit is only worth what a real
-            // bar's spread says it is.
-            if dump, let ink { PelmetLog.log("pass: \(key.rawValue) empty-bar ink \(String(format: "%.1f%%", ink * 100))") }
-            if let ink, ink >= BarReference.inkShareLimit {
-                contaminated.append((key, ink))
-                continue
-            }
-            guard let picture = ItemPictures.picture(
-                from: column,
-                raw: raw.image.cropping(to: rect),
-                background: background)
-            else { continue }
+        var fromSharper = 0
+        var notCutThere: [ItemID] = []
+        func keep(_ key: ItemID, _ picture: ItemPictures.Picture, _ column: ConcealGhostOverlay.BarSnapshot) {
             pictures[key] = picture
             if picture.isHighlighted { PelmetLog.log("pass: \(key.rawValue) on a coloured capsule") }
-            if dump { dumpPass([column], name: key.rawValue) }
+            if dump {
+                dumpPass([column], name: key.rawValue)
+                PelmetLog.log("pass: \(key.rawValue) \(String(format: "%.1f", CGFloat(picture.image.width) / max(picture.size.width, 1)))px/pt")
+            }
+        }
+        for (key, f) in items {
+            if let sharp, let there = sharper?.frames[key] {
+                if case .picture(let picture, let column) = Self.cut(key, there, from: sharp, dump: dump) {
+                    keep(key, picture, column)
+                    fromSharper += 1
+                    continue
+                }
+                notCutThere.append(key)
+            }
+            switch Self.cut(key, f, from: primary, dump: dump) {
+            case .picture(let picture, let column): keep(key, picture, column)
+            case .contaminated(let ink): contaminated.append((key, ink))
+            case .none: break
+            }
+        }
+        if let sharper, sharp != nil {
+            let notDrawn = items.count - sharper.frames.count
+            PelmetLog.log("pass: \(fromSharper) of \(items.count) cut from display \(sharper.display)'s bar\(notDrawn > 0 ? ", \(notDrawn) not drawn clear there or moved" : "")\(notCutThere.isEmpty ? "" : ", \(notCutThere.count) that won't cut there \(notCutThere.map(\.rawValue))"), the rest from the primary")
         }
         if !contaminated.isEmpty {
             let named = contaminated.map { "\($0.0.rawValue) \(String(format: "%.1f%%", $0.1 * 100))" }.joined(separator: ", ")
             PelmetLog.log("pass: \(contaminated.count) column(s) where the empty bar held an icon, not cut — \(named)")
         }
         return pictures
+    }
+
+    /// One display's copy of the bar as a pass cuts it: the strip keyed
+    /// against the empty bar, the strip as filmed, and the empty bar under
+    /// it (a one-colour glyph is un-blended from those two).
+    private struct CutCopy {
+        let base: ConcealGhostOverlay.BarSnapshot
+        let raw: ConcealGhostOverlay.BarSnapshot
+        let under: ConcealGhostOverlay.BarSnapshot?
+
+        init?(_ raw: ConcealGhostOverlay.BarSnapshot, empty: [ConcealGhostOverlay.BarSnapshot]) {
+            guard let base = ConcealGhostOverlay.iconsOnly([raw], background: empty)?.first else { return nil }
+            self.base = base
+            self.raw = raw
+            under = empty.first { abs($0.windowFrame.minY - raw.windowFrame.minY) < 1 && $0.windowFrame.intersects(raw.windowFrame) }
+        }
+    }
+
+    private enum Cut {
+        case picture(ItemPictures.Picture, column: ConcealGhostOverlay.BarSnapshot)
+        case contaminated(Double)
+        case none
+    }
+
+    /// The item at `f` (on the bar `copy` was filmed on) cut out of it.
+    private static func cut(_ key: ItemID, _ f: CGRect, from copy: CutCopy, dump: Bool) -> Cut {
+        let base = copy.base
+        let scale = CGFloat(base.image.width) / base.windowFrame.width
+        // Exactly the item's frame, less a point a side: neighbouring
+        // frames overlap by a point or two, and `cropped(toPrimaryX:)`
+        // pads, which let a neighbour's capsule (Velja's, Herd's) ride
+        // along. The band's last point stays out: it is no icon's, and a
+        // window under the bar that gained focus since the empty bar was
+        // taken draws its dark top edge there, with its shadow's darkest
+        // row above it, which read as ink: a line under every tile, and
+        // the icon pushed up its tile on a bright bar (#127).
+        guard f.minX >= base.windowFrame.minX, f.maxX <= base.windowFrame.maxX else { return .none }
+        let rect = CGRect(
+            x: ((f.minX + 1 - base.windowFrame.minX) * scale).rounded(), y: 0,
+            width: ((f.width - 2) * scale).rounded(), height: CGFloat(base.image.height) - scale.rounded())
+        guard rect.width > 0, let image = base.image.cropping(to: rect) else { return .none }
+        let column = ConcealGhostOverlay.BarSnapshot(
+            image: image,
+            windowFrame: NSRect(x: f.minX + 1, y: base.windowFrame.minY, width: rect.width / scale, height: base.windowFrame.height),
+            takenAt: base.takenAt)
+        let under = copy.under
+        let bgRect = under.map { rect.offsetBy(dx: ((base.windowFrame.minX - $0.windowFrame.minX) * scale).rounded(), dy: 0) }
+        let background = bgRect.flatMap { under?.image.cropping(to: $0) }
+        // The empty bar is only empty where no icon stayed. The icons
+        // move between this strip and the bar the reference was taken
+        // over, so a visible icon can stand in the column a hidden one
+        // was filmed in (#128). Both the keyed column and the mask come
+        // out of that subtraction, so there is nothing downstream to
+        // fall back to: the item keeps its app icon and pictures on a
+        // later pass, which is what an icon that won't cut out does.
+        let ink = background.flatMap { ItemPictures.referenceInk($0) }
+        // `pelmet.debug.picturePass` prints every column's share, not
+        // just the refused ones: the limit is only worth what a real
+        // bar's spread says it is.
+        if dump, let ink { PelmetLog.log("pass: \(key.rawValue) empty-bar ink \(String(format: "%.1f%%", ink * 100))") }
+        if let ink, ink >= BarReference.inkShareLimit { return .contaminated(ink) }
+        guard let picture = ItemPictures.picture(
+            from: column,
+            raw: copy.raw.image.cropping(to: rect),
+            background: background)
+        else { return .none }
+        return .picture(picture, column: column)
     }
 
     /// Debug trigger (`pelmet.debug.picturePass`): Hidden (and Always
