@@ -39,6 +39,8 @@ enum SettingsIndex {
                     ["chevron", "icon", "iconless", "hide icon"]),
             general("hotkey", String(localized: "Show hidden icons"),
                     ["hotkey", "shortcut", "keyboard shortcut", "toggle", "show hide", "key", "always hidden", "notification center"]),
+            general("alwaysHiddenOnlyHotkey", String(localized: "Show Always Hidden only"),
+                    ["hotkey", "shortcut", "keyboard shortcut", "always hidden", "only"]),
             general("settingsHotkey", String(localized: "Open Settings"),
                     ["hotkey", "shortcut"]),
             general("accentColor", String(localized: "Accent color"),

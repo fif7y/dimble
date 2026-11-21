@@ -8,7 +8,7 @@ import PelmetCore
 import PelmetEngine
 
 final class HotkeyManager {
-    enum Slot: UInt32 { case toggle = 1, settings = 2, notificationCenter = 3, alwaysHidden = 4, search = 5 }
+    enum Slot: UInt32 { case toggle = 1, settings = 2, notificationCenter = 3, alwaysHidden = 4, search = 5, alwaysHiddenOnly = 6 }
 
     /// Per-item shortcuts (open that item's menu) take raw ids from here
     /// up. The owner hands them out, so a slot outlives nothing it does not

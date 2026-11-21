@@ -1025,6 +1025,10 @@ private struct GeneralPane: View {
                 .settingAnchor("hotkey")
             shortcutRow("Show Always Hidden too", binding(\.alwaysHiddenHotkey), fallback: .alwaysHiddenDefault,
                         conflict: appState.alwaysHiddenHotkeyConflict)
+            // No default (#149): × removes it rather than turning it off.
+            shortcutRow("Show Always Hidden only", binding(\.alwaysHiddenOnlyHotkey), fallback: nil,
+                        conflict: appState.alwaysHiddenOnlyHotkeyConflict)
+                .settingAnchor("alwaysHiddenOnlyHotkey")
             // The same setting Search's own recorder edits.
             shortcutRow("Search the menu bar", binding(\.searchHotkey), fallback: .searchDefault,
                         conflict: appState.searchHotkeyConflict)
@@ -1073,7 +1077,7 @@ private struct GeneralPane: View {
     private func shortcutRow(
         _ title: LocalizedStringKey,
         _ shortcut: Binding<HotkeySpec?>,
-        fallback: HotkeySpec,
+        fallback: HotkeySpec?,
         conflict: Bool
     ) -> some View {
         SettingRow(title: title, caption: hotkeyWarning(shortcut.wrappedValue, conflict: conflict)) {

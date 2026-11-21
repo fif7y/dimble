@@ -83,6 +83,23 @@ struct SettingsStoreTests {
         #expect(back.alwaysHiddenHotkey == settings.alwaysHiddenHotkey)
     }
 
+    // #149: Always Hidden alone has no default. A blob from before it, null
+    // and garbage all read as none; a recorded one survives a save.
+    @Test func alwaysHiddenOnlyHotkeyIsNoneUntilRecorded() throws {
+        #expect(SettingsStore().alwaysHiddenOnlyHotkey == nil)
+        let legacy = try JSONDecoder().decode(SettingsStore.self, from: Data("{}".utf8))
+        #expect(legacy.alwaysHiddenOnlyHotkey == nil)
+        let null = try JSONDecoder().decode(SettingsStore.self, from: Data(#"{"alwaysHiddenOnlyHotkey":null}"#.utf8))
+        #expect(null.alwaysHiddenOnlyHotkey == nil)
+        let junk = try JSONDecoder().decode(SettingsStore.self, from: Data(#"{"alwaysHiddenOnlyHotkey":7,"rehideDelay":3}"#.utf8))
+        #expect(junk.alwaysHiddenOnlyHotkey == nil)
+        #expect(junk.rehideDelay == 3)
+        var settings = SettingsStore()
+        settings.alwaysHiddenOnlyHotkey = HotkeySpec(keyCode: 0x2B, modifiers: 0x1100, display: "⌃⌘,")
+        let back = try JSONDecoder().decode(SettingsStore.self, from: JSONEncoder().encode(settings))
+        #expect(back.alwaysHiddenOnlyHotkey == settings.alwaysHiddenOnlyHotkey)
+    }
+
     // Live mode is on for everyone: a blob saved before the setting existed,
     // and a field that fails to decode, both take it on; off survives a save.
     @Test func showLiveActivitiesDefaultsOnAndRoundTrips() throws {

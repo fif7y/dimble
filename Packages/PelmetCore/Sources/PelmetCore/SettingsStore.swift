@@ -453,6 +453,10 @@ public struct SettingsStore: Codable, Equatable, Sendable {
     public var settingsHotkey: HotkeySpec? = .settingsDefault
     public var alwaysHiddenHotkey: HotkeySpec? = .alwaysHiddenDefault
     public var searchHotkey: HotkeySpec? = .searchDefault
+    /// Shows Always Hidden alone, like the middle click's "Always Hidden
+    /// only" (#149). No default: absent = none, so nobody gets a combo they
+    /// didn't pick.
+    public var alwaysHiddenOnlyHotkey: HotkeySpec?
     /// A shortcut per menu bar item that opens its menu, keyed by the item's
     /// `sectionKey`. Set from the command bar's actions; absent = none.
     public var itemHotkeys: [String: HotkeySpec] = [:]
@@ -630,6 +634,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case onboardingCompleted, launchAtLogin, showStatusItem, hotkey, settingsHotkey, alwaysHiddenHotkey, searchHotkey
+        case alwaysHiddenOnlyHotkey
         case itemHotkeys, itemAliases
         case revealTriggers, autoRehide, rehideDelay, rehideOnClickElsewhere, revealAnimation
         case hideSystemExtras, showMediaControls, extraItems, sectionModel, separators
@@ -655,6 +660,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         settingsHotkey = c.field(HotkeySpec?.self, .settingsHotkey, defaults.settingsHotkey) ?? defaults.settingsHotkey
         alwaysHiddenHotkey = c.field(HotkeySpec?.self, .alwaysHiddenHotkey, defaults.alwaysHiddenHotkey) ?? defaults.alwaysHiddenHotkey
         searchHotkey = c.field(HotkeySpec?.self, .searchHotkey, defaults.searchHotkey) ?? defaults.searchHotkey
+        alwaysHiddenOnlyHotkey = c.field(HotkeySpec?.self, .alwaysHiddenOnlyHotkey, nil)
         itemHotkeys = c.field([String: HotkeySpec].self, .itemHotkeys, defaults.itemHotkeys)
         itemAliases = c.field([String: String].self, .itemAliases, defaults.itemAliases)
         revealTriggers = c.field(RevealTriggers.self, .revealTriggers, defaults.revealTriggers)

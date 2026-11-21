@@ -62,6 +62,7 @@ final class AppState {
     private(set) var hotkeyConflict = false
     private(set) var settingsHotkeyConflict = false
     private(set) var alwaysHiddenHotkeyConflict = false
+    private(set) var alwaysHiddenOnlyHotkeyConflict = false
     private(set) var notificationCenterHotkeyConflict = false
     private(set) var searchHotkeyConflict = false
     /// One-shot: the setting row (`SettingsIndex` id) Settings should scroll
@@ -491,6 +492,7 @@ final class AppState {
             case .settings: self?.openSettings()
             case .notificationCenter: self?.openNotificationCenter()
             case .alwaysHidden: self?.toggleAll(reason: .hotkey)
+            case .alwaysHiddenOnly: self?.toggleOnly([.alwaysHidden], reason: .hotkey)
             case .search:
                 // Settings › Search in front: the demo there takes it.
                 if let self, self.searchDemo.isInFront, !self.commandBar.isOpen {
@@ -505,11 +507,13 @@ final class AppState {
         hotkeyConflict = !hotkey.register(settings.hotkey, slot: .toggle)
         settingsHotkeyConflict = !hotkey.register(settings.settingsHotkey, slot: .settings)
         alwaysHiddenHotkeyConflict = !hotkey.register(settings.alwaysHiddenHotkey, slot: .alwaysHidden)
+        alwaysHiddenOnlyHotkeyConflict = !hotkey.register(settings.alwaysHiddenOnlyHotkey, slot: .alwaysHiddenOnly)
         notificationCenterHotkeyConflict = !hotkey.register(activeNotificationCenterHotkey, slot: .notificationCenter)
         searchHotkeyConflict = !hotkey.register(settings.searchHotkey, slot: .search)
         registeredHotkey = settings.hotkey
         registeredSettingsHotkey = settings.settingsHotkey
         registeredAlwaysHiddenHotkey = settings.alwaysHiddenHotkey
+        registeredAlwaysHiddenOnlyHotkey = settings.alwaysHiddenOnlyHotkey
         registeredNotificationCenterHotkey = activeNotificationCenterHotkey
         registeredSearchHotkey = settings.searchHotkey
         self.hotkey = hotkey
@@ -1244,6 +1248,20 @@ final class AppState {
         if panelShowsReveal, reason != .hover { panelPresenter.makeDeliberate() }
     }
 
+    /// A middle click set to "Always Hidden only" and its shortcut (#149):
+    /// shows exactly these sections, taking Hidden's place when Hidden is
+    /// out, and puts them away once they are all out. On a display that
+    /// shows all icons Hidden is the policy's, not a reveal to switch away
+    /// from: the ask goes on top of it, where that display's "Show hidden
+    /// icons in" says, as it always did.
+    func toggleOnly(_ sections: Set<PelmetCore.Section>, reason: RevealReason) {
+        if !sections.isSubset(of: revealedSectionsForExtras), pointerDisplayBehavior == .alwaysShowAll {
+            reveal(sections, reason: reason)
+        } else {
+            toggle(reason: reason, sections: sections)
+        }
+    }
+
     /// The Always Hidden shortcut (#67): everything out, or everything back
     /// once it is all out. A reveal that left Always Hidden in widens to
     /// include it instead of closing: the key asked for more, not less.
@@ -1599,6 +1617,7 @@ final class AppState {
         }
         if same(settings.hotkey) { return .pelmet(String(localized: "Show Hidden Items")) }
         if same(settings.alwaysHiddenHotkey) { return .pelmet(String(localized: "Show Always Hidden Too")) }
+        if same(settings.alwaysHiddenOnlyHotkey) { return .pelmet(String(localized: "Show Always Hidden Only")) }
         if same(settings.searchHotkey) { return .pelmet(String(localized: "Search the menu bar")) }
         if same(settings.settingsHotkey) { return .pelmet(String(localized: "Open Settings")) }
         if same(activeNotificationCenterHotkey) { return .pelmet(String(localized: "Open Notification Center")) }
@@ -1837,6 +1856,7 @@ final class AppState {
     private var registeredHotkey: HotkeySpec?
     private var registeredSettingsHotkey: HotkeySpec?
     private var registeredAlwaysHiddenHotkey: HotkeySpec?
+    private var registeredAlwaysHiddenOnlyHotkey: HotkeySpec?
     private var registeredNotificationCenterHotkey: HotkeySpec?
     private var registeredSearchHotkey: HotkeySpec?
     private var activeNotificationCenterHotkey: HotkeySpec? {
@@ -2526,6 +2546,10 @@ final class AppState {
         if settings.alwaysHiddenHotkey != registeredAlwaysHiddenHotkey {
             alwaysHiddenHotkeyConflict = !(hotkey?.register(settings.alwaysHiddenHotkey, slot: .alwaysHidden) ?? true)
             registeredAlwaysHiddenHotkey = settings.alwaysHiddenHotkey
+        }
+        if settings.alwaysHiddenOnlyHotkey != registeredAlwaysHiddenOnlyHotkey {
+            alwaysHiddenOnlyHotkeyConflict = !(hotkey?.register(settings.alwaysHiddenOnlyHotkey, slot: .alwaysHiddenOnly) ?? true)
+            registeredAlwaysHiddenOnlyHotkey = settings.alwaysHiddenOnlyHotkey
         }
         if activeNotificationCenterHotkey != registeredNotificationCenterHotkey {
             notificationCenterHotkeyConflict = !(hotkey?.register(activeNotificationCenterHotkey, slot: .notificationCenter) ?? true)
