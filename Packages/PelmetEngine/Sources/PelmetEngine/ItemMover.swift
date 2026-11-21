@@ -140,8 +140,13 @@ public enum ItemMover {
     /// probed 2026-08-22 and 2026-09-20). Cursor hidden for the blip,
     /// warped home after. `button` .right is the secondary click (an item's
     /// right-click menu).
-    public static func shieldedClick(at point: CGPoint, button: CGMouseButton = .left) async {
-        guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+    /// `owner`: the pid whose element the click is for. Over a full-screen
+    /// app's hidden bar the click first brings the bar down and waits for that
+    /// pid's element to be under the point. Returns that wait in ms, nil when
+    /// the bar was already down.
+    @discardableResult
+    public static func shieldedClick(at point: CGPoint, button: CGMouseButton = .left, owner: pid_t? = nil) async -> Int? {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return nil }
         source.userData = SyntheticInput.tag
         let originalPosition = CGEvent(source: nil)?.location
         let shield = DragShield()
@@ -166,6 +171,23 @@ public enum ItemMover {
             ) else { return }
             event.post(tap: .cghidEventTap)
         }
+        // In full screen the bar is up out of sight under MenuBarAgent's band,
+        // and a click posted there lands on the band: the item's menu never
+        // opened, 2 of 2 (#166 run, 2026-11-21). The pointer brings the bar
+        // down first. The band went 140-180 ms after the pointer got there and
+        // the item was under the point 155-290 ms after, the bar still sliding
+        // in between (fsat, 2026-11-21), so the click waits for both.
+        var waited: Int?
+        if hiddenBarCovers(point) {
+            post(.mouseMoved)
+            let start = ContinuousClock.now
+            while ContinuousClock.now - start < .milliseconds(1000) {
+                try? await Task.sleep(for: .milliseconds(10))
+                shield.reassert()
+                if !hiddenBarCovers(point), owner.map({ pidAt(point) == $0 }) ?? true { break }
+            }
+            waited = Int((ContinuousClock.now - start) / .milliseconds(1))
+        }
         SyntheticInput.noteClickPosted()
         post(downType)
         for _ in 0..<2 {
@@ -176,7 +198,55 @@ public enum ItemMover {
         if let originalPosition {
             try? await Task.sleep(for: .milliseconds(60))
             CGWarpMouseCursorPosition(originalPosition)
+            // A warp sends no event, so MenuBarAgent never heard the pointer
+            // leave the bar it brought down and kept it down 62 s, until the
+            // next real move (2026-11-21). A move at home tells it.
+            if waited != nil {
+                CGEvent(mouseEventSource: source, mouseType: .mouseMoved,
+                        mouseCursorPosition: originalPosition, mouseButton: .left)?.post(tap: .cghidEventTap)
+            }
         }
+        return waited
+    }
+
+    /// MenuBarAgent's band over a hidden menu bar (27.3): a layer-25 window the
+    /// width of the display, on screen only while the bar is up out of sight
+    /// and gone once the bar is down (fsbar, 2026-11-21). The width keeps a
+    /// small MenuBarAgent window, like the «'s, from counting.
+    public static func hiddenBarCovers(_ point: CGPoint) -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]
+        else { return false }
+        let width = displayBounds(containing: point).width
+        return list.contains { info in
+            guard info[kCGWindowOwnerName as String] as? String == "MenuBarAgent",
+                  info[kCGWindowLayer as String] as? Int == 25,
+                  let dict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let frame = CGRect(dictionaryRepresentation: dict),
+                  frame.height <= 60, frame.contains(point)
+            else { return false }
+            return frame.width >= width - 1
+        }
+    }
+
+    private static func displayBounds(containing point: CGPoint) -> CGRect {
+        var id = CGMainDisplayID()
+        var count: UInt32 = 0
+        CGGetDisplaysWithPoint(point, 1, &id, &count)
+        return CGDisplayBounds(count > 0 ? id : CGMainDisplayID())
+    }
+
+    /// The pid of the element under `point`, read with a short timeout so a
+    /// hung app cannot hold the click.
+    private static func pidAt(_ point: CGPoint) -> pid_t? {
+        let wide = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(wide, 0.1)
+        var element: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(wide, Float(point.x), Float(point.y), &element) == .success,
+              let element
+        else { return nil }
+        var pid: pid_t = 0
+        AXUIElementGetPid(element, &pid)
+        return pid
     }
 
     /// Seconds since the user (or anyone) last produced a mouse event. Our own

@@ -3056,6 +3056,9 @@ final class AppState {
     /// no neighbour to measure, so they wait for the next reveal that shows
     /// their section (`onRevealSettled`) and go through the door then.
     private var ownItemsAwaitingReveal: Set<ItemID> = []
+    /// Own items whose pass waits for a full-screen app's hidden bar, so the
+    /// wait is logged once and not every recheck.
+    private var ownItemsWaitingForBar: Set<ItemID> = []
     /// Own items that already got their one retry after a failed pass.
     private var ownItemsRetried: Set<ItemID> = []
     /// Passes that found the item not laid out yet, by item.
@@ -3154,6 +3157,16 @@ final class AppState {
             PelmetLog.log("apply: own \(id.rawValue) left layout before its pass — nothing to place")
             return
         }
+        // Over a full-screen app's hidden bar the pass would only abandon
+        // (`ApplyPass.run`), and its 1.5s retry ran it again for as long as
+        // the app stayed full screen. It looks again on a slower beat instead.
+        if ItemMover.hiddenBarCovers(ApplyPass.hiddenBarProbe) {
+            if ownItemsWaitingForBar.insert(id).inserted {
+                PelmetLog.log("apply: own \(id.rawValue) waits — the bar is hidden over a full-screen app")
+            }
+            return placeOwnItemSoon(id, after: AppTiming.ownItemHiddenBarRecheck)
+        }
+        ownItemsWaitingForBar.remove(id)
         applying = true
         defer { applying = false }
         let report = await ApplyPass.run(appState: self, scope: .ownItem(id, userAdded: ownItemsAddedByUser.contains(id.sectionKey)))
@@ -3651,6 +3664,10 @@ final class AppState {
         if NSEvent.pressedMouseButtons != 0 { return ("mouse button down", true) }
         if CGDisplayIsAsleep(CGMainDisplayID()) != 0 { return ("display asleep", false) }
         if Self.sessionAway { return ("screen locked", false) }
+        // A drag over a full-screen app's hidden bar lands on MenuBarAgent's
+        // band (`ApplyPass.run`). Looked at again on the beat, like input:
+        // leaving full screen sends no wake.
+        if ItemMover.hiddenBarCovers(ApplyPass.hiddenBarProbe) { return ("the bar is hidden over a full-screen app", true) }
         // The quiet Apply asks of the pointer, asked of the keyboard too:
         // the ⌘-click of a drag makes the icon's app frontmost, and a
         // keystroke then lands in it. A busy user defers the pass instead of
@@ -4450,6 +4467,13 @@ final class AppState {
     /// the bar mid-pass, which snapped the editor's drawing back (Sound,
     /// 2026-09-20 16:56).
     var syntheticDragInFlight: Bool { applying }
+
+    /// A press has the pointer on the bar for its click. Over a full-screen
+    /// app's hidden bar it stays there until the bar is down (about 200 ms),
+    /// past the hover dwell, and the hover reveal it set off re-took the
+    /// cover and moved the bar under the click: the menu opened 1 time of 2
+    /// (2026-11-21). Hover leaves the bar alone meanwhile.
+    var pressHoldsPointer = false
 
     /// The one write path for the engine snapshot mirror (Apply and
     /// engine-event handling route through here). Content-gated: every

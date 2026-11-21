@@ -166,6 +166,9 @@ enum AppTiming {
     static let newExtraPlacementDelay: Duration = .milliseconds(600)
     /// The second pass for an own item the first one found not laid out.
     static let ownItemRetryDelay: Duration = .milliseconds(1500)
+    /// How often an own item's pass looks again while the bar is hidden over
+    /// a full-screen app: no pass runs meanwhile (`placeOwnItemNow`).
+    static let ownItemHiddenBarRecheck: Duration = .seconds(5)
     /// The boot own-item passes wait this long after the own items were
     /// adopted: 235ms after adoption the bar is still attaching (frames
     /// overlap, the chevron reads as trapped) and the pass planned on it —

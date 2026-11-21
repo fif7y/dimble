@@ -682,8 +682,8 @@ final class MenuBarBandMonitor {
     private func scheduleHoverReveal() {
         guard let appState,
               appState.settings.revealTriggers.hoverEnabled, !appState.isRevealed, appState.itemsInBar.isEmpty else { return }
-        guard !appState.syntheticDragInFlight, !hoverSuppressedUntilExit else {
-            PelmetLog.log("band: hover refused — \(hoverSuppressedUntilExit ? "concealed under the pointer, waits for it to leave the bar" : "synthetic drag in flight")")
+        guard !appState.syntheticDragInFlight, !appState.pressHoldsPointer, !hoverSuppressedUntilExit else {
+            PelmetLog.log("band: hover refused — \(hoverSuppressedUntilExit ? "concealed under the pointer, waits for it to leave the bar" : appState.pressHoldsPointer ? "a press has the pointer on the bar" : "synthetic drag in flight")")
             return
         }
         // Floor: otherwise the bar flaps open on the way to a hot corner.
@@ -701,7 +701,7 @@ final class MenuBarBandMonitor {
                 guard let geometry = self.screenGeometry(containing: location),
                       self.isBarHover(location, of: geometry),
                       self.isHoverZone(location, of: geometry.screen),
-                      !appState.syntheticDragInFlight else {
+                      !appState.syntheticDragInFlight, !appState.pressHoldsPointer else {
                     PelmetLog.log("band: hover dropped at the dwell's end, pointer at x=\(Int(location.x)) y=\(Int(location.y))")
                     return
                 }

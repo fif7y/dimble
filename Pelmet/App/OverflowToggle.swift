@@ -216,7 +216,11 @@ enum OverflowToggle {
             // late, so the click waits for it exactly as a press does.
             try? await Task.sleep(for: .milliseconds(40))
             PelmetLog.log("overflow«: click \(attempt) at \(Int(at.x)),\(Int(at.y)) → \(ItemPress.whatIsAt(at))")
-            await ItemMover.shieldedClick(at: at)
+            var owner: pid_t = 0
+            AXUIElementGetPid(toggle.element, &owner)
+            if let waited = await ItemMover.shieldedClick(at: at, owner: owner > 0 ? owner : nil) {
+                PelmetLog.log("overflow«: click \(attempt) waited \(waited)ms for the hidden bar to come down")
+            }
             ConcealGhostOverlay.everyCoverPassesClicks(false)
             try? await Task.sleep(for: AppTiming.overflowExpandSettle)
             let now = state(of: toggle.element)

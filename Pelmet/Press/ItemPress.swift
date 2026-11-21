@@ -340,16 +340,20 @@ final class ItemPress {
                 let mid = CGPoint(x: frame.midX, y: frame.midY)
                 PelmetLog.log("press: \(key.rawValue) aim x\(Int(frame.minX))..\(Int(frame.maxX)) y\(Int(frame.minY))..\(Int(frame.maxY)) click \(Int(mid.x)),\(Int(mid.y)) → \(Self.whatIsAt(mid)), want pid \(target.pid)")
             }
-            await ItemMover.shieldedClick(
+            appState.pressHoldsPointer = true
+            let barCameDown = await ItemMover.shieldedClick(
                 at: CGPoint(x: frame.midX, y: frame.midY),
-                button: button == .secondary ? .right : .left
+                button: button == .secondary ? .right : .left,
+                owner: target.pid
             )
+            appState.pressHoldsPointer = false
             if passed { appState.liveMirror.takeClicksAfterPress() }
             ConcealGhostOverlay.everyCoverPassesClicks(false)
             let bar = clickDisplay.map {
                 clickedElsewhere ? ", on display \($0)'s bar" : ", on the main bar (display \($0)'s had no copy to click)"
             } ?? ""
-            PelmetLog.log("press: \(key.rawValue) clicked at \(ms())ms\(toggle == nil ? "" : " (« expanded)")\(bar)")
+            let fullScreen = barCameDown.map { ", after the hidden bar came down (\($0)ms)" } ?? ""
+            PelmetLog.log("press: \(key.rawValue) clicked at \(ms())ms\(toggle == nil ? "" : " (« expanded)")\(bar)\(fullScreen)")
             // The reveal and the click are behind the cover; from here the
             // real icon shows, highlighted, with its menu dropping from it.
             if AppTiming.pressCoverLiftsAfterClick, toggle == nil, let lifting = cover {
@@ -608,6 +612,8 @@ final class ItemPress {
         UserDefaults.standard.bool(forKey: "pelmet.debug.aimProbe")
     }
 
+    nonisolated private static let cursorLayer = Int(CGWindowLevelForKey(.cursorWindow))
+
     /// What the system says sits at the point the click is about to land on.
     /// Our own element — the cover that hides the reveal — is named, never
     /// read: an attribute read of our own AX element from the main thread
@@ -686,7 +692,11 @@ final class ItemPress {
             guard owner != me else { continue }
             // A system popover can sit at the bar's own level (layer 25,
             // 1131pt tall): the bar's level is excluded only at the bar's
-            // height.
+            // height. The cursor's own window is not something a press
+            // opened: it shows when the press warps the pointer home over a
+            // full-screen app, and read as "showed a window" 2 of 2 with no
+            // window opened (2026-11-21).
+            if layer >= Self.cursorLayer { continue }
             if layer > 0, layer != 25 || height > 60 {
                 counts.elevated.insert(number)
             } else if layer == 0, height > AppTiming.pressPanelFloor,

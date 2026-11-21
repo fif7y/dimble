@@ -652,6 +652,15 @@ enum ApplyPass {
                 return report
             }
         }
+        // Over a full-screen app the bar is up out of sight under
+        // MenuBarAgent's band, and a drag starts on the band: both tries
+        // bounced, and three bounces mark the app immovable for good
+        // (2026-11-21). The pass waits for the bar instead, no attempt spent.
+        if ItemMover.hiddenBarCovers(hiddenBarProbe) {
+            PelmetLog.log("apply: the bar is hidden over a full-screen app — the drags wait")
+            report.abandoned = true
+            return report
+        }
         // Settings is held above the drag and re-fronted after it only when
         // it is the window the user is in (an edit dragged there, Apply
         // pressed there). Open behind another app it stays there: the order
@@ -707,6 +716,9 @@ enum ApplyPass {
         }
         return report
     }
+
+    /// A point on the main display's bar, where the drags are made.
+    static var hiddenBarProbe: CGPoint { CGPoint(x: CGDisplayBounds(CGMainDisplayID()).midX, y: 12) }
 
     /// Whether any drag started or landed left of the chevron, where it
     /// shifts the concealed icons beside it (or the chevron had no frame to
