@@ -934,6 +934,21 @@ final class LiveMirror {
                 PelmetLog.log("livemirror: a pill turned off is back on — the stand-down ends")
             }
         }
+        // A display's "Hides icons" / "Shows all icons" changed (Settings ›
+        // Displays): each side read it once, at the start, so the change
+        // waited for an unrelated re-enter, 31 s to 2.5 min (Gab,
+        // 2026-11-20). Live mode leaves and re-enters on it, as for a
+        // display change; a start in flight leaves once it has settled.
+        if let appState, isActive, !exiting, sides.contains(where: {
+            $0.showsAll != (appState.settings.behavior(forDisplayUUID: $0.screen.displayUUIDString) == .alwaysShowAll)
+        }) {
+            if entering {
+                displaysChangedWhileEntering = true
+            } else {
+                PelmetLog.log("livemirror: a display's icons setting changed — leaving live mode, it re-enters")
+                Task { [weak self] in await self?.exit("a display's icons setting changed") }
+            }
+        }
         let running = enabled && reported.running && pillsOff == nil
         guard running != wanted else { return }
         if !standDownEnded { PelmetLog.log("livemirror: the setting turned \(enabled ? "on" : "off")") }
