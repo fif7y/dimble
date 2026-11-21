@@ -717,6 +717,8 @@ final class LiveMirror {
     private var pendingReveal: (reason: RevealReason, sections: Set<PelmetCore.Section>, how: Replay)?
     private var themeObserver: NSObjectProtocol?
     private var wallpaperWatch: DispatchSourceFileSystemObject?
+    /// A cover retake waiting out a burst of focus changes between displays.
+    private var dimRetake: Task<Void, Never>?
     private var activateObserver: NSObjectProtocol?
     /// Before the assertion drops nothing is held: a reveal that comes then
     /// goes first and the start stands down (`standDown`). After it, the
@@ -2769,6 +2771,7 @@ final class LiveMirror {
             let active = Self.activeDisplayID() == side.id
             if active != side.activeAtSnapshot {
                 reasons.append("display \(active ? "took" : "lost") the focus, the bar's dim went with it")
+                scheduleDimRetake()
             }
         }
         let pictureOnly = live.contains { !$0.tree.images.isEmpty && $0.tree.texts.isEmpty && !$0.mirror.dropped }
@@ -3895,6 +3898,22 @@ final class LiveMirror {
         source.setCancelHandler { close(fd) }
         source.resume()
         wallpaperWatch = source
+    }
+
+    /// The cover is a picture of the bar under the dim it had when taken,
+    /// and only the pill's still followed a focus change between displays:
+    /// the cover around it showed as a darker or lighter box (#156, 41 dims
+    /// and 3 cover retakes in his 6-day log). One retake per burst, half a
+    /// second after the first change, of the bar as it is by then.
+    private func scheduleDimRetake() {
+        guard dimRetake == nil else { return }
+        dimRetake = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard let self else { return }
+            self.dimRetake = nil
+            self.backdropGeneration += 1
+            await self.backdropMayHaveChanged("the bar's dim changed")
+        }
     }
 
     private func backdropMayHaveChanged(_ reason: String) async {
