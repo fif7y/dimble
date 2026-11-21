@@ -367,8 +367,9 @@ enum ApplyPass {
         /// re-enter at the slot the agent remembers, and a re-registration
         /// under the same tag keeps that slot whatever the order hint says
         /// (probed 2026-09-20), so the one door is the only way to move
-        /// them — docs/CORE-SETS.md §Own items.
-        case ownItem(ItemID)
+        /// them — docs/CORE-SETS.md §Own items. `userAdded`: the user just
+        /// added or turned it on in Settings, so the pass may expand the «.
+        case ownItem(ItemID, userAdded: Bool)
         /// "Keep sections grouped" (docs/CORE-SETS.md, #80): only the given
         /// strays, icons on the wrong side of the chevron that Pelmet can
         /// explain (`StrayLedger`), cross it. No edits are read, no
@@ -549,7 +550,7 @@ enum ApplyPass {
             trappedFor = { _ in [] }
         case .seedOrder:
             return report
-        case .ownItem(let own):
+        case .ownItem(let own, let userAdded):
             // The item's section as the editor draws it counts as the edit,
             // so the plan puts the newcomer between its roster neighbours;
             // only its own move runs, the rest of the bar is not touched.
@@ -566,16 +567,24 @@ enum ApplyPass {
                 plan.skipped = plan.skipped.filter { $0.0 == key }
                 return plan
             }
-            // Never expands the «: an own item behind it waits for its
-            // drawing (`ownItemsBehindOverflow`), then a reveal, then Apply.
-            // On Gab's Mac all 24 expands were for own items, 11 of 11
-            // replanned 0 moves, and every « click raced live mode's enter
-            // (a cover born mid-click, a « still moving): 2-3s of shielded
-            // clicks for nothing, and the first one missed (#150).
-            trappedFor = { _ in [] }
+            // An item that came on by itself never expands the «: behind it,
+            // it waits for its drawing (`ownItemsBehindOverflow`), then a
+            // reveal, then Apply. On Gab's Mac all 24 expands were for own
+            // items, 11 of 11 replanned 0 moves, and every « click raced
+            // live mode's enter (a cover born mid-click, a « still moving):
+            // 2-3s of shielded clicks for nothing, and the first one missed
+            // (#150).
+            // One the user just added does, like an editor move: macOS lays
+            // a new item out at the bar's far left, behind the « on a full
+            // bar, and a seeded agent slot doesn't move it (probed
+            // 2026-11-20). Without the «, a new shortcut button sat there
+            // for good (`waits for a reveal`).
+            trappedFor = userAdded
+                ? { ApplyPass.trapped($0, appState: appState).intersection([key]) }
+                : { _ in [] }
         }
         var plan = planFor(snap)
-        if case .ownItem(let own) = scope, plan.moves.isEmpty, plan.skipped.isEmpty {
+        if case .ownItem(let own, _) = scope, plan.moves.isEmpty, plan.skipped.isEmpty {
             PelmetLog.log("apply: \(own.sectionKey.rawValue) already in its slot (own)")
             report.applied.append(own.sectionKey)
             return report

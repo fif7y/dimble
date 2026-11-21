@@ -2682,6 +2682,8 @@ final class AppState {
         settings.extraItems.append(spec)
         let key = ExtrasManager.itemID(for: spec).sectionKey
         settings.sectionModel.enroll(key, in: section)
+        // The boot migration adds before the engine runs: not the user's.
+        if engineStarted { ownItemsAddedByUser.insert(key) }
         PelmetLog.log("extras: add \(spec.itemTitle) → \(settings.sectionModel.section(of: key))")
         settings.save()
         retireAppleTwin(of: spec.kind)
@@ -3034,6 +3036,9 @@ final class AppState {
     private var ownItemsRetried: Set<ItemID> = []
     /// Passes that found the item not laid out yet, by item.
     private var ownItemMisses: [ItemID: Int] = [:]
+    /// Own items the user added in Settings, by section key, until placed:
+    /// their pass may expand the « (`ApplyPass.Scope.ownItem`).
+    private var ownItemsAddedByUser: Set<ItemID> = []
     /// When the boot adoption saw every own item; nil until then.
     private var ownItemsAdoptedAt: ContinuousClock.Instant?
 
@@ -3058,6 +3063,7 @@ final class AppState {
     /// apply and was dragged 600ms later to x=-1, 2026-09-21 07:05).
     func cancelOwnItemPlacement(_ id: ItemID) {
         ownItemsAwaitingReveal.remove(id)
+        ownItemsAddedByUser.remove(id.sectionKey)
         ownItemPassLeads[id]?.cancel()
         ownItemPassLeads.removeValue(forKey: id)
     }
@@ -3126,7 +3132,7 @@ final class AppState {
         }
         applying = true
         defer { applying = false }
-        let report = await ApplyPass.run(appState: self, scope: .ownItem(id))
+        let report = await ApplyPass.run(appState: self, scope: .ownItem(id, userAdded: ownItemsAddedByUser.contains(id.sectionKey)))
         PelmetLog.log("apply: own \(id.rawValue) applied=\(report.applied.count) failed=\(report.failed.count) skipped=\(report.skipped.count)")
         // Put off for a held mouse button (#159): again shortly, until the
         // button is up or the item has left the bar.
@@ -3151,6 +3157,7 @@ final class AppState {
             default:
                 PelmetLog.log("apply: own \(id.rawValue) never on screen — left to Apply")
                 ownItemMisses.removeValue(forKey: id)
+                ownItemsAddedByUser.remove(id.sectionKey)
             }
         // A failed move on a concealable section gets one more try at the
         // next reveal settle (the bar may have concealed mid-pass).
@@ -3159,6 +3166,7 @@ final class AppState {
         } else if !report.applied.isEmpty {
             ownItemsRetried.remove(id)
             ownItemMisses.removeValue(forKey: id)
+            ownItemsAddedByUser.remove(id.sectionKey)
         }
     }
 
