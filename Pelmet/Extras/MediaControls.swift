@@ -318,6 +318,12 @@ final class ExtrasManager {
             if spec.kind == .appLauncher, let button = items[spec.id]?.button {
                 button.image = Self.launcherImage(for: spec, size: 18)
             }
+            // A shortcut button's symbol is picked in Settings too (#162).
+            // Drawn at the default size like every other Dimble symbol, not
+            // the launcher's: a symbol has no app icon to sit beside.
+            if spec.kind == .shortcut, let button = items[spec.id]?.button {
+                button.image = NSImage(systemSymbolName: Self.symbol(for: spec), accessibilityDescription: spec.itemTitle)
+            }
         }
         // Only a "while running" launcher depends on the running list; an
         // "always" launcher hides purely by section. This KVO fires for

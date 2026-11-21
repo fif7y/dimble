@@ -1140,22 +1140,7 @@ private struct PelmetItemsStrip: View {
                     isOn: hasKind(.shortcutsMenu)
                 ) { toggleKind(.shortcutsMenu, on: $0) }
                 ForEach(appState.settings.extraItems.filter { $0.kind == .shortcut }) { spec in
-                    HStack(spacing: 8) {
-                        Image(systemName: spec.symbol ?? "bolt.fill")
-                            .frame(width: 18)
-                            .foregroundStyle(.secondary)
-                        Text(spec.shortcutName ?? String(localized: "Shortcut"))
-                            .font(.callout)
-                        Text("Runs the shortcut.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        Spacer()
-                        RemoveRowButton {
-                            appState.settings.extraItems.removeAll { $0.id == spec.id }
-                            appState.settingsChanged()
-                        }
-                    }
-                    .padding(.vertical, 2)
+                    ShortcutButtonRow(spec: spec)
                 }
             }
             .pelmetCardSurface()
@@ -1527,6 +1512,66 @@ private struct AppLauncherRow: View {
     }
 }
 
+/// A shortcut button. macOS keeps a shortcut's own icon where only Full
+/// Disk Access reaches (`~/Library/Shortcuts`, kTCCServiceSystemPolicy-
+/// PrivateFolders, denied without a prompt), so Dimble can't wear it; the
+/// launcher's chooser lets you pick the symbol that matches it (#162).
+private struct ShortcutButtonRow: View {
+    @Environment(AppState.self) private var appState
+    let spec: ExtraItemSpec
+
+    @State private var pickingIcon = false
+    @State private var iconHovered = false
+
+    private func setSymbol(_ symbol: String?) {
+        guard let index = appState.settings.extraItems.firstIndex(where: { $0.id == spec.id }) else { return }
+        appState.settings.extraItems[index].symbol = symbol
+        appState.settingsChanged()
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // The same chooser tile as a launcher's icon.
+            Button { pickingIcon = true } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: ExtrasManager.symbol(for: spec))
+                        .font(.system(size: 18 * 0.8))
+                        .foregroundStyle(.primary)
+                        .frame(width: 26, height: 26)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(Color.secondary.opacity(iconHovered ? 0.2 : 0.1))
+                        )
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { iconHovered = $0 }
+            .help("Change icon")
+            .popover(isPresented: $pickingIcon, arrowEdge: .bottom) {
+                LauncherIconPicker(spec: spec, offersAppIcon: false, choose: setSymbol)
+            }
+            Text(spec.shortcutName ?? String(localized: "Shortcut"))
+                .font(.callout)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Text("Runs the shortcut.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer(minLength: 10)
+            RemoveRowButton {
+                appState.settings.extraItems.removeAll { $0.id == spec.id }
+                appState.settingsChanged()
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 /// A launcher's glyph as it appears in the bar: the picked SF Symbol, else
 /// the app's own icon, else a dashed placeholder for an app that is gone.
 private struct LauncherGlyph: View {
@@ -1553,6 +1598,8 @@ private struct LauncherGlyph: View {
 /// Selected = accent ring over a soft fill, never a 1px cage.
 private struct LauncherIconPicker: View {
     let spec: ExtraItemSpec
+    /// A shortcut button has no app, so no "App icon" option.
+    var offersAppIcon = true
     let choose: (String?) -> Void
     @State private var query = ""
     @FocusState private var searching: Bool
@@ -1568,7 +1615,8 @@ private struct LauncherIconPicker: View {
     }
 
     private func cell(symbol: String?) -> some View {
-        let selected = spec.symbol == symbol
+        // A shortcut button with no symbol saved wears the bolt.
+        let selected = (offersAppIcon ? spec.symbol : ExtrasManager.symbol(for: spec)) == symbol
         return Button { choose(symbol) } label: {
             Group {
                 if let symbol {
@@ -1601,15 +1649,17 @@ private struct LauncherIconPicker: View {
             // Laid out, not nudged: a hardcoded offset pinned the label's
             // right edge and grew it leftward over the tile in every
             // language longer than English (ru "Значок приложения").
-            HStack(spacing: 8) {
-                cell(symbol: nil)
-                Text("App icon")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
+            if offersAppIcon {
+                HStack(spacing: 8) {
+                    cell(symbol: nil)
+                    Text("App icon")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                Divider()
             }
-            Divider()
             // Soft capsule, no border (de-box); the field's own focus ring
             // is off with the rest of the card.
             HStack(spacing: 6) {
