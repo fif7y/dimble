@@ -55,7 +55,9 @@ public actor ItemEnumerator {
         }
         // Every bar's groups first: a stand-in is weighed against the real
         // buttons of the whole walk (`echoedStandIns`).
-        var listed: [(item: RawItem, standIn: Bool)] = []
+        // `buttons`: how many of the apps' real buttons the entry's bar window
+        // hosts (`prefers`).
+        var listed: [(item: RawItem, standIn: Bool, buttons: Int)] = []
         // An app's extras bar is the same under every group of it, on every
         // display: read once per walk.
         var extrasByPID: [pid_t: StatusExtras] = [:]
@@ -143,33 +145,36 @@ public actor ItemEnumerator {
                         + (!unread && unnamed == groupsOfApp.count && groupsOfApp.count == extras.items.count ? ", places or width gaps disagree" : ""),
                     pid: nil)
             }
-            listed.append(contentsOf: described.compactMap { $0.map { ($0.item, $0.standIn) } })
+            let entries = described.compactMap { $0 }
+            let buttons = Self.realButtons(entries.map { (pid: $0.item.pid, standIn: $0.standIn) }, agentPID: agentPID)
+            listed.append(contentsOf: entries.map { ($0.item, $0.standIn, buttons) })
         }
         let echoes = Self.echoedStandIns(listed.map { (pid: $0.item.pid, frame: $0.item.frame, standIn: $0.standIn) })
         for index in echoes.sorted() {
             logOnce("enumerate: stand-in \(listed[index].item.id.rawValue) sits on its app's real button — one icon, the button's name stands", pid: nil)
         }
         var byID: [ItemID: RawItem] = [:]
+        var keptButtons: [ItemID: Int] = [:]
         var order: [ItemID] = []
         var copies: [ItemID: [CGRect]] = [:]
         for (index, entry) in listed.enumerated() where !echoes.contains(index) {
             let item = entry.item
             copies[item.id, default: []].append(item.frame)
             if let existing = byID[item.id] {
-                // The same item appears once per display. Prefer the
-                // main-display occurrence so every frame lives in one
-                // coordinate space — boundary comparisons break across
-                // mixed display spaces. The band test alone is not
-                // enough: a display parked beside the main one, tops
-                // aligned, puts its bar at y ≈ 0 too, and its copies
-                // can come first in the walk (#27: every system item
-                // read past the main display's right edge, so the
-                // clock relay and the adopt pass measured nothing).
-                if !isMainDisplayFrame(existing.frame), isMainDisplayFrame(item.frame) {
+                // The same item appears once per display, and twice on the
+                // active one (`prefers`).
+                let existingMain = isMainDisplayFrame(existing.frame)
+                if Self.prefers((main: isMainDisplayFrame(item.frame), buttons: entry.buttons),
+                                over: (main: existingMain, buttons: keptButtons[item.id] ?? 0)) {
+                    if existingMain, abs(existing.frame.midX - item.frame.midX) > 2 {
+                        logOnce("enumerate: the active display's stand-in bar lags its buttons' bar — the buttons' copies kept", pid: nil)
+                    }
                     byID[item.id] = item
+                    keptButtons[item.id] = entry.buttons
                 }
             } else {
                 byID[item.id] = item
+                keptButtons[item.id] = entry.buttons
                 order.append(item.id)
             }
         }
@@ -259,6 +264,30 @@ public actor ItemEnumerator {
                     && abs(button.frame.midY - entry.frame.midY) <= tolerance
             }
         })
+    }
+
+    /// Whether the walk keeps `candidate`, a copy of an item it already
+    /// holds, in place of the one it kept. The main display's copy first, so
+    /// every frame lives in one coordinate space: the band test alone is not
+    /// enough, since a display parked beside the main one, tops aligned,
+    /// puts its bar at y ≈ 0 too, and its copies can come first in the walk
+    /// (#27: every system item read past the main display's right edge, so
+    /// the clock relay and the adopt pass measured nothing).
+    /// On the main display, the copy from the bar window hosting more of the
+    /// apps' real buttons. The agent draws the active display's bar twice,
+    /// once with the buttons and once with stand-ins, and the stand-in bar
+    /// can lag: with the « just expanded it kept Snib 32pt right of where
+    /// the buttons' bar drew it, on Dimble's own icon, and a press clicked
+    /// Dimble (MenuHog, 2026-11-21). A click lands on the buttons' bar.
+    static func prefers(_ candidate: (main: Bool, buttons: Int), over kept: (main: Bool, buttons: Int)) -> Bool {
+        if candidate.main != kept.main { return candidate.main }
+        return candidate.main && candidate.buttons > kept.buttons
+    }
+
+    /// The apps' real buttons among one bar window's entries: neither a
+    /// stand-in nor one of the agent's own items.
+    static func realButtons(_ entries: [(pid: pid_t, standIn: Bool)], agentPID: pid_t) -> Int {
+        entries.filter { !$0.standIn && $0.pid != agentPID }.count
     }
 
     /// A stand-in group its app's extras bar does not name on its own.
