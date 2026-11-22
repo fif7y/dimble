@@ -29,8 +29,9 @@ final class ItemPictures {
         /// The same icon cut from a sharper display's bar (#156), for a
         /// panel there: the main display's 1x picture read blurry on a 2x
         /// built-in, and the built-in's picture alone read soft on the 1x
-        /// main display. Nil when the main display is the sharpest or that
-        /// bar doesn't draw the icon clear.
+        /// main display. For a 1x one-colour picture with none, the picture
+        /// enlarged for a 2x display (`withEnlargedCopy`). Nil when the main
+        /// display is the sharpest.
         var sharper: Copy?
 
         struct Copy {
@@ -90,8 +91,73 @@ final class ItemPictures {
 
     func store(_ new: [ItemID: Picture]) {
         dropColouredOnAppearanceChange()
-        pictures.merge(new) { _, latest in latest }
+        // Debug: `-pelmet.debug.picturesAt1x 1` stores every one-colour
+        // picture shrunk to 1x, as a 1x main display's bar gives it, so the
+        // enlarged copy can be seen on a 2x built-in alone; `2` shrinks it
+        // and gives none (beta.5's blur).
+        let at1x = UserDefaults.standard.integer(forKey: "pelmet.debug.picturesAt1x")
+        let new = at1x > 0 ? new.mapValues(Self.shrunkTo1x) : new
+        let given = at1x == 2 ? new : new.mapValues(Self.withEnlargedCopy)
+        let enlarged = given.filter { $0.value.sharper != nil && new[$0.key]?.sharper == nil }.count
+        if enlarged > 0 { PelmetLog.log("panel: \(enlarged) 1x picture(s) given an enlarged copy for a 2x display") }
+        pictures.merge(given) { _, latest in latest }
         scheduleSave()
+    }
+
+    /// A 1x one-colour picture with no sharper copy gets one enlarged from
+    /// it while a 2x display is attached (#156): an icon the built-in's bar
+    /// doesn't draw clear (past its notch or Island, behind its «) is only
+    /// cut on the 1x main display, and scaled smoothly it read blurry there.
+    private static func withEnlargedCopy(_ picture: Picture) -> Picture {
+        guard picture.isMonochrome, picture.sharper == nil,
+              CGFloat(picture.image.width) / max(picture.size.width, 1) < 1.5,
+              NSScreen.screens.contains(where: { $0.backingScaleFactor >= 2 }),
+              let image = enlarged(picture.image)
+        else { return picture }
+        var out = picture
+        out.sharper = Picture.Copy(image: image, size: picture.size)
+        return out
+    }
+
+    /// Debug (`pelmet.debug.picturesAt1x`): a 2x one-colour picture at 1x,
+    /// each pixel the mean of four, with no sharper copy.
+    private static func shrunkTo1x(_ picture: Picture) -> Picture {
+        let w = picture.image.width / 2, h = picture.image.height / 2
+        guard picture.isMonochrome, CGFloat(picture.image.width) / max(picture.size.width, 1) > 1.5, w > 0, h > 0,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 4 * w,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return picture }
+        ctx.interpolationQuality = .medium
+        ctx.draw(picture.image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let image = ctx.makeImage() else { return picture }
+        return Picture(image: image, size: picture.size, takenAt: picture.takenAt,
+                       isMonochrome: true, isHighlighted: picture.isHighlighted)
+    }
+
+    /// `image` at twice its size, its clean edges pulled tight
+    /// (`MaskEnlargement`). Black: a one-colour picture is drawn as a
+    /// template, by its alpha alone.
+    static func enlarged(_ image: CGImage) -> CGImage? {
+        let w = image.width, h = image.height
+        guard w > 0, h > 0, let source = rgba(image, width: w, height: h),
+              let ctx = CGContext(data: nil, width: 2 * w, height: 2 * h, bitsPerComponent: 8, bytesPerRow: 8 * w,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = ctx.data
+        else { return nil }
+        defer { withExtendedLifetime(source.context) {} }
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: 2 * w, height: 2 * h))
+        let px = data.bindMemory(to: UInt8.self, capacity: 16 * w * h)
+        let tight = MaskEnlargement.tighten(
+            smooth: (0..<(4 * w * h)).map { px[$0 * 4 + 3] },
+            source: (0..<(w * h)).map { source.pixels[$0 * 4 + 3] }, width: w, height: h)
+        for (i, a) in tight.enumerated() {
+            px[i * 4] = 0
+            px[i * 4 + 1] = 0
+            px[i * 4 + 2] = 0
+            px[i * 4 + 3] = a
+        }
+        return ctx.makeImage()
     }
 
     private func dropColouredOnAppearanceChange() {
