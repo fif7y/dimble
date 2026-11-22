@@ -627,11 +627,17 @@ enum ApplyPass {
             // A busy user means no pass at all (never the shielded drag a
             // busy pointer gets from Apply after its 8s wait): the reveal is
             // closed again by the defer above and the budget stays unspent.
-            guard secondsSinceAnyInput() >= AppTiming.applyIdleGap else {
+            // A held button sends no input: the gate's check ran before the
+            // reveal, and the recording pill's pass has no gate (#159).
+            let buttonDown = NSEvent.pressedMouseButtons != 0
+            guard PointerBorrow.automaticMayDrag(
+                quietFor: secondsSinceAnyInput(), gap: AppTiming.applyIdleGap, buttonDown: buttonDown
+            ) else {
+                let why = buttonDown ? "a mouse button is held" : "input"
                 if case .drift = scope {
-                    PelmetLog.log("order: pass abandoned — input")
+                    PelmetLog.log("order: pass abandoned — \(why)")
                 } else {
-                    PelmetLog.log("group: pass abandoned — input")
+                    PelmetLog.log("group: pass abandoned — \(why)")
                 }
                 report.abandoned = true
                 return report

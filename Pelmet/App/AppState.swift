@@ -622,7 +622,12 @@ final class AppState {
                 PelmetLog.log("recording: pill already in Visible")
                 return
             }
-            guard ApplyPass.secondsSinceAnyInput() >= AppTiming.applyIdleGap else { waiting = "input"; continue }
+            // A held button sends no input: the drag went 1.5s into a held
+            // Telegram button and ended the recording (#159, Fra's video).
+            let buttonDown = NSEvent.pressedMouseButtons != 0
+            guard PointerBorrow.automaticMayDrag(
+                quietFor: ApplyPass.secondsSinceAnyInput(), gap: AppTiming.applyIdleGap, buttonDown: buttonDown
+            ) else { waiting = buttonDown ? "a mouse button held" : "input"; continue }
             updateSnapshot(snap)
             transitions.heldPassClicks = true
             let report = await runGroupingPass(.strays(pill))

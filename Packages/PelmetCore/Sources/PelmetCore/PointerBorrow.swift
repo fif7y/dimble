@@ -26,4 +26,13 @@ public enum PointerBorrow: Equatable, Sendable {
         if !buttonDown, quietFor >= gap { return .now }
         return waitedOut ? .shielded : .wait
     }
+
+    /// An automatic pass (the grouper's, the order keeper's, the recording
+    /// pill's) never waits and never goes shielded: it drags only when the
+    /// user has been still for the gap with no button held. A held button
+    /// sends no input, so the clock alone dragged into a press-and-hold
+    /// (the Stop Recording pill's pass, #159, Fra's video 2026-11-19).
+    public static func automaticMayDrag(quietFor: TimeInterval, gap: TimeInterval, buttonDown: Bool) -> Bool {
+        !buttonDown && quietFor >= gap
+    }
 }

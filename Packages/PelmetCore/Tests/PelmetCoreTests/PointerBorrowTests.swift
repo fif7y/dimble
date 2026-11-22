@@ -21,6 +21,16 @@ import Testing
         #expect(verdict(quiet: 3, down: true, waitedOut: true, asked: true) == .shielded)
     }
 
+    /// #159, again: a screen recording's Stop Recording pill was dragged
+    /// 1.5s into a held Telegram button, the gap with no input since the
+    /// press, and the recording ended (Fra's video, 2026-11-19).
+    @Test func aHeldButtonStopsAnAutomaticPass() {
+        #expect(!PointerBorrow.automaticMayDrag(quietFor: 1.5, gap: 1.5, buttonDown: true))
+        #expect(!PointerBorrow.automaticMayDrag(quietFor: 30, gap: 1.5, buttonDown: true))
+        #expect(PointerBorrow.automaticMayDrag(quietFor: 1.5, gap: 1.5, buttonDown: false))
+        #expect(!PointerBorrow.automaticMayDrag(quietFor: 0.4, gap: 1.5, buttonDown: false))
+    }
+
     @Test func withNoButtonHeldTheClockDecides() {
         for asked in [true, false] {
             #expect(verdict(quiet: 1.5, down: false, asked: asked) == .now)
