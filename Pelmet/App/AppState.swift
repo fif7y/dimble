@@ -904,6 +904,7 @@ final class AppState {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.transitions.dropHeldBars("display change")
+                if self?.transitions.forgetStripIfPrimaryMoved() == true { self?.rewalkForNewPrimary = true }
                 self?.chevronDisplaysChanged()
                 self?.scheduleChevronHostCheck("display change")
                 self?.scheduleAnchorCheck("display change")
@@ -942,11 +943,22 @@ final class AppState {
     /// anchored for a display that shows all icons or not, and the held
     /// pictures go back up at the new geometry.
     @ObservationIgnored private var anchorCheck: Task<Void, Never>?
+    /// Another display became primary: the walk in hand counts its x from
+    /// the old one (the anchored run read `live -` for minutes), so the
+    /// settled bar is walked again and the strip seeded from it.
+    @ObservationIgnored private var rewalkForNewPrimary = false
     private func scheduleAnchorCheck(_ why: String) {
         anchorCheck?.cancel()
         anchorCheck = Task { [weak self] in
             try? await Task.sleep(for: AppTiming.chevronHostCheckDelay)
             guard !Task.isCancelled, let self, self.launchBaselineApplied else { return }
+            if self.rewalkForNewPrimary, !self.isTransitioning {
+                let snap = await self.engine.freshSnapshot()
+                guard !Task.isCancelled else { return }
+                self.rewalkForNewPrimary = false
+                self.updateSnapshot(snap)
+                self.transitions.warmAfterBoot(from: snap)
+            }
             self.reconcileAnchor(why)
             self.transitions.refreshHeld(why)
         }

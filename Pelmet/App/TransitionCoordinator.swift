@@ -441,6 +441,9 @@ final class TransitionCoordinator {
     /// then slid the always-hidden cluster in UNCOVERED left of it (Sconce's
     /// bar: cover 249px @1352, items landing from 1075 — 2026-09-05).
     private(set) var widestStripMinX: CGFloat?
+    /// The primary display, and its frame, the strip was measured with.
+    /// Every x here is counted from the primary's left edge.
+    private var stripPrimary: (id: CGDirectDisplayID?, frame: CGRect)?
     /// Concealable items in the last engine snapshot — the floor for the
     /// cover's width before any full conceal has measured the real strip.
     private var concealableCount = 0
@@ -480,6 +483,31 @@ final class TransitionCoordinator {
     /// the blink cover to `-906..1676`, a capture spanning two bars.
     private var primaryMaxX: CGFloat { NSScreen.screens.first?.frame.maxX ?? .greatestFiniteMagnitude }
 
+    /// A display change that made another display primary, or resized the
+    /// primary, moves every icon under a strip that stays put. Switching
+    /// main from the LG back to the built-in held the other bars' covers at
+    /// x 2791..3217, past the built-in's 1800pt, so none went up and every
+    /// bar showed Hidden until a relaunch (2026-11-22). The strip and the
+    /// pictures taken over it go; returns whether they did, and the caller
+    /// walks the bar again to seed a new one (`warmAfterBoot`).
+    func forgetStripIfPrimaryMoved() -> Bool {
+        guard let was = stripPrimary, let screen = NSScreen.screens.first else { return false }
+        let now = (id: screen.directDisplayID, frame: screen.frame)
+        guard was.id != now.id || was.frame != now.frame else { return false }
+        let strip = lastConcealedStripRect.map { "\(Int($0.minX))..\(Int($0.maxX))" } ?? "-"
+        PelmetLog.log("strip: dropped \(strip) — measured with display \(was.id.map(String.init) ?? "?") as primary \(Int(was.frame.width))pt, now display \(now.id.map(String.init) ?? "?") \(Int(now.frame.width))pt")
+        lastConcealedStripRect = nil
+        widestStripMinX = nil
+        stripPrimary = nil
+        heldPictures = [:]
+        heldPicturesRun = nil
+        revealCoverSnapshot = []
+        revealCoverTakenRect = nil
+        revealCoverWanted = appState?.currentRevealedSections.isEmpty ?? false
+        parkedCover = nil
+        return true
+    }
+
     /// Before the first click of the session the active display is
     /// unknown; the one under the pointer is the one macOS most likely
     /// draws bright, and the one the first click most likely lands on. A
@@ -491,6 +519,7 @@ final class TransitionCoordinator {
     private func rememberStrip(_ strip: CGRect?) {
         lastConcealedStripRect = strip
         guard let strip else { return }
+        if let screen = NSScreen.screens.first { stripPrimary = (screen.directDisplayID, screen.frame) }
         widestStripMinX = min(widestStripMinX ?? strip.minX, strip.minX)
         // The idle picture spans the rect it was taken with. A strip wider
         // than that rect (the boot seed missed Sound; the first conceal
