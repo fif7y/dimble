@@ -26,6 +26,26 @@ final class ItemPictures {
         /// item is on (Screen Mirroring in use, #125). The mask leaves the
         /// capsule out, so the tile puts the sign in the glyph's colour.
         let isHighlighted: Bool
+        /// The same icon cut from a sharper display's bar (#156), for a
+        /// panel there: the main display's 1x picture read blurry on a 2x
+        /// built-in, and the built-in's picture alone read soft on the 1x
+        /// main display. Nil when the main display is the sharpest or that
+        /// bar doesn't draw the icon clear.
+        var sharper: Copy?
+
+        struct Copy {
+            let image: CGImage
+            /// Points on the display it was taken on.
+            let size: CGSize
+        }
+
+        /// The copy a panel on a display of `scale` draws.
+        func drawn(onScale scale: CGFloat) -> Copy {
+            let copies = [Copy(image: image, size: size)] + (sharper.map { [$0] } ?? [])
+            let index = PanelPictureFrame.copyIndex(
+                pixelsPerPoint: copies.map { CGFloat($0.image.width) / max($0.size.width, 1) }, displayScale: scale)
+            return copies[index ?? 0]
+        }
     }
 
     /// Past this a picture is retaken on the next open: an app can redraw
@@ -117,6 +137,10 @@ final class ItemPictures {
             let isMonochrome: Bool
             /// Nil in a file from before highlights.
             let isHighlighted: Bool?
+            /// The sharper display's copy (#156), nil when there is none.
+            let sharperPNG: Data?
+            let sharperWidth: Double?
+            let sharperHeight: Double?
         }
         let dark: Bool
         let entries: [Entry]
@@ -140,11 +164,16 @@ final class ItemPictures {
         }
         var loaded: [ItemID: Picture] = [:]
         for entry in kept.entries where -entry.takenAt.timeIntervalSinceNow < Self.keepFor {
-            guard let source = CGImageSourceCreateWithData(entry.png as CFData, nil),
-                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }
+            guard let image = Self.image(fromPNG: entry.png) else { continue }
+            var sharper: Picture.Copy?
+            if let png = entry.sharperPNG, let width = entry.sharperWidth, let height = entry.sharperHeight,
+               let image = Self.image(fromPNG: png) {
+                sharper = Picture.Copy(image: image, size: CGSize(width: width, height: height))
+            }
             loaded[ItemID(rawValue: entry.key)] = Picture(
                 image: image, size: CGSize(width: entry.width, height: entry.height),
-                takenAt: entry.takenAt, isMonochrome: entry.isMonochrome, isHighlighted: entry.isHighlighted ?? false)
+                takenAt: entry.takenAt, isMonochrome: entry.isMonochrome, isHighlighted: entry.isHighlighted ?? false,
+                sharper: sharper)
         }
         guard !loaded.isEmpty else { return }
         pictures = loaded
@@ -165,12 +194,20 @@ final class ItemPictures {
         guard let url = Self.keptURL, let dark = takenDark else { return }
         let entries = pictures.compactMap { key, picture -> Kept.Entry? in
             guard -picture.takenAt.timeIntervalSinceNow < Self.keepFor, let png = Self.png(picture.image) else { return nil }
+            let sharper = picture.sharper.flatMap { copy in Self.png(copy.image).map { (copy, $0) } }
             return Kept.Entry(key: key.rawValue, png: png, width: picture.size.width, height: picture.size.height,
-                              takenAt: picture.takenAt, isMonochrome: picture.isMonochrome, isHighlighted: picture.isHighlighted)
+                              takenAt: picture.takenAt, isMonochrome: picture.isMonochrome, isHighlighted: picture.isHighlighted,
+                              sharperPNG: sharper?.1, sharperWidth: sharper.map { Double($0.0.size.width) },
+                              sharperHeight: sharper.map { Double($0.0.size.height) })
         }
         guard let data = try? PropertyListEncoder().encode(Kept(dark: dark, entries: entries, epoch: Self.keptEpoch)) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
+    }
+
+    private static func image(fromPNG data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     /// Drawn once more first: a picture cut from a stream frame does not

@@ -34,4 +34,17 @@ public struct PanelPictureFrame: Equatable, Sendable {
             width: width / scale, height: height / scale)
         isOneToOne = width == pixels.width && height == pixels.height
     }
+
+    /// Which of an icon's copies a panel on a display of `displayScale`
+    /// draws, by each copy's pixels per point: the one that covers the
+    /// display's pixels with the fewest to spare, so it is drawn as it is,
+    /// else the sharpest. A 1x main display's picture drawn on a 2x
+    /// built-in read blurry, and the built-in's 2x picture drawn on the 1x
+    /// display read soft (#156). Nil when there is none.
+    public static func copyIndex(pixelsPerPoint: [CGFloat], displayScale: CGFloat) -> Int? {
+        let scale = max(displayScale, 1)
+        let covering = pixelsPerPoint.indices.filter { pixelsPerPoint[$0] >= scale - 0.01 }
+        if let best = covering.min(by: { pixelsPerPoint[$0] < pixelsPerPoint[$1] }) { return best }
+        return pixelsPerPoint.indices.max { pixelsPerPoint[$0] < pixelsPerPoint[$1] }
+    }
 }

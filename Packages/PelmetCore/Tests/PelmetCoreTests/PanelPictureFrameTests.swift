@@ -78,4 +78,19 @@ import Testing
             }
         }
     }
+
+    // #156: a 1x main display's picture and the 2x built-in's copy of it.
+    @Test func eachDisplayDrawsTheCopyThatMatchesItsScale() {
+        let copies: [CGFloat] = [1, 2]
+        #expect(PanelPictureFrame.copyIndex(pixelsPerPoint: copies, displayScale: 1) == 0)
+        #expect(PanelPictureFrame.copyIndex(pixelsPerPoint: copies, displayScale: 2) == 1)
+        #expect(PanelPictureFrame.copyIndex(pixelsPerPoint: [2, 1], displayScale: 1) == 1)
+    }
+
+    @Test func withNoCopySharpEnoughTheSharpestIsDrawn() {
+        #expect(PanelPictureFrame.copyIndex(pixelsPerPoint: [1], displayScale: 2) == 0)
+        #expect(PanelPictureFrame.copyIndex(pixelsPerPoint: [1, 2], displayScale: 3) == 1)
+        #expect(PanelPictureFrame.copyIndex(pixelsPerPoint: [2], displayScale: 1) == 0)
+        #expect(PanelPictureFrame.copyIndex(pixelsPerPoint: [], displayScale: 2) == nil)
+    }
 }

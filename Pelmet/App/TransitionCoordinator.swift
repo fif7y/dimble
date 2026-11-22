@@ -396,6 +396,9 @@ final class TransitionCoordinator {
     /// at the old geometry.
     private var heldDropEpoch = 0
     private var heldCapturesInFlight = 0
+    /// Why the last pass took no picture from a sharper display's bar,
+    /// logged when it changes (`sharperBarDisplay`).
+    private var sharperSkipSaid: String?
     /// The run the held covers show: the wanted run inside the kept
     /// pictures. Bare glass crops to any part with no capture, so a run
     /// that narrowed — the chevron moved left, settled after the reveal or
@@ -2497,9 +2500,9 @@ extension TransitionCoordinator {
         // Anchored, the idle picture isn't kept and the icons are out: the
         // bare bar (WindowServer's bar window left out) is the empty one.
         // Live, each film takes its own bare bar over its strip instead.
-        // The pictures are cut from the sharpest bar when the primary's is
-        // not it (#156): that display's bar is filmed beside the primary's,
-        // and its empty bar is wanted under it too.
+        // The pictures are cut from the sharpest bar too when the primary's
+        // is not it (#156): that display's bar is filmed beside the
+        // primary's, and its empty bar is wanted under it too.
         let sharper = await sharperBarDisplay()
         let bars = Self.filmedBars(sharper)
         var empty = anchoredPass || livePass ? [] : freshEmptyBarSnapshots(cropped: false)
@@ -3007,14 +3010,22 @@ extension TransitionCoordinator {
     /// primary's: the sharpest one that lists icons, when it is sharper
     /// than the primary (#156: a 1x main display's pictures, drawn
     /// upscaled in the panel on a 2x built-in, read blurry). Nil when the
-    /// primary is the sharpest, and nothing changes there.
+    /// primary is the sharpest, and nothing changes there. A sharper
+    /// display whose bar lists no icon is logged: without it a pass that
+    /// took nothing from the sharper bar left no line saying why.
     private func sharperBarDisplay() async -> CGDirectDisplayID? {
         guard let primary = NSScreen.screens.first,
               let sharpest = NSScreen.screens.dropFirst().max(by: { $0.backingScaleFactor < $1.backingScaleFactor }),
               sharpest.backingScaleFactor > primary.backingScaleFactor,
-              let id = sharpest.directDisplayID,
-              PressAim.barListed(on: CGDisplayBounds(id), copies: await engine.barCopies())
+              let id = sharpest.directDisplayID
         else { return nil }
+        guard PressAim.barListed(on: CGDisplayBounds(id), copies: await engine.barCopies()) else {
+            let why = "pass: display \(id) (\(sharpest.backingScaleFactor)x) is sharper than the primary (\(primary.backingScaleFactor)x), but the walk lists no icon on its bar: all from the primary"
+            if why != sharperSkipSaid { PelmetLog.log(why) }
+            sharperSkipSaid = why
+            return nil
+        }
+        sharperSkipSaid = nil
         return id
     }
 
@@ -3082,9 +3093,10 @@ extension TransitionCoordinator {
     /// icon: on glass that reads as a dark box, so a strip that won't cut
     /// out (an animated wallpaper) gives none, and the tiles keep their app
     /// icons.
-    /// `sharper`: the items that display's bar draws, cut from its copy of
-    /// the bar under the same rules (#156). One that won't cut there is cut
-    /// from the primary's, as is every other.
+    /// `sharper`: the items that display's bar draws, also cut from its copy
+    /// of the bar under the same rules (#156), and kept beside the primary's
+    /// picture: each display's panel draws the copy that matches it. One the
+    /// primary's bar won't give is the sharper copy alone.
     private static func pictures(
         of items: [(key: ItemID, frame: CGRect)],
         strip: [ConcealGhostOverlay.BarSnapshot], empty: [ConcealGhostOverlay.BarSnapshot], dump: Bool,
@@ -3104,6 +3116,7 @@ extension TransitionCoordinator {
         var contaminated: [(ItemID, Double)] = []
         var fromSharper = 0
         var notCutThere: [ItemID] = []
+        var readDifferently: [ItemID] = []
         func keep(_ key: ItemID, _ picture: ItemPictures.Picture, _ column: ConcealGhostOverlay.BarSnapshot) {
             pictures[key] = picture
             if picture.isHighlighted { PelmetLog.log("pass: \(key.rawValue) on a coloured capsule") }
@@ -3113,23 +3126,42 @@ extension TransitionCoordinator {
             }
         }
         for (key, f) in items {
-            if let sharp, let there = sharper?.frames[key] {
-                if case .picture(let picture, let column) = Self.cut(key, there, from: sharp, dump: dump) {
-                    keep(key, picture, column)
+            var there: (picture: ItemPictures.Picture, column: ConcealGhostOverlay.BarSnapshot)?
+            if let sharp, let frame = sharper?.frames[key] {
+                if case .picture(let picture, let column) = Self.cut(key, frame, from: sharp, dump: dump) {
+                    there = (picture, column)
                     fromSharper += 1
-                    continue
+                } else {
+                    notCutThere.append(key)
                 }
-                notCutThere.append(key)
             }
             switch Self.cut(key, f, from: primary, dump: dump) {
-            case .picture(let picture, let column): keep(key, picture, column)
-            case .contaminated(let ink): contaminated.append((key, ink))
-            case .none: break
+            case .picture(var picture, let column):
+                // Both copies are kept, so neither display's panel scales
+                // the other's (#156). Only one that reads the same there: a
+                // copy that is coloured where the main one is a mask would
+                // be tinted as one.
+                if let there {
+                    if there.picture.isMonochrome == picture.isMonochrome, there.picture.isHighlighted == picture.isHighlighted {
+                        picture.sharper = ItemPictures.Picture.Copy(image: there.picture.image, size: there.picture.size)
+                        if dump {
+                            dumpPass([there.column], name: "\(key.rawValue)_sharper")
+                            PelmetLog.log("pass: \(key.rawValue) sharper copy \(String(format: "%.1f", CGFloat(there.picture.image.width) / max(there.picture.size.width, 1)))px/pt")
+                        }
+                    } else {
+                        readDifferently.append(key)
+                    }
+                }
+                keep(key, picture, column)
+            case .contaminated(let ink):
+                if let there { keep(key, there.picture, there.column) } else { contaminated.append((key, ink)) }
+            case .none:
+                if let there { keep(key, there.picture, there.column) }
             }
         }
         if let sharper, sharp != nil {
             let notDrawn = items.count - sharper.frames.count
-            PelmetLog.log("pass: \(fromSharper) of \(items.count) cut from display \(sharper.display)'s bar\(notDrawn > 0 ? ", \(notDrawn) not drawn clear there or moved" : "")\(notCutThere.isEmpty ? "" : ", \(notCutThere.count) that won't cut there \(notCutThere.map(\.rawValue))"), the rest from the primary")
+            PelmetLog.log("pass: \(fromSharper) of \(items.count) cut from display \(sharper.display)'s bar too\(notDrawn > 0 ? ", \(notDrawn) not drawn clear there or moved" : "")\(notCutThere.isEmpty ? "" : ", \(notCutThere.count) that won't cut there \(notCutThere.map(\.rawValue))")\(readDifferently.isEmpty ? "" : ", \(readDifferently.count) that read differently there \(readDifferently.map(\.rawValue))"), each display's panel draws its own copy")
         }
         if !contaminated.isEmpty {
             let named = contaminated.map { "\($0.0.rawValue) \(String(format: "%.1f%%", $0.1 * 100))" }.joined(separator: ", ")
