@@ -218,7 +218,7 @@ enum OverflowToggle {
             PelmetLog.log("overflow«: click \(attempt) at \(Int(at.x)),\(Int(at.y)) → \(ItemPress.whatIsAt(at))")
             var owner: pid_t = 0
             AXUIElementGetPid(toggle.element, &owner)
-            if let waited = await ItemMover.shieldedClick(at: at, owner: owner > 0 ? owner : nil) {
+            if let waited = await ItemMover.shieldedClick(at: at, owner: owner > 0 ? owner : nil).waited {
                 PelmetLog.log("overflow«: click \(attempt) waited \(waited)ms for the hidden bar to come down")
             }
             ConcealGhostOverlay.everyCoverPassesClicks(false)

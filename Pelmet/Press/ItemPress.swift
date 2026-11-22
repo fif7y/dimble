@@ -340,13 +340,24 @@ final class ItemPress {
                 let mid = CGPoint(x: frame.midX, y: frame.midY)
                 PelmetLog.log("press: \(key.rawValue) aim x\(Int(frame.minX))..\(Int(frame.maxX)) y\(Int(frame.minY))..\(Int(frame.maxY)) click \(Int(mid.x)),\(Int(mid.y)) → \(Self.whatIsAt(mid)), want pid \(target.pid)")
             }
+            // MenuBarAgent keeps two bar windows per display and one can lag.
+            // With the « just expanded, the walk's copy of Snib sat 32pt right
+            // of where the bar drew it, on Dimble's own icon, and the press
+            // opened Dimble's menu instead, 4 of 4 (MenuHog, 2026-11-21). The
+            // click takes whichever copy has the item under it.
+            let others = Self.otherCopies(of: target.id, besides: frame, in: await appState.engine.barCopies())
             appState.pressHoldsPointer = true
-            let barCameDown = await ItemMover.shieldedClick(
+            let clicked = await ItemMover.shieldedClick(
                 at: CGPoint(x: frame.midX, y: frame.midY),
+                or: others.map { CGPoint(x: $0.midX, y: $0.midY) },
                 button: button == .secondary ? .right : .left,
                 owner: target.pid
             )
+            let barCameDown = clicked.waited
             appState.pressHoldsPointer = false
+            if let moved = others.first(where: { $0.midX == clicked.point.x && $0.midY == clicked.point.y }) {
+                PelmetLog.log("press: \(key.rawValue) — the walk's copy at x\(Int(frame.minX))..\(Int(frame.maxX)) had something else under it, the copy at x\(Int(moved.minX))..\(Int(moved.maxX)) clicked")
+            }
             if passed { appState.liveMirror.takeClicksAfterPress() }
             ConcealGhostOverlay.everyCoverPassesClicks(false)
             let bar = clickDisplay.map {
@@ -505,13 +516,29 @@ final class ItemPress {
             ?? copies.first
     }
 
+    /// The item's other copies on the bar `frame` sits on, read apart from
+    /// it: MenuBarAgent draws each display's bar in two windows.
+    private static func otherCopies(of id: ItemID, besides frame: CGRect, in copies: [ItemID: [CGRect]]) -> [CGRect] {
+        let mid = CGPoint(x: frame.midX, y: frame.midY)
+        guard let display = NSScreen.screens.compactMap(\.directDisplayID).map(CGDisplayBounds)
+            .first(where: { $0.contains(mid) }) else { return [] }
+        return (copies[id] ?? []).filter {
+            MenuBarGeometry.isInBand($0, ofDisplay: display)
+                && abs($0.midX - frame.midX) > AppTiming.pressFrameTolerance
+        }
+    }
+
     /// Where a press made from `display` clicks the walk's `item`: its own
     /// copy on that display's bar in the last walk, paired by full id
     /// (`PressAim`), else its main copy. `awaitingDisplay`: that bar lists
     /// icons, so a missing copy may still come (a stand-in mid-swap).
     /// The first other display whose bar draws the item, the main display
     /// and `skip` aside: a copy the « holds there is no copy (`PressAim.aim`).
+    /// Debug: launched with `-pelmet.debug.pressNoElsewhere YES`, no other
+    /// display's copy is clicked, so a trapped press has to open the main
+    /// bar's « (the only way to test that path docked, #166).
     private func drawnElsewhere(_ item: ObservedItem?, besides skip: CGDirectDisplayID?) async -> (aim: PressAim, display: CGDirectDisplayID)? {
+        guard !UserDefaults.standard.bool(forKey: "pelmet.debug.pressNoElsewhere") else { return nil }
         guard let item, let frame = item.frame, let appState else { return nil }
         let copies = await appState.engine.barCopies()
         for id in NSScreen.screens.compactMap(\.directDisplayID) where id != CGMainDisplayID() && id != skip {

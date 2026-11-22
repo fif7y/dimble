@@ -135,6 +135,14 @@ public enum ItemMover {
         }
     }
 
+    /// What `shieldedClick` did.
+    public struct Click: Sendable {
+        /// Where the click went: `point` or one of the alternatives.
+        public let point: CGPoint
+        /// The wait for a full-screen app's hidden bar in ms, nil when the bar was already down.
+        public let waited: Int?
+    }
+
     /// One plain click at a bar point under the same shield as a drag —
     /// the native « toggle only answers real HID clicks (AXPress refused,
     /// probed 2026-08-22 and 2026-09-20). Cursor hidden for the blip,
@@ -142,11 +150,17 @@ public enum ItemMover {
     /// right-click menu).
     /// `owner`: the pid whose element the click is for. Over a full-screen
     /// app's hidden bar the click first brings the bar down and waits for that
-    /// pid's element to be under the point. Returns that wait in ms, nil when
-    /// the bar was already down.
+    /// pid's element to be under the point.
+    /// `alternatives`: other places the same element may be drawn (its other
+    /// copy on that bar). With something else under `point` and the owner's
+    /// element under one of them, the click goes there.
     @discardableResult
-    public static func shieldedClick(at point: CGPoint, button: CGMouseButton = .left, owner: pid_t? = nil) async -> Int? {
-        guard let source = CGEventSource(stateID: .hidSystemState) else { return nil }
+    public static func shieldedClick(
+        at point: CGPoint, or alternatives: [CGPoint] = [], button: CGMouseButton = .left, owner: pid_t? = nil
+    ) async -> Click {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return Click(point: point, waited: nil) }
+        var point = point
+        func ownerUnder(_ at: CGPoint) -> Bool { owner.map { pidAt(at) == $0 } ?? true }
         source.userData = SyntheticInput.tag
         let originalPosition = CGEvent(source: nil)?.location
         let shield = DragShield()
@@ -184,9 +198,15 @@ public enum ItemMover {
             while ContinuousClock.now - start < .milliseconds(1000) {
                 try? await Task.sleep(for: .milliseconds(10))
                 shield.reassert()
-                if !hiddenBarCovers(point), owner.map({ pidAt(point) == $0 }) ?? true { break }
+                if !hiddenBarCovers(point), let under = ([point] + alternatives).first(where: ownerUnder) {
+                    point = under
+                    break
+                }
             }
             waited = Int((ContinuousClock.now - start) / .milliseconds(1))
+        } else if owner != nil, !alternatives.isEmpty, !ownerUnder(point),
+                  let under = alternatives.first(where: ownerUnder) {
+            point = under
         }
         SyntheticInput.noteClickPosted()
         post(downType)
@@ -206,7 +226,7 @@ public enum ItemMover {
                         mouseCursorPosition: originalPosition, mouseButton: .left)?.post(tap: .cghidEventTap)
             }
         }
-        return waited
+        return Click(point: point, waited: waited)
     }
 
     /// MenuBarAgent's band over a hidden menu bar (27.3): a layer-25 window the
