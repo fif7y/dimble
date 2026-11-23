@@ -24,9 +24,11 @@ struct PanelTileArt {
     let name: String
     /// A launcher: the app isn't running, a click opens it.
     var dimmed = false
-    /// The app's own icon, drawn in place of a picture with no cut sharp
-    /// on the tile's display (#156). Nil when the app has several icons in
-    /// the bar (five tiles with one app icon say nothing) or none to show.
+    /// The item's stand-in, drawn in place of a picture with no cut sharp
+    /// on the tile's display (#156): the app's icon, Apple's symbol for a
+    /// system item, the glyph of one of Pelmet's own. Nil when another
+    /// app has several icons in the bar (five tiles with one app icon say
+    /// nothing) or there is none to show.
     var appIcon: NSImage?
 }
 

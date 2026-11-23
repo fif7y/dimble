@@ -18,4 +18,13 @@ enum ItemStandIn {
         }
         return ItemImageCache.icon(for: id)
     }
+
+    /// Whether the stand-in is the item's own mark (Apple's symbol for a
+    /// system item, the glyph of one of Pelmet's own) and not its app's
+    /// icon, which every item of that app would share.
+    static func isTheItemsOwnMark(_ id: ItemID) -> Bool {
+        guard let bundle = id.bundleID else { return false }
+        return PelmetBundle.ownIDs.contains(bundle)
+            || [PelmetBundle.agentID, PelmetBundle.textInputAgentID, PelmetBundle.systemUIServerID].contains(bundle)
+    }
 }

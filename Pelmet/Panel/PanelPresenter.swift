@@ -1208,7 +1208,9 @@ final class PanelPresenter: RevealPresenter {
             return nil
         } ?? [])
         // Apps with one icon in the bar: their own icon can stand for it
-        // where no cut is sharp (`PanelTileArt.appIcon`).
+        // where no cut is sharp (`PanelTileArt.appIcon`). A system item
+        // and one of Pelmet's own have a mark of their own, however many
+        // their host draws.
         let aloneFromItsApp = Set(Dictionary(grouping: items.compactMap(\.id.bundleID), by: { $0 })
             .filter { $0.value.count == 1 }.keys)
         var missing: [ItemID] = []
@@ -1224,7 +1226,8 @@ final class PanelPresenter: RevealPresenter {
                         let id = item?.id ?? key
                         content.art[tile] = PanelTileArt(
                             image: .picture(picture), name: name,
-                            appIcon: id.bundleID.map(aloneFromItsApp.contains) == true ? ItemStandIn.image(for: id) : nil)
+                            appIcon: ItemStandIn.isTheItemsOwnMark(id) || id.bundleID.map(aloneFromItsApp.contains) == true
+                                ? ItemStandIn.image(for: id) : nil)
                         // Shown while the pass retakes it.
                         if pictures.isStale(picture), !didntFitKeys.contains(key) { missing.append(key) }
                     } else {
