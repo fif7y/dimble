@@ -12,6 +12,7 @@
 // glass inside it can change height without that.
 
 import AppKit
+import PelmetCore
 import PelmetEngine
 import QuartzCore
 
@@ -155,15 +156,18 @@ class GlassPanel: NSPanel {
         edgeAccessory.frame = NSRect(x: 0, y: glass.frame.minY, width: 2 * leadingMargin, height: glass.frame.height)
     }
 
-    /// The bar's own height on `screen`: the visibleFrame band, falling
-    /// back to the safe area under a full-screen app, then to the bar's own
-    /// window: off the main display the visibleFrame keeps no band, and a
-    /// 30pt bar read as none and became 24 (externals, 2026-10-12).
+    /// The bar's own height on `screen`: its window's when one is drawn
+    /// (`BarBand.height`: a MacBook with an Island has a 45pt bar over a
+    /// 40pt safe area, #156), else the visibleFrame band. Under a
+    /// full-screen app it is the safe area, cut to the window's height
+    /// when that is shorter, never raised to it. Off the main display the
+    /// visibleFrame keeps no band, and a 30pt bar read as none and became
+    /// 24 (externals, 2026-10-12): the window answers there too.
     static func barHeight(of screen: NSScreen) -> CGFloat {
-        let safeBand = screen.safeAreaInsets.top
-        let visibleBand = screen.frame.maxY - screen.visibleFrame.maxY
-        let band = visibleBand > 0 && (safeBand == 0 || visibleBand <= safeBand + 2) ? visibleBand : safeBand
-        return band > 0 ? band : drawnBarHeight(of: screen) ?? 24
+        let drawn = drawnBarHeight(of: screen)
+        let band = BarBand.height(
+            safe: screen.safeAreaInsets.top, visible: screen.frame.maxY - screen.visibleFrame.maxY, window: drawn)
+        return band > 0 ? band : drawn ?? 24
     }
 
     /// The bar across `screen`, at `barHeight`.

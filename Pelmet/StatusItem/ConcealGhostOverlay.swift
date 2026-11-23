@@ -194,6 +194,11 @@ final class ConcealGhostOverlay {
             if pid == me {
                 return layer >= menuLevel ? (id, "Pelmet menu") : nil
             }
+            // The bar itself, whatever height the band was read at: a 45pt
+            // bar over a band read at 40 passed for a foreign surface (#156).
+            if BarBand.isBarWindow(
+                owner: w[kCGWindowOwnerName as String] as? String, layer: layer, barLevel: barLevel,
+                y: y, top: rect.minY, height: height) { return nil }
             // Its top anywhere above the band's last row: Snib's panel
             // hangs 2pt into the bar (y 37 of 39), and a picture filmed
             // with it carried its top edge as a line under the tile.
@@ -506,24 +511,32 @@ final class ConcealGhostOverlay {
             // (2026-09-07). Windows start below the bar window, so its
             // last row is still bar, never a window; a band more than
             // 2pt past the safe area is not the bar and is clamped.
-            let safeBand = screen.safeAreaInsets.top
+            // Debug: `defaults write app.fif7y.Pelmet pelmet.debug.bandShort
+            // -int 5` reads the safe area that many points short, to play a
+            // MacBook whose bar window is taller than its safe area (#156)
+            // on one where the two agree.
+            let safeBand = max(screen.safeAreaInsets.top - CGFloat(UserDefaults.standard.integer(forKey: "pelmet.debug.bandShort")), 0)
             let visibleBand = screen.frame.maxY - screen.visibleFrame.maxY
-            let ownBand = visibleBand > 0 && (safeBand == 0 || visibleBand <= safeBand + 2)
-                ? visibleBand : safeBand
-            var bandHeight = ownBand > 0 ? ownBand : rect.maxY
-            // The bar window is the bar. A visibleFrame band taller than it
-            // films a row of what lies under the bar, and the picture pass
-            // keyed that row as ink: a line under every tile (#81, a Mac
-            // Studio whose main display is external). The same on the
-            // builtin (39pt both, 2026-10-13).
-            if ownBand > 0, let drawn = GlassPanel.drawnBarHeight(of: screen), drawn < bandHeight {
-                let line = "ghost: display \(displayID) band \(Int(bandHeight))pt cut to its bar window's \(Int(drawn))pt"
+            let ownBand = BarBand.height(safe: safeBand, visible: visibleBand, window: nil)
+            // The bar window is the bar (`BarBand.height`). A visibleFrame
+            // band taller than it films a row of what lies under the bar,
+            // and the picture pass keyed that row as ink: a line under every
+            // tile (#81, a Mac Studio whose main display is external). A
+            // safe area shorter than it (40pt under a 45pt bar, a MacBook
+            // with an Island, #156) left the bar's own window taller than
+            // the band, so it was left out of the picture as a foreign
+            // surface, and the icons with it.
+            let barBand = ownBand > 0
+                ? BarBand.height(safe: safeBand, visible: visibleBand, window: GlassPanel.drawnBarHeight(of: screen, in: windowList))
+                : ownBand
+            if barBand != ownBand {
+                let line = "ghost: display \(displayID) band \(Int(ownBand))pt (safe area \(Int(safeBand)), visible frame \(Int(visibleBand))) \(barBand < ownBand ? "cut" : "raised") to its bar window's \(Int(barBand))pt"
                 if line != lastBandClampLine {
                     lastBandClampLine = line
                     PelmetLog.log(line)
                 }
-                bandHeight = drawn
             }
+            let bandHeight = barBand > 0 ? barBand : rect.maxY
             // Right-anchored translation onto this display, padded so the
             // snapshot's background is continuous with the bar around it.
             let translatedX = rect.minX + (screen.frame.maxX - primary.frame.maxX)
