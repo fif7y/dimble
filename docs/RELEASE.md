@@ -88,10 +88,13 @@ Everything below the one-time setup is: bump version → run script → publish.
    rename). Every build since the 0.1.5 bridge points `SUFeedURL` at the
    Pelmet feed (now the account site's `pelmet/` copy), so one update from that feed is enough to cross over. It
    carries 0.3.1 for that, and nothing newer is needed.
-6. Bump the Homebrew cask: `fif7y/homebrew-tap` → `Casks/dimble.rb` (`Casks/pelmet.rb` up to 0.3.1, renamed with the 0.3.2 stable), set
-   `version` and the DMG's `sha256` (`shasum -a 256 build/releases/Dimble-<v>.dmg`),
-   push with the same identity rule as step 4, then confirm the published DMG
-   hashes to what the cask declares.
+6. Homebrew: nothing to push. Dimble is in the official cask repo since 0.4.0
+   (Homebrew/homebrew-cask#305215), and Homebrew's bot bumps it from the
+   appcast. Its livecheck reads stable items only, so a beta never reaches it.
+   A day after a stable, check `brew livecheck --cask dimble` and
+   `brew info --cask dimble` show the new version; if not,
+   `brew bump-cask-pr dimble --version <v>`. `fif7y/homebrew-tap` only keeps
+   `tap_migrations.json`, which sends `dimble` and `pelmet` to the official cask.
 7. Sanity: install the previous DMG, let Sparkle offer the new version, update.
 
 `SKIP_NOTARIZE=1 scripts/release.sh` smoke-tests the archive/export/DMG half
