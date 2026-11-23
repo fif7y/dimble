@@ -93,4 +93,21 @@ import Testing
         #expect(PanelPictureFrame.copyIndex(pixelsPerPoint: [2], displayScale: 1) == 0)
         #expect(PanelPictureFrame.copyIndex(pixelsPerPoint: [], displayScale: 2) == nil)
     }
+
+    // #156: a 1x cut alone is not sharp on a 2x display, so the tile there
+    // draws the app's icon. The 1x display's own tile keeps the picture.
+    @Test func aCutBelowTheDisplaysScaleIsNotSharp() {
+        #expect(PanelPictureFrame.lacksSharpCut(pixelsPerPoint: [1], displayScale: 2))
+        #expect(!PanelPictureFrame.lacksSharpCut(pixelsPerPoint: [1], displayScale: 1))
+    }
+
+    @Test func aCutFromTheSharperBarIsSharpEverywhere() {
+        #expect(!PanelPictureFrame.lacksSharpCut(pixelsPerPoint: [1, 2], displayScale: 2))
+        #expect(!PanelPictureFrame.lacksSharpCut(pixelsPerPoint: [2], displayScale: 1))
+        #expect(!PanelPictureFrame.lacksSharpCut(pixelsPerPoint: [2], displayScale: 2))
+    }
+
+    @Test func noCutIsNotSharp() {
+        #expect(PanelPictureFrame.lacksSharpCut(pixelsPerPoint: [], displayScale: 1))
+    }
 }

@@ -47,4 +47,14 @@ public struct PanelPictureFrame: Equatable, Sendable {
         if let best = covering.min(by: { pixelsPerPoint[$0] < pixelsPerPoint[$1] }) { return best }
         return pixelsPerPoint.indices.max { pixelsPerPoint[$0] < pixelsPerPoint[$1] }
     }
+
+    /// Whether none of an icon's cuts covers the pixels of a display of
+    /// `displayScale`, by each cut's pixels per point. A 1x cut on a 2x
+    /// display is drawn enlarged, and enlarged it still read fuzzy (#156):
+    /// a tile there draws the app's own icon when it has one to show.
+    /// True with no cut at all.
+    public static func lacksSharpCut(pixelsPerPoint: [CGFloat], displayScale: CGFloat) -> Bool {
+        let scale = max(displayScale, 1)
+        return !pixelsPerPoint.contains { $0 >= scale - 0.01 }
+    }
 }

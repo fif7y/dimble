@@ -38,6 +38,19 @@ final class ItemPictures {
             let image: CGImage
             /// Points on the display it was taken on.
             let size: CGSize
+            /// Made from the 1x picture (`withEnlargedCopy`), not cut from
+            /// a bar.
+            var isEnlarged = false
+        }
+
+        /// Whether no cut from a bar is sharp on a display of `scale`: the
+        /// enlarged copy is not one. The tile draws the app's icon there
+        /// when it has one to show (#156).
+        func lacksSharpCut(onScale scale: CGFloat) -> Bool {
+            let cuts = [Copy(image: image, size: size)] + (sharper.map { [$0] } ?? [])
+            return PanelPictureFrame.lacksSharpCut(
+                pixelsPerPoint: cuts.filter { !$0.isEnlarged }.map { CGFloat($0.image.width) / max($0.size.width, 1) },
+                displayScale: scale)
         }
 
         /// The copy a panel on a display of `scale` draws.
@@ -115,7 +128,7 @@ final class ItemPictures {
               let image = enlarged(picture.image)
         else { return picture }
         var out = picture
-        out.sharper = Picture.Copy(image: image, size: picture.size)
+        out.sharper = Picture.Copy(image: image, size: picture.size, isEnlarged: true)
         return out
     }
 
@@ -207,6 +220,8 @@ final class ItemPictures {
             let sharperPNG: Data?
             let sharperWidth: Double?
             let sharperHeight: Double?
+            /// Nil in a file from before the copy said which it was.
+            let sharperEnlarged: Bool?
         }
         let dark: Bool
         let entries: [Entry]
@@ -234,7 +249,7 @@ final class ItemPictures {
             var sharper: Picture.Copy?
             if let png = entry.sharperPNG, let width = entry.sharperWidth, let height = entry.sharperHeight,
                let image = Self.image(fromPNG: png) {
-                sharper = Picture.Copy(image: image, size: CGSize(width: width, height: height))
+                sharper = Picture.Copy(image: image, size: CGSize(width: width, height: height), isEnlarged: entry.sharperEnlarged ?? false)
             }
             loaded[ItemID(rawValue: entry.key)] = Picture(
                 image: image, size: CGSize(width: entry.width, height: entry.height),
@@ -264,7 +279,8 @@ final class ItemPictures {
             return Kept.Entry(key: key.rawValue, png: png, width: picture.size.width, height: picture.size.height,
                               takenAt: picture.takenAt, isMonochrome: picture.isMonochrome, isHighlighted: picture.isHighlighted,
                               sharperPNG: sharper?.1, sharperWidth: sharper.map { Double($0.0.size.width) },
-                              sharperHeight: sharper.map { Double($0.0.size.height) })
+                              sharperHeight: sharper.map { Double($0.0.size.height) },
+                              sharperEnlarged: sharper.map(\.0.isEnlarged))
         }
         guard let data = try? PropertyListEncoder().encode(Kept(dark: dark, entries: entries, epoch: Self.keptEpoch)) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

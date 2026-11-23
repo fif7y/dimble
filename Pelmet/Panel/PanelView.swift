@@ -24,6 +24,10 @@ struct PanelTileArt {
     let name: String
     /// A launcher: the app isn't running, a click opens it.
     var dimmed = false
+    /// The app's own icon, drawn in place of a picture with no cut sharp
+    /// on the tile's display (#156). Nil when the app has several icons in
+    /// the bar (five tiles with one app icon say nothing) or none to show.
+    var appIcon: NSImage?
 }
 
 /// One stacked block of the panel.
@@ -700,6 +704,8 @@ struct PanelTileLabel: View {
         // draws as it is (#102).
         let room = CGSize(width: well.width - PanelMetrics.pictureMargin, height: well.height - PanelMetrics.pictureMargin)
         switch art.image {
+        case .picture(let item) where art.appIcon != nil && !item.isHighlighted && item.lacksSharpCut(onScale: displayScale):
+            art.appIcon.map { iconGlyph($0, room: room) }
         case .picture(let item):
             let copy = item.drawn(onScale: displayScale)
             let image = copy.image, size = copy.size
@@ -728,14 +734,18 @@ struct PanelTileLabel: View {
             .offset(x: placed.frame.minX, y: placed.frame.minY)
             .frame(width: well.width, height: well.height, alignment: .topLeading)
         case .icon(let icon):
-            let side = min(icon.isTemplate ? 16 : 20, room.height)
-            Image(nsImage: icon)
-                .renderingMode(icon.isTemplate ? .template : .original)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(ink.primary)
-                .frame(width: side, height: side)
+            iconGlyph(icon, room: room)
         }
+    }
+
+    private func iconGlyph(_ icon: NSImage, room: CGSize) -> some View {
+        let side = min(icon.isTemplate ? 16 : 20, room.height)
+        return Image(nsImage: icon)
+            .renderingMode(icon.isTemplate ? .template : .original)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .foregroundStyle(ink.primary)
+            .frame(width: side, height: side)
     }
 }
 

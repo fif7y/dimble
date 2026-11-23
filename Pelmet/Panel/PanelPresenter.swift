@@ -1207,6 +1207,10 @@ final class PanelPresenter: RevealPresenter {
             if case .item(let key) = tile { return key }
             return nil
         } ?? [])
+        // Apps with one icon in the bar: their own icon can stand for it
+        // where no cut is sharp (`PanelTileArt.appIcon`).
+        let aloneFromItsApp = Set(Dictionary(grouping: items.compactMap(\.id.bundleID), by: { $0 })
+            .filter { $0.value.count == 1 }.keys)
         var missing: [ItemID] = []
         for block in content.blocks where !block.isFolded {
             for tile in block.grid.rows.joined().map(\.tile) {
@@ -1217,8 +1221,10 @@ final class PanelPresenter: RevealPresenter {
                     let item = byKey[key]
                     let name = item.map(ItemNaming.displayName(for:)) ?? ItemNaming.displayName(for: key)
                     if let picture = pictures.picture(for: key) {
+                        let id = item?.id ?? key
                         content.art[tile] = PanelTileArt(
-                            image: .picture(picture), name: name)
+                            image: .picture(picture), name: name,
+                            appIcon: id.bundleID.map(aloneFromItsApp.contains) == true ? ItemStandIn.image(for: id) : nil)
                         // Shown while the pass retakes it.
                         if pictures.isStale(picture), !didntFitKeys.contains(key) { missing.append(key) }
                     } else {
