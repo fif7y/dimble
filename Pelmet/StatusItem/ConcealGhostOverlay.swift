@@ -420,6 +420,27 @@ final class ConcealGhostOverlay {
 
     /// Said once per display and heights, not per film.
     private static var lastBandClampLine = ""
+    private static var lastLeftOutLine: [CGDirectDisplayID: String] = [:]
+
+    /// The windows a capture of `display`'s band left out, each with its
+    /// frame, said when the set changes: the line above names owners only,
+    /// not the display or what the windows span, and a window that draws a
+    /// bar's icons left out is a strip with no icon to cut (#156).
+    private static func sayLeftOut(_ ids: Set<CGWindowID>, display: CGDirectDisplayID, bandHeight: CGFloat, in list: [[String: Any]]?) {
+        let described = (list ?? []).compactMap { w -> String? in
+            guard let id = (w[kCGWindowNumber as String] as? NSNumber)?.uint32Value, ids.contains(id),
+                  let b = w[kCGWindowBounds as String] as? [String: CGFloat],
+                  let x = b["X"], let y = b["Y"], let width = b["Width"], let height = b["Height"]
+            else { return nil }
+            let owner = w[kCGWindowOwnerName as String] as? String ?? "?"
+            let layer = w[kCGWindowLayer as String] as? Int ?? 0
+            return "\(owner) \(Int(width))×\(Int(height)) at \(Int(x)),\(Int(y)) layer \(layer)"
+        }
+        let line = "ghost: display \(display) band \(Int(bandHeight))pt, left out — \(described.joined(separator: "; "))"
+        guard lastLeftOutLine[display] != line else { return }
+        lastLeftOutLine[display] = line
+        PelmetLog.log(line)
+    }
 
     /// `excludingOwnWindows`: leave Pelmet's own windows out, so a picture
     /// taken under a cover shows the real bar beneath it (the panel's
@@ -544,6 +565,7 @@ final class ConcealGhostOverlay {
                 } ?? [])
                 if !foreign.isEmpty {
                     PelmetLog.log("ghost: capture leaves out \(foreign.map(\.owner).joined(separator: ", ")) (\(excluded.count) window(s))")
+                    sayLeftOut(Set(foreign.map(\.id)), display: displayID, bandHeight: bandHeight, in: windowList)
                 }
             }
             if liveMirror {

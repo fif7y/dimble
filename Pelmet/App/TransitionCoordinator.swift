@@ -3144,7 +3144,9 @@ extension TransitionCoordinator {
         var pictures: [ItemID: ItemPictures.Picture] = [:]
         var contaminated: [(ItemID, Double)] = []
         var fromSharper = 0
-        var notCutThere: [ItemID] = []
+        // Each with why: `0 of 10 … won't cut there` named no reason, and
+        // the cut has four ways to give nothing (#156).
+        var notCutThere: [String] = []
         var readDifferently: [ItemID] = []
         func keep(_ key: ItemID, _ picture: ItemPictures.Picture, _ column: ConcealGhostOverlay.BarSnapshot) {
             pictures[key] = picture
@@ -3157,11 +3159,14 @@ extension TransitionCoordinator {
         for (key, f) in items {
             var there: (picture: ItemPictures.Picture, column: ConcealGhostOverlay.BarSnapshot)?
             if let sharp, let frame = sharper?.frames[key] {
-                if case .picture(let picture, let column) = Self.cut(key, frame, from: sharp, dump: dump) {
+                switch Self.cut(key, frame, from: sharp, dump: dump) {
+                case .picture(let picture, let column):
                     there = (picture, column)
                     fromSharper += 1
-                } else {
-                    notCutThere.append(key)
+                case .contaminated(let ink):
+                    notCutThere.append("\(key.rawValue) (the empty bar holds an icon there, \(String(format: "%.1f%%", ink * 100)))")
+                case .none(let why):
+                    notCutThere.append("\(key.rawValue) (\(why))")
                 }
             }
             switch Self.cut(key, f, from: primary, dump: dump) {
@@ -3190,7 +3195,7 @@ extension TransitionCoordinator {
         }
         if let sharper, sharp != nil {
             let notDrawn = items.count - sharper.frames.count
-            PelmetLog.log("pass: \(fromSharper) of \(items.count) cut from display \(sharper.display)'s bar too\(notDrawn > 0 ? ", \(notDrawn) not drawn clear there or moved" : "")\(notCutThere.isEmpty ? "" : ", \(notCutThere.count) that won't cut there \(notCutThere.map(\.rawValue))")\(readDifferently.isEmpty ? "" : ", \(readDifferently.count) that read differently there \(readDifferently.map(\.rawValue))"), each display's panel draws its own copy")
+            PelmetLog.log("pass: \(fromSharper) of \(items.count) cut from display \(sharper.display)'s bar too\(notDrawn > 0 ? ", \(notDrawn) not drawn clear there or moved" : "")\(notCutThere.isEmpty ? "" : ", \(notCutThere.count) that won't cut there \(notCutThere)")\(readDifferently.isEmpty ? "" : ", \(readDifferently.count) that read differently there \(readDifferently.map(\.rawValue))"), each display's panel draws its own copy")
         }
         if !contaminated.isEmpty {
             let named = contaminated.map { "\($0.0.rawValue) \(String(format: "%.1f%%", $0.1 * 100))" }.joined(separator: ", ")
@@ -3218,7 +3223,8 @@ extension TransitionCoordinator {
     private enum Cut {
         case picture(ItemPictures.Picture, column: ConcealGhostOverlay.BarSnapshot)
         case contaminated(Double)
-        case none
+        /// With why, for the log.
+        case none(String)
     }
 
     /// The item at `f` (on the bar `copy` was filmed on) cut out of it.
@@ -3233,11 +3239,14 @@ extension TransitionCoordinator {
         // taken draws its dark top edge there, with its shadow's darkest
         // row above it, which read as ink: a line under every tile, and
         // the icon pushed up its tile on a bright bar (#127).
-        guard f.minX >= base.windowFrame.minX, f.maxX <= base.windowFrame.maxX else { return .none }
+        let at = "\(Int(f.minX))…\(Int(f.maxX))"
+        guard f.minX >= base.windowFrame.minX, f.maxX <= base.windowFrame.maxX else {
+            return .none("at \(at), off the strip \(Int(base.windowFrame.minX))…\(Int(base.windowFrame.maxX))")
+        }
         let rect = CGRect(
             x: ((f.minX + 1 - base.windowFrame.minX) * scale).rounded(), y: 0,
             width: ((f.width - 2) * scale).rounded(), height: CGFloat(base.image.height) - scale.rounded())
-        guard rect.width > 0, let image = base.image.cropping(to: rect) else { return .none }
+        guard rect.width > 0, let image = base.image.cropping(to: rect) else { return .none("at \(at), no column to crop") }
         let column = ConcealGhostOverlay.BarSnapshot(
             image: image,
             windowFrame: NSRect(x: f.minX + 1, y: base.windowFrame.minY, width: rect.width / scale, height: base.windowFrame.height),
@@ -3262,7 +3271,7 @@ extension TransitionCoordinator {
             from: column,
             raw: copy.raw.image.cropping(to: rect),
             background: background)
-        else { return .none }
+        else { return .none("at \(at), nothing drawn in its column") }
         return .picture(picture, column: column)
     }
 
