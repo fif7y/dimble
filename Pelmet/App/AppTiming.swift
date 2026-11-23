@@ -189,6 +189,9 @@ enum AppTiming {
     static let dragAdoptDelay: TimeInterval = 0.35
     /// Rehide re-arm while deferred (pointer in band / elevated window).
     static let rehideDeferRearm: TimeInterval = 1.5
+    /// A click elsewhere waits at most this long for the popover it closed
+    /// to go (Passwords fades in ~160ms) before the conceal runs anyway.
+    static let concealPopoverWait: TimeInterval = 0.6
     /// Termination: max wait for engine.stop() before replying anyway.
     static let terminationStopDeadline: TimeInterval = 2
     /// Accessibility grant poll. A revoked grant only shows up as empty AX

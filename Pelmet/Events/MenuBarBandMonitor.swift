@@ -526,7 +526,7 @@ final class MenuBarBandMonitor {
         // Pelmet frontmost only holds the bar for the layout editor and the
         // onboarding demo — the General tab is not a reason to stay revealed.
         if NSApp.isActive, appState?.editorHoldsBar == true || OnboardingController.shared.isPresented { return .active }
-        if pointerIsOverElevatedWindow() { return .elevated }
+        if pointerIsOverElevatedWindow() || popUpUnderBar() { return .elevated }
         // Apple's « open on hidden icons that didn't fit: it draws them left
         // of the notch, and the notch is off the band, so the way there read
         // as leaving the bar and they concealed under the pointer (#81, live
@@ -554,6 +554,46 @@ final class MenuBarBandMonitor {
         let location = NSEvent.mouseLocation
         guard let geometry = screenGeometry(containing: location), let notch = geometry.notch else { return false }
         return NSMouseInRect(location, geometry.band, false) && location.x > notch.minX && location.x < notch.maxX
+    }
+
+    /// A status item's menu or popover is open: a pop-up-menu-level window
+    /// whose top edge hangs from the bar. Concealing under one takes its icon
+    /// off the bar still highlighted, and the capsule stays (Passwords'
+    /// 320×384 layer-101 popover at y=35, 2026-11-24). Overlays drawn over
+    /// the bar itself (Canopy's at y=0) start above it and don't count.
+    private func popUpUnderBar() -> Bool {
+        guard let primary = NSScreen.screens.first,
+              let windows = ConcealGhostOverlay.onScreenWindows() else { return false }
+        let bandHeight = primary.frame.maxY - primary.visibleFrame.maxY
+        // Auto-hidden bar or full-screen Space: no band to hang from, and
+        // Control Center's y=0 window would then hold the reveal for good.
+        guard bandHeight > 0 else { return false }
+        let level = Int(CGWindowLevelForKey(.popUpMenuWindow))
+        return windows.contains { window in
+            guard (window[kCGWindowLayer as String] as? Int) == level,
+                  (window[kCGWindowAlpha as String] as? CGFloat ?? 1) > 0.01,
+                  let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
+                  let y = bounds["Y"], let width = bounds["Width"], let height = bounds["Height"],
+                  width > 20, height > 12, width < 900, height < 1200
+            else { return false }
+            return y >= bandHeight - 1 && y <= bandHeight + 8
+        }
+    }
+
+    /// A click elsewhere also closes the open popover: conceal once it has
+    /// gone, so its button un-highlights while still on the bar.
+    private func concealAfterPopUpCloses() {
+        pendingConceal?.cancel()
+        pendingConceal = Task { @MainActor [weak self] in
+            let cap = Date().addingTimeInterval(AppTiming.concealPopoverWait)
+            while Date() < cap, self?.popUpUnderBar() == true {
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+            // Settings or the editor may have opened during the wait.
+            guard !Task.isCancelled, let appState = self?.appState, appState.isRevealed,
+                  !appState.editorHoldsBar, !NSApp.isActive else { return }
+            appState.rehideTriggered(.clickedElsewhere)
+        }
     }
 
     /// Deliberately narrow: only visible, menu/popover-sized windows at
@@ -861,7 +901,7 @@ final class MenuBarBandMonitor {
             // display never collapse either: the display's policy wins.
             if !appState.editorHoldsBar, !NSApp.isActive, !pointerIsOverElevatedWindow(),
                appState.settings.behavior(forDisplayUUID: screen?.displayUUIDString) == .collapse {
-                appState.rehideTriggered(.clickedElsewhere)
+                concealAfterPopUpCloses()
             }
         }
     }
