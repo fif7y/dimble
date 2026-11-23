@@ -69,6 +69,16 @@ final class SectionGrouper {
     private var driftSeen: (ids: Set<ItemID>, since: ContinuousClock.Instant)?
     private var lastDriftPass: ContinuousClock.Instant?
     private var lastDriftWaiting: String?
+    /// Drift read while Hidden and Always Hidden were both out, the one time
+    /// all their icons have live frames. At rest the remembered frames keep
+    /// Always Hidden left of Hidden (`FrameMemory`), so an icon standing
+    /// among the other section's reads as no drift the moment the bar shuts,
+    /// and the keeper, which waits out a reveal the user opened, never saw it
+    /// again: a double-click kept showing Battery right of a Hidden icon
+    /// (#171, 2026-11-23). Carried until a full reveal reads again, a pass
+    /// moves it, or its tries run out.
+    private var seenAtFullReveal: Set<ItemID> = []
+    private var lastCarried = ""
     private var lastLiftWaiting: String?
     private var observers: [NSObjectProtocol] = []
     private var menuDepth = 0
@@ -295,7 +305,7 @@ final class SectionGrouper {
         appState.slotUnlistedIcons(snap, skipping: Set(strays))
         // A stray is grouped above or left where the user put it, never
         // kept to its stored slot from here.
-        let drift = noteDrift(appState, snap).filter { !strays.contains($0) }
+        let drift = carryFullRevealDrift(appState, read: noteDrift(appState, snap)).filter { !strays.contains($0) }
         for id in byHand where strays.contains(id) {
             PelmetLog.log("group: \(id.rawValue) moved by hand — left where it is")
         }
@@ -383,6 +393,23 @@ final class SectionGrouper {
         return plan.moves.map(\.item)
     }
 
+    /// The drift read now, plus what the last full reveal saw out of order
+    /// that a read at rest can't (`seenAtFullReveal`).
+    private func carryFullRevealDrift(_ appState: AppState, read: [ItemID]) -> [ItemID] {
+        if appState.currentRevealedSections.isSuperset(of: [.hidden, .alwaysHidden]) {
+            seenAtFullReveal = Set(read)
+            lastCarried = ""
+            return read
+        }
+        let carried = seenAtFullReveal.subtracting(read).sorted { $0.rawValue < $1.rawValue }
+        let line = carried.isEmpty ? "" : "order: carrying [\(Self.names(carried))] — out of order at the last full reveal"
+        if line != lastCarried {
+            lastCarried = line
+            if !line.isEmpty { PelmetLog.log(line) }
+        }
+        return read + carried
+    }
+
     /// M3, the keeper: drift from the stored order goes back to its stored
     /// slots through the grouper's door. The drift must read the same for
     /// `driftSettle` first, passes are `driftCooldown` apart, and an icon
@@ -418,6 +445,7 @@ final class SectionGrouper {
         let verdict = driftBudget.check(candidates, roster: model.roster)
         if !verdict.newlyExhausted.isEmpty {
             PelmetLog.log("order: giving up on [\(Self.names(verdict.newlyExhausted))] after \(driftBudget.limit) attempts — left to Apply")
+            seenAtFullReveal.subtract(verdict.newlyExhausted)
         }
         let ready = verdict.ready
         guard !ready.isEmpty else {
@@ -481,6 +509,7 @@ final class SectionGrouper {
         lastDriftPass = .now
         driftSeen = nil
         driftBudget.spend(ready, roster: model.roster)
+        seenAtFullReveal.subtract(report.applied)
         PelmetLog.log("order: pass applied=\(report.applied.count) failed=\(report.failed.count) skipped=\(report.skipped.count)")
         schedule(after: AppTiming.groupingDebounce)
     }

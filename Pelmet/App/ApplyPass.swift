@@ -461,7 +461,11 @@ enum ApplyPass {
         case .drift(let allowed):
             if wholeReveal, let snap = appState.snapshot {
                 let roster = appState.settings.sectionModel.roster
-                revealedForPass = driftPlan(for: appState, snapshot: snap, allowing: allowed, remembered: true).moves.contains { move in
+                // Drift a full reveal saw (#171) has no move in a remembered
+                // plan, which keeps Always Hidden left of Hidden: only the
+                // live frames show it, so a concealed icon means a reveal.
+                revealedForPass = allowed.contains { roster.section(of: $0) != .visible }
+                    || driftPlan(for: appState, snapshot: snap, allowing: allowed, remembered: true).moves.contains { move in
                     [move.item, move.after, move.before].compactMap { $0 }.contains { roster.section(of: $0) != .visible }
                 }
             }
