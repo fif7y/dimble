@@ -943,8 +943,40 @@ final class MenuBarBandMonitor {
             // display never collapse either: the display's policy wins.
             if !appState.editorHoldsBar, !NSApp.isActive, !pointerIsOverElevatedWindow(),
                appState.settings.behavior(forDisplayUUID: screen?.displayUUIDString) == .collapse {
-                appState.rehideTriggered(.clickedElsewhere)
+                concealOnceMenusClose()
             }
+        }
+    }
+
+    /// A click elsewhere also closes the popover an item had open, but its
+    /// window fades for a beat (Passwords' for ~160ms), and concealing under
+    /// it takes the icon off the bar still highlighted: the grey capsule
+    /// stays until the next reveal (#172, from @mr-steveryan's #173). So the
+    /// conceal waits for the last pop-up-menu-level window to go, the same
+    /// oracle the rehide hold reads, at most `concealMenuWait`: Control
+    /// Center keeps one up on a full-screen Space. No menu up, no wait.
+    private func concealOnceMenusClose() {
+        pendingConceal?.cancel()
+        pendingConceal = nil
+        guard let owner = SectionGrouper.popUpMenuOwner() else {
+            appState?.rehideTriggered(.clickedElsewhere)
+            return
+        }
+        PelmetLog.log("band: click elsewhere waits for \(owner)'s menu to go")
+        let started = Date()
+        pendingConceal = Task { @MainActor [weak self] in
+            while !Task.isCancelled, Date().timeIntervalSince(started) < AppTiming.concealMenuWait,
+                  SectionGrouper.popUpMenuOwner() != nil {
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+            // Settings or the editor may have come up during the wait.
+            guard !Task.isCancelled, let appState = self?.appState, appState.isRevealed,
+                  !appState.editorHoldsBar, !NSApp.isActive else { return }
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            let left = SectionGrouper.popUpMenuOwner()
+            PelmetLog.log(left.map { "band: \($0)'s menu still up after \(ms)ms, concealing anyway" }
+                          ?? "band: menu gone after \(ms)ms, concealing")
+            appState.rehideTriggered(.clickedElsewhere)
         }
     }
 

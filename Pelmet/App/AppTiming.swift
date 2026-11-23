@@ -204,6 +204,9 @@ enum AppTiming {
     /// goes away must not pin the bar open for good; same cap as a press's
     /// wait for the menu it opened (`pressMenuCap`).
     static let rehideMenuHoldCap: TimeInterval = 60
+    /// A click elsewhere waits at most this long for the popover it closed
+    /// to go (Passwords' fades in ~160ms) before the conceal runs anyway (#172).
+    static let concealMenuWait: TimeInterval = 0.6
     /// Termination: max wait for engine.stop() before replying anyway.
     static let terminationStopDeadline: TimeInterval = 2
     /// Accessibility grant poll. A revoked grant only shows up as empty AX
