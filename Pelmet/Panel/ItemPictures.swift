@@ -333,33 +333,9 @@ final class ItemPictures {
         let w = image.width, h = image.height
         guard w > 0, h > 0, let bitmap = rgba(image, width: w, height: h) else { return nil }
         defer { withExtendedLifetime(bitmap.context) {} }
-        let px = bitmap.pixels
-        func alpha(_ x: Int, _ y: Int) -> Int { Int(px[(y * w + x) * 4 + 3]) }
-
-        var runs: [ClosedRange<Int>] = []
-        var start: Int?
-        for x in 0...w {
-            let inked = x < w && (0..<h).contains { alpha(x, $0) > 24 }
-            if inked, start == nil { start = x }
-            if !inked, let s = start { runs.append(s...(x - 1)); start = nil }
-        }
-        guard let widest = runs.map(\.count).max() else { return nil }
-        let kept = runs.filter { run in
-            guard runs.count > 1, run.lowerBound == 0 || run.upperBound == w - 1 else { return true }
-            // A capsule's fill is see-through; a glyph has solid pixels.
-            let solid = run.contains { x in (0..<h).contains { alpha(x, $0) > 160 } }
-            return solid && run.count * 5 >= widest * 2
-        }
-        guard let minX = kept.first?.lowerBound, let maxX = kept.last?.upperBound else { return nil }
-        var minY = h, maxY = -1
-        for y in 0..<h where (minX...maxX).contains(where: { alpha($0, y) > 24 }) {
-            minY = min(minY, y); maxY = max(maxY, y)
-        }
-        guard maxY >= minY else { return nil }
-        let lo = max(0, minX - 1), hi = min(w - 1, maxX + 1)
-        // Rows are counted from the top here; CGImage cropping is too.
-        let top = max(0, minY - 1), bottom = min(h - 1, maxY + 1)
-        return CGRect(x: lo, y: top, width: hi - lo + 1, height: bottom - top + 1)
+        // Rows are counted from the top there; CGImage cropping is too.
+        guard let box = InkBox.bounds(bitmap.pixels, width: w, height: h) else { return nil }
+        return CGRect(x: box.x, y: box.y, width: box.width, height: box.height)
     }
 
     private struct Mask {
