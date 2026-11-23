@@ -1217,6 +1217,21 @@ final class MenuBarBandMonitor {
             if recordsHit { PelmetLog.log("band: hit-test role=AXMenuBar owner=\(owner) → own extras bar, not empty") }
             return false
         }
+        // Other apps' icons lag the same way: for ~0.6s after a reveal moves
+        // the icons, the point over an icon answers with a menu-bar-only
+        // app's MAIN menu bar (frame the whole bar, not its extras bar), and
+        // that read as empty bar, so a click on the icon also toggled the bar
+        // and hid the section under the menu it opened (Velja, Snib,
+        // Bitwarden, probe 2026-11-23). An accessory app never draws a menu
+        // bar, so its bar under the pointer is its icon mid-move. Frontmost
+        // or regular (Finder is the backdrop even when another app is in
+        // front), it stays backdrop as before.
+        if role == "AXMenuBar", pid > 0, owner != PelmetBundle.agentID,
+           pid != NSWorkspace.shared.frontmostApplication?.processIdentifier,
+           let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy != .regular {
+            if recordsHit { PelmetLog.log("band: hit-test role=AXMenuBar owner=\(owner) → a menu-bar app's icon mid-move, not empty") }
+            return false
+        }
         // The corner left of the Apple menu is the Apple menu's, not empty
         // space: macOS opens it from the screen's very edge while the item's
         // AX frame starts 10pt in, so the strip between hit-tests as the bare
