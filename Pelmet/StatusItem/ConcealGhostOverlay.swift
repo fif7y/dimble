@@ -1466,6 +1466,8 @@ final class ConcealGhostOverlay {
     /// left of it: either way a twin's cut stops matching, and in live mode
     /// nothing else reads the bar to say so. Watched while held bars are up.
     private static var agentWatch: (observer: AXObserver, pid: pid_t)?
+    /// The observer asked for AXUIElementDestroyed.
+    private static var destroyedAsked: AXObserver?
     private static var agentReadPending = false
     private static var agentReadAt = Date.distantPast
     /// For the bar to settle before it is read.
@@ -1770,8 +1772,11 @@ final class ConcealGhostOverlay {
     }
 
     private static func watchAgent() {
-        guard agentWatch == nil,
-              let agent = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == PelmetBundle.agentID })
+        guard agentWatch == nil else {
+            hearDestroyed()
+            return
+        }
+        guard let agent = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == PelmetBundle.agentID })
         else { return }
         var observer: AXObserver?
         let made = AXObserverCreate(agent.processIdentifier, { _, element, _, _ in
@@ -1781,12 +1786,31 @@ final class ConcealGhostOverlay {
         }, &observer)
         guard made == .success, let observer else { return }
         let app = AXUIElementCreateApplication(agent.processIdentifier)
-        let heard = [kAXLayoutChangedNotification, kAXUIElementDestroyedNotification].filter {
-            AXObserverAddNotification(observer, app, $0 as CFString, nil) == .success
-        }
-        guard !heard.isEmpty else { return }
+        guard AXObserverAddNotification(observer, app, kAXLayoutChangedNotification as CFString, nil) == .success else { return }
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
         agentWatch = (observer, agent.processIdentifier)
+        // Each notification has HIServices run a block of its own for every
+        // app in the bar: two at once took ~500 of the 512 threads a process
+        // may have, and a main thread needing one right then never got it
+        // (Dimble hung, 2026-11-24 12:57). So one at a time, and the observer
+        // stays for as long as this agent runs.
+        hearDestroyed()
+    }
+
+    /// The second notification, 3s after the first: the new cover's twin
+    /// reads the bar 1s in. A busy agent can refuse it, and the next cover
+    /// put up while none is asks again.
+    private static func hearDestroyed() {
+        guard let watch = agentWatch, destroyedAsked !== watch.observer else { return }
+        destroyedAsked = watch.observer
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            guard agentWatch?.observer === watch.observer else { return }
+            let app = AXUIElementCreateApplication(watch.pid)
+            let heard = AXObserverAddNotification(watch.observer, app, kAXUIElementDestroyedNotification as CFString, nil)
+            guard heard != .success, heard != .notificationAlreadyRegistered else { return }
+            destroyedAsked = nil
+            PelmetLog.log("ghost: agent watch refused a notification (AXError \(heard.rawValue))")
+        }
     }
 
     private static func unwatchAgent() {
@@ -1819,7 +1843,6 @@ final class ConcealGhostOverlay {
             missionWatch?.invalidate()
             missionWatch = nil
             awayHeld = []
-            unwatchAgent()
             return
         }
         // MenuBarAgent restarted: watch the new one.
