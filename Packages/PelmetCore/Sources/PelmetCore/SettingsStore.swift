@@ -511,6 +511,11 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         hideSystemExtras || replacesCollateralExtras
     }
 
+    /// A short line in the bar where Always Hidden ends and Hidden starts,
+    /// while both are out. Off by default: people read it as a separator
+    /// they never added (#149, #171).
+    public var showSectionDivider: Bool = false
+
     /// Right-clicking an empty spot on the menu bar opens Pelmet's menu.
     /// Off for people running an app that draws its own surface across the
     /// bar, where the two menus compete for the same click (issue #8).
@@ -638,6 +643,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         case itemHotkeys, itemAliases
         case revealTriggers, autoRehide, rehideDelay, rehideOnClickElsewhere, revealAnimation
         case hideSystemExtras, showMediaControls, extraItems, sectionModel, separators
+        case showSectionDivider
         case displayTemplate, displayOverrides, displayRevealTargets
         case notifyOnUpdates, barRightClickMenu, betaUpdates
         case statusIconStyle
@@ -679,6 +685,7 @@ public struct SettingsStore: Codable, Equatable, Sendable {
         notifyOnUpdates = c.field(Bool.self, .notifyOnUpdates, defaults.notifyOnUpdates)
         betaUpdates = c.field(Bool.self, .betaUpdates, defaults.betaUpdates)
         barRightClickMenu = c.field(Bool.self, .barRightClickMenu, defaults.barRightClickMenu)
+        showSectionDivider = c.field(Bool.self, .showSectionDivider, defaults.showSectionDivider)
         statusIconStyle = c.field(StatusIconStyle.self, .statusIconStyle, defaults.statusIconStyle)
         chevronMenu = c.field(ChevronMenu.self, .chevronMenu, defaults.chevronMenu).normalized()
         notificationCenterHotkey = c.field(HotkeySpec?.self, .notificationCenterHotkey, defaults.notificationCenterHotkey) ?? defaults.notificationCenterHotkey

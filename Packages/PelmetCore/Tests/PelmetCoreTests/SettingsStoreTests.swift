@@ -116,6 +116,18 @@ struct SettingsStoreTests {
         #expect(on.showLiveActivities)
     }
 
+    // The section line is off for everyone, older blobs included (#171);
+    // on survives a save.
+    @Test func showSectionDividerDefaultsOffAndRoundTrips() throws {
+        #expect(!SettingsStore().showSectionDivider)
+        let legacy = try JSONDecoder().decode(SettingsStore.self, from: Data("{}".utf8))
+        #expect(!legacy.showSectionDivider)
+        var settings = SettingsStore()
+        settings.showSectionDivider = true
+        let back = try JSONDecoder().decode(SettingsStore.self, from: JSONEncoder().encode(settings))
+        #expect(back.showSectionDivider)
+    }
+
     // Turned off on purpose (#79) survives a save; only a missing, null or
     // unreadable value falls back to the default.
     @Test func turnedOffHotkeyRoundTrips() throws {

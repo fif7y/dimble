@@ -4050,7 +4050,8 @@ final class AppState {
 
     private func refreshSectionDivider(snapshot fresh: EngineSnapshot? = nil) {
         sectionDividerRefresh?.cancel()
-        guard !isTransitioning, !panelShowsReveal, picturePassSections == nil,
+        guard settings.showSectionDivider,
+              !isTransitioning, !panelShowsReveal, picturePassSections == nil,
               MenuBarGeometry.showsSectionDivider(revealed: currentRevealedSections),
               let snap = fresh ?? snapshot, snap.itemsAtRest else {
             sectionDivider.hide()

@@ -66,6 +66,8 @@ enum SettingsIndex {
                      ["double click", "always hidden"]),
             behavior("middleClickReveal", String(localized: "Middle-click reveals"),
                      ["middle click", "scroll wheel", "always hidden", "wheel", "third button"]),
+            behavior("sectionDivider", String(localized: "Show a line between Hidden and Always Hidden"),
+                     ["divider", "separator", "line", "always hidden"]),
             behavior("autoRehide", String(localized: "Hide again"),
                      ["auto hide", "rehide", "conceal", "timer", "delay", "seconds", "close", "never"]),
             behavior("rehideElsewhere", String(localized: "Hide again when you click elsewhere"),

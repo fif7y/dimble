@@ -1253,6 +1253,14 @@ private struct BehaviorPane: View {
                                  options: Self.middleClickOptions)
             }
             .settingAnchor("middleClickReveal")
+            // Phrased as adding the line, since it's off by default. Not
+            // "separator": that's the item you add from the editor (#171).
+            SettingToggleRow(
+                title: "Show a line between Hidden and Always Hidden",
+                caption: "While both are out.",
+                isOn: binding(\.showSectionDivider)
+            )
+            .settingAnchor("sectionDivider")
         }
 
         SettingsCard(title: "Hide again") {
