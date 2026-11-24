@@ -35,8 +35,20 @@ enum EditorItemsBuilder {
         func canonical(_ id: ItemID) -> ItemID {
             id.bundleID.map(PelmetBundle.helperIDs.contains) == true ? id.sectionKey : id
         }
+        let ownSpecIDs = Set(
+            separators.map { SeparatorManager.itemID(for: $0).sectionKey }
+                + extraItems.map { ExtrasManager.itemID(for: $0).sectionKey }
+        )
+        // A separator or extra of Pelmet's with no spec is removed: the spec
+        // is the item's existence, not the engine's memory of it.
+        func isRemoved(_ id: ItemID) -> Bool {
+            id.bundleID == pelmetBundleID && MenuBarPolicy.isPelmetExtraID(id) && !ownSpecIDs.contains(id.sectionKey)
+        }
         for item in snapshotItems {
             let id = canonical(item.id)
+            // The walk lists a removed separator until the next one: a new
+            // one was filed in front of it (#169, 2026-11-24).
+            if isRemoved(id) { continue }
             byID[id] = id == item.id ? item : ObservedItem(
                 id: id, frame: item.frame, appName: item.appName,
                 hostIsBundleless: item.hostIsBundleless, pid: item.pid
@@ -47,20 +59,14 @@ enum EditorItemsBuilder {
         // in it, and without the running check its stand-in tile outlived the
         // app in the editor (Bitwarden quit, 2026-08-31). Same guard as the
         // stored path below; nil-bundle IDs stay (system modules filter later).
-        let ownSpecIDs = Set(
-            separators.map { SeparatorManager.itemID(for: $0).sectionKey }
-                + extraItems.map { ExtrasManager.itemID(for: $0).sectionKey }
-        )
         for raw in concealed {
             let id = canonical(raw)
             guard byID[id] == nil else { continue }
             if let bundle = id.bundleID, bundle != pelmetBundleID, !isRunning(bundle) { continue }
             // Pelmet's bundle is exempt from the running check, so a
             // separator or extra removed while concealed would keep its
-            // stand-in until the engine's carried set caught up: the spec
-            // is the item's existence, not the engine's memory of it.
-            if id.bundleID == pelmetBundleID, MenuBarPolicy.isPelmetExtraID(id),
-               !ownSpecIDs.contains(id.sectionKey) { continue }
+            // stand-in until the engine's carried set caught up.
+            if isRemoved(id) { continue }
             byID[id] = ObservedItem(id: id, frame: nil, appName: id.bundleID.flatMap(appName))
         }
         // Pelmet's extras are section-manageable (visibility-based hiding); when

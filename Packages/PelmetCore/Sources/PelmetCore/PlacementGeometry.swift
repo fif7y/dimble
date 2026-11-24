@@ -73,6 +73,19 @@ public enum PlacementGeometry {
         return overflowTrapped(frames).filter { !drawn[$0] }.union(amongShown)
     }
 
+    /// Hidden icons behind the « with an Always Hidden icon drawn right of
+    /// them. The « takes the bar's left end, so they sit left of it: out of
+    /// place, though nothing behind it has a frame that gives its order
+    /// (#171). Only a phantom left of every drawn Always Hidden icon counts:
+    /// two icons that overlap in mid-bar are no «.
+    public static func hiddenBehindOverflow(
+        _ frames: [ItemID: CGRect], trapped: Set<ItemID>, section: (ItemID) -> Section
+    ) -> Set<ItemID> {
+        let drawn = frames.filter { !trapped.contains($0.key) && section($0.key) == .alwaysHidden }
+        guard let left = drawn.map(\.value.minX).min() else { return [] }
+        return trapped.filter { section($0) == .hidden && (frames[$0]?.minX ?? left) < left }
+    }
+
     /// How many measured items the native « has trapped. The editor's
     /// overflow note reads this.
     public static func overflowTrappedCount(_ frames: [CGRect]) -> Int {

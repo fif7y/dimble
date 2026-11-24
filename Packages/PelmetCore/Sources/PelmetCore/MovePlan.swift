@@ -89,6 +89,26 @@ public struct OrderEdits: Codable, Equatable, Sendable {
         previousOrder.removeValue(forKey: section)
     }
 
+    /// Own items (separators, extras) that are gone leave nothing pending.
+    /// Kept, every pass skipped one as not on screen (the Dot removed at
+    /// 20:43, 2026-09-20), and a section waited on a separator that can no
+    /// longer be placed (`OrderEditSettle`). Third-party icons stay: one that
+    /// quit is still a member and comes back. True when something went.
+    public mutating func dropRemovedOwnItems(managed: Set<ItemID>) -> Bool {
+        let before = self
+        func gone(_ id: ItemID) -> Bool {
+            guard let bundle = id.bundleID, PelmetBundle.ownIDs.contains(bundle), !id.isPelmetChevron else { return false }
+            return !managed.contains(id.sectionKey)
+        }
+        created = created.filter { !gone($0) }
+        dropped = dropped.filter { !gone($0) }
+        // A crossing kept the section it left from ever settling.
+        previousSection = previousSection.filter { !gone($0.key) }
+        for (section, drawn) in order { order[section] = drawn.filter { !gone($0) } }
+        for (section, baseline) in previousOrder { previousOrder[section] = baseline.filter { !gone($0) } }
+        return self != before
+    }
+
     /// A pass, or the person's own ⌘-drag, landed `key` (canonical) in the
     /// section whose drawing holds it: Discard has no section to put it
     /// back to. The baselines follow, since Discard puts each pending

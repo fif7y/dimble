@@ -84,7 +84,7 @@ nonisolated struct MenuBarSeparatorEntity: AppEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
 }
 
-nonisolated struct MenuBarSeparatorQuery: EntityQuery {
+nonisolated struct MenuBarSeparatorQuery: EntityStringQuery {
     @MainActor
     private func all() async throws -> [MenuBarSeparatorEntity] {
         let appState = try await Automation.ready()
@@ -97,6 +97,14 @@ nonisolated struct MenuBarSeparatorQuery: EntityQuery {
     func entities(for identifiers: [String]) async throws -> [MenuBarSeparatorEntity] {
         let separators = try await all()
         return identifiers.compactMap { id in separators.first { $0.id == id } }
+    }
+
+    /// Typed text: its id from Get Menu Bar Layout, or its name here.
+    @MainActor
+    func entities(matching string: String) async throws -> [MenuBarSeparatorEntity] {
+        let separators = try await all()
+        let found = Set(IconMatch.matches(string, in: separators.map { .init(name: $0.name, id: $0.id) }).map(\.id))
+        return separators.filter { found.contains($0.id) }
     }
 
     @MainActor
@@ -138,7 +146,7 @@ struct MoveMenuBarIconIntent: AppIntent {
         let appState = try await Automation.ready()
         PelmetLog.log("action: move")
         try await Automation.settled(appState)
-        try Automation.move(ItemID(rawValue: icon.id), to: section.section, place: after.map { .after($0.id) }, appState: appState)
+        try await Automation.move(ItemID(rawValue: icon.id), to: section.section, place: after.map { .after($0.id) }, appState: appState)
         return .result()
     }
 }
@@ -204,6 +212,7 @@ struct ShowHiddenIconsIntent: AppIntent {
         let appState = try await Automation.ready()
         PelmetLog.log("action: show\(alwaysHidden ? " all" : "")")
         appState.reveal(alwaysHidden ? [.hidden, .alwaysHidden] : [.hidden], reason: .hotkey)
+        await appState.waitForQueuedReveal()
         return .result()
     }
 }
@@ -218,7 +227,7 @@ nonisolated struct HideIconsIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         let appState = try await Automation.ready()
         PelmetLog.log("action: hide")
-        appState.concealNow()
+        appState.hideIcons()
         return .result()
     }
 }
@@ -239,7 +248,8 @@ struct SearchMenuBarIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         let appState = try await Automation.ready()
         PelmetLog.log("action: search")
-        appState.commandBar.open(source: "action", query: text.map { String($0.prefix(AutomationLink.maxQueryLength)) })
+        let query = text.map { String($0.prefix(AutomationLink.maxQueryLength)) }
+        Automation.onceNoPrompt { appState.commandBar.open(source: "action", query: query) }
         return .result()
     }
 }

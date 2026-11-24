@@ -46,16 +46,20 @@ public enum ApplyCount {
     /// from before, and Snib dropped into a concealed Hidden read a plain
     /// "Apply" until the walk at rest 0.55s later (live test, 2026-10-13
     /// 19:24:25).
+    /// `outOfPlace`: icons the last full reveal had behind the «, left of an
+    /// Always Hidden one (`PlacementGeometry.hiddenBehindOverflow`, #171),
+    /// dropped or not: no plan sees them, and the pass expands the « for them.
     public static func count(
         _ plan: MovePlan.Plan, edits: OrderEdits, trapped: Set<ItemID>,
         drawn: (ItemID) -> Bool, concealed: (ItemID) -> Bool,
-        unread: (ItemID) -> Bool = { _ in false }
+        unread: (ItemID) -> Bool = { _ in false }, outOfPlace: Set<ItemID> = []
     ) -> Count {
         let drawnKeys = Set(edits.order.values.joined())
         let moved = edits.dropped.subtracting(OrderEditSettle.dropsInPlace(edits))
         let unseen = Set(plan.skipped.filter { $0.1 == .notOnScreen }.map(\.0)).intersection(moved)
         let hidden = unseen.filter(concealed)
         let behind = unseen.intersection(trapped).subtracting(hidden)
+            .union(outOfPlace.subtracting(plan.moves.map(\.item)).subtracting(hidden))
         let total = plan.moves.count + behind.count + hidden.count
         let drawnBehind = trapped.intersection(drawnKeys).filter(drawn)
         let concealedDrop = moved.intersection(drawnKeys).contains { concealed($0) || unread($0) }

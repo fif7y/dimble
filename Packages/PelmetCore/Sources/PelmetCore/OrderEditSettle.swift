@@ -73,7 +73,12 @@ public enum OrderEditSettle {
             // counted, it kept the drawing pending and Apply lit after the
             // grouper had placed everything (Today, Figma, four idle
             // separators, 2026-10-07).
-            let drawn = allDrawn.filter { onBar.contains($0.sectionKey) }
+            // A separator this edit made is on its way to the bar, whether or
+            // not the walk has named it yet: it waits for the pass that
+            // places it. Two of three made in a concealed Always Hidden
+            // stayed at the bar's far left, their edit cleared as the bar's
+            // own order (live test, 2026-11-24 12:37).
+            let drawn = allDrawn.filter { onBar.contains($0.sectionKey) || edits.created.contains($0.sectionKey) }
             let drawnSet = Set(drawn)
             guard drawnSet.isDisjoint(with: crossing) else { continue }
             let placed = bar.filter { roster.section(of: $0) == section }
@@ -100,7 +105,7 @@ public enum OrderEditSettle {
             // (live test, 2026-10-13 18:14:47).
             let unplaced = drawnSet.subtracting(placed)
             if !unplaced.isEmpty {
-                guard edits.previousOrder[section]?.filter(drawnSet.contains) == drawn else { continue }
+                guard unplaced.isDisjoint(with: edits.created), edits.previousOrder[section]?.filter(drawnSet.contains) == drawn else { continue }
             }
             if placed.filter(drawnSet.contains) == drawn.filter({ !unplaced.contains($0) }) { settled.insert(section) }
         }

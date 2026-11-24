@@ -305,7 +305,7 @@ final class SectionGrouper {
         appState.slotUnlistedIcons(snap, skipping: Set(strays))
         // A stray is grouped above or left where the user put it, never
         // kept to its stored slot from here.
-        let drift = carryFullRevealDrift(appState, read: noteDrift(appState, snap)).filter { !strays.contains($0) }
+        let drift = carryFullRevealDrift(appState, snap, read: noteDrift(appState, snap)).filter { !strays.contains($0) }
         for id in byHand where strays.contains(id) {
             PelmetLog.log("group: \(id.rawValue) moved by hand — left where it is")
         }
@@ -395,10 +395,11 @@ final class SectionGrouper {
 
     /// The drift read now, plus what the last full reveal saw out of order
     /// that a read at rest can't (`seenAtFullReveal`).
-    private func carryFullRevealDrift(_ appState: AppState, read: [ItemID]) -> [ItemID] {
+    private func carryFullRevealDrift(_ appState: AppState, _ snap: EngineSnapshot, read: [ItemID]) -> [ItemID] {
         if appState.currentRevealedSections.isSuperset(of: [.hidden, .alwaysHidden]) {
             seenAtFullReveal = Set(read)
             lastCarried = ""
+            appState.noteHiddenBehindOverflow(snap)
             return read
         }
         let carried = seenAtFullReveal.subtracting(read).sorted { $0.rawValue < $1.rawValue }

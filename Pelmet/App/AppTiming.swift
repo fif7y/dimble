@@ -180,6 +180,18 @@ enum AppTiming {
     /// its item registered before the bar is measured (launch → ready →
     /// hosts ≈ 100ms at boot; a cold launch takes longer).
     static let applyRehostWait: Duration = .milliseconds(1200)
+    /// How long a whole-bar pass waits for a walk that reads the revealed
+    /// bar (`ApplyPass.revealedBar`): twice the worst empty stretch measured.
+    static let applyBarWait: Duration = .seconds(6)
+    static let applyBarPoll: Duration = .milliseconds(100)
+    /// A link's or an action's second pass: a separator just made was read
+    /// twice, and as behind the «, for 3s after it was hosted (2026-11-24).
+    static let automationRetryWait: Duration = .seconds(2)
+    /// `Automation.onceNoPrompt`: how long a Shortcuts prompt is waited for,
+    /// and how long the app after it takes the keyboard once it is in front
+    /// (up to 0.42s measured, 2026-11-24).
+    static let promptWait: TimeInterval = 30
+    static let promptHandover: Duration = .milliseconds(500)
     /// Below ~100ms every swipe-through of the band reads as a hover
     /// (the fire-time live-pointer check catches the rest).
     static let hoverDelayFloor: TimeInterval = 0.1

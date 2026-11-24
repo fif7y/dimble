@@ -1107,6 +1107,27 @@ final class LiveMirror {
         PelmetLog.log("livemirror: Hidden back under the covers (\(why))")
     }
 
+    /// A reveal waits for the start to settle.
+    var revealWaits: Bool { pendingReveal != nil }
+
+    /// Hide asked for by name (a link, a Shortcuts action): the reveal that
+    /// waits for the start to settle goes, or the icons came out 3s after
+    /// the Hide (2026-11-24 10:29:05), and Hidden out under the covers goes
+    /// back. The rest is the caller's `concealNow`.
+    func hideAsked() {
+        if let waiting = pendingReveal, waiting.reason != .settingsPreview {
+            pendingReveal = nil
+            PelmetLog.log("livemirror: the reveal(\(waiting.reason)) asked while live mode starts is off — Hide")
+        }
+        if hiddenOut != nil { Task { @MainActor in await self.hideHidden("Hide") } }
+    }
+
+    /// An Apply pass is over: its reveal, still waiting, would leave both
+    /// sections out (2026-11-24 10:46:44).
+    func passOver() {
+        if pendingReveal?.reason == .settingsPreview { pendingReveal = nil }
+    }
+
     /// The live display under the pointer.
     private func pointerSide() -> Side? {
         let point = NSEvent.mouseLocation

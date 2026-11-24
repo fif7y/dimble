@@ -1001,6 +1001,10 @@ public actor AgentBarEngine: MenuBarEngine {
     /// live assertion conceals is still in the agent's tree. The bundle set,
     /// not the snapshot's stamped ids: a converge that lost its epoch to a
     /// hover reveal leaves the stamp stale (2026-09-14).
+    /// A converge found the walk empty and waits for one that reads: the
+    /// reveal or conceal it was for has not swapped yet.
+    public var convergeDeferred: Bool { emptyAXSince != nil }
+
     /// A fresh AX walk, bypassing the snapshot cache.
     public func freshSnapshot() async -> EngineSnapshot {
         await refreshSnapshot()

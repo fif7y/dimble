@@ -22,6 +22,36 @@ struct ApplyReport: Equatable {
     /// A grouping pass that gave up before its first drag because the user
     /// was typing or pointing again: nothing moved, nothing was spent.
     var abandoned = false
+    /// Abandoned because no walk read the bar: the edits wait for the next pass.
+    var barUnread = false
+    /// Icons this pass marked immovable: it moved none of them, and they are
+    /// in `skipped` from now on.
+    var gaveUp: [ItemID] = []
+    /// Icons out of place behind the « (#171) this pass could not expand it for.
+    var stillBehind: Set<ItemID> = []
+
+    /// Icons the edits draw that are not on the bar at all.
+    var absent: [ItemID] = []
+
+    /// The pass did what it was asked: `key` is where it was drawn (a link's
+    /// or an action's one icon, whatever became of the others), or with none
+    /// every icon is.
+    func landed(_ key: ItemID? = nil) -> Bool {
+        guard !abandoned else { return false }
+        guard let key = key?.sectionKey else {
+            return failed.isEmpty && gaveUp.isEmpty && stillBehind.isEmpty
+                && skipped.allSatisfy { $0.why != .notOnScreen }
+        }
+        return !(failed + gaveUp + absent + skipped.map(\.item)).contains { $0.sectionKey == key }
+    }
+
+    /// Another pass would not change it. One of Pelmet's own that no walk
+    /// lists yet can still come.
+    func hopeless(_ key: ItemID? = nil) -> Bool {
+        guard let key = key?.sectionKey else { return !gaveUp.isEmpty }
+        let gone = absent.filter { !($0.bundleID.map(PelmetBundle.ownIDs.contains) ?? false) }
+        return (gaveUp + gone + skipped.filter { $0.why == .pinned }.map(\.item)).contains { $0.sectionKey == key }
+    }
 }
 
 @MainActor
@@ -75,6 +105,18 @@ enum ApplyPass {
         trappedKeys(in: leftmostPrimaryFrames(snap), drawn: appState.drawnNow(in: snap))
     }
 
+    /// Hidden icons this full reveal has behind the «, left of an Always
+    /// Hidden one that is drawn (#171). A walk can read two icons on top of
+    /// each other without a «: the caller checks the bar has one.
+    static func hiddenBehindOverflow(_ snap: EngineSnapshot, appState: AppState) -> Set<ItemID> {
+        let frames = leftmostPrimaryFrames(snap)
+        let model = appState.settings.sectionModel
+        return PlacementGeometry.hiddenBehindOverflow(
+            frames, trapped: trappedKeys(in: frames, drawn: appState.drawnNow(in: snap)),
+            section: { model.section(of: $0) }
+        ).filter { !appState.isImmovable($0) }
+    }
+
     /// Drawn entries the plan skipped as notOnScreen that are not on the bar
     /// at all (the app quit, the icon left): nothing to wait for, so they
     /// leave the report — or Apply stays lit on "1 not moved" forever
@@ -84,13 +126,23 @@ enum ApplyPass {
     /// yet (a locked screen reads empty), and the skip is what runs
     /// `placeOwnItemNow`'s retry ladder. Dropped, the media control lost its
     /// placement on every track change under a lock (2026-10-06).
-    static func dropAbsentSkips(_ report: inout ApplyReport, snap: EngineSnapshot, scope: Scope) {
+    /// Nor does a walk that read nothing say anything left the bar, or a
+    /// concealed icon's absence from it: every edit of a Set Layout went that
+    /// way and the pass read as done (2026-11-24 10:46:18).
+    /// A separator this edit made is on its way: its skip stays until a pass
+    /// places it.
+    static func dropAbsentSkips(_ report: inout ApplyReport, snap: EngineSnapshot, scope: Scope, created: Set<ItemID>) {
         if case .ownItem = scope { return }
-        let onBar = Set(snap.items.map { $0.id.sectionKey })
-        let absent = report.skipped.filter { $0.why == .notOnScreen && !onBar.contains($0.item.sectionKey) }
+        report.absent = []
+        guard !snap.items.isEmpty else { return }
+        let onBar = Set(snap.items.map { $0.id.sectionKey }).union(snap.concealed.map(\.sectionKey))
+        let absent = report.skipped.filter {
+            $0.why == .notOnScreen && !onBar.contains($0.item.sectionKey) && !created.contains($0.item.sectionKey)
+        }
         guard !absent.isEmpty else { return }
         for skip in absent { PelmetLog.log("apply: \(skip.item.rawValue) is not on the bar — edit dropped") }
         report.skipped.removeAll { skip in absent.contains { $0.item == skip.item } }
+        report.absent = absent.map(\.item)
     }
 
     /// Trapped icons a drawn edit names — the only reason a pass expands
@@ -357,6 +409,39 @@ enum ApplyPass {
         return snap
     }
 
+    /// The bar a whole-bar pass plans on: read at rest, the chevron on it and
+    /// nothing concealed. The agent's tree can read empty for seconds (a
+    /// Shortcuts run's pill, 3.2s on 2026-11-24), and the reveal waits for a
+    /// walk too: planned meanwhile, every icon was off the bar. The last walk
+    /// after `applyBarWait`, whatever it read.
+    private static func revealedBar(_ first: EngineSnapshot, appState: AppState) async -> EngineSnapshot {
+        let engine = appState.engine
+        func unread(_ snap: EngineSnapshot) async -> String? {
+            if snap.items.isEmpty { return "the walk is empty" }
+            // Planned between the walk coming back and the swap it held up,
+            // a pass clicked a « that went with the swap (2026-11-24 11:06:30).
+            if appState.isTransitioning { return "the reveal isn't out" }
+            if await engine.convergeDeferred { return "the reveal waits for a walk" }
+            if appState.settings.showStatusItem, appState.pelmetChevronItem(in: snap) == nil { return "no chevron" }
+            if !snap.itemsAtRest { return "not at rest" }
+            let roster = appState.settings.sectionModel.roster
+            let concealed = snap.concealed.filter { roster.section(of: $0.sectionKey) != .visible }
+            return concealed.isEmpty ? nil : "\(concealed.count) icon(s) concealed"
+        }
+        var snap = first
+        guard let why = await unread(snap) else { return snap }
+        let started = ContinuousClock.now
+        repeat {
+            snap = await engine.freshSnapshot()
+            if await unread(snap) == nil { break }
+            try? await Task.sleep(for: AppTiming.applyBarPoll)
+        } while started.duration(to: .now) < AppTiming.applyBarWait
+        let waited = Int((ContinuousClock.now - started) / .milliseconds(1))
+        let still = await unread(snap)
+        PelmetLog.log("apply: waited \(waited)ms for the bar (\(why))\(still.map { " — still \($0)" } ?? "")")
+        return snap
+    }
+
     /// What a pass covers.
     enum Scope {
         /// The Apply button: the whole bar, revealed for measuring.
@@ -418,7 +503,9 @@ enum ApplyPass {
     }
 
     /// Runs the whole pass. The caller owns `applying` and the report.
-    static func run(appState: AppState, scope: Scope = .wholeBar) async -> ApplyReport {
+    /// `outOfPlace`: icons behind the « a whole-bar pass was asked to put
+    /// right (#171), counted like the plan's own.
+    static func run(appState: AppState, scope: Scope = .wholeBar, outOfPlace: Set<ItemID> = []) async -> ApplyReport {
         let engine = appState.engine
         var report = ApplyReport()
         let screenMaxX = NSScreen.screens.first?.frame.maxX ?? .greatestFiniteMagnitude
@@ -428,7 +515,13 @@ enum ApplyPass {
         // nothing and the count comes straight back (Figma, 2026-09-25).
         let counted: Set<ItemID> = appState.snapshot.map {
             Set(plan(for: appState, snapshot: $0, remembered: true).moves.map(\.item))
-        } ?? []
+        }.map { $0.union(outOfPlace) } ?? []
+
+        var leftToApply = Set<ItemID>()
+        if case .wholeBar = scope {
+            leftToApply = appState.hiddenBehindOverflow.subtracting(outOfPlace).subtracting(appState.settings.orderEdits.dropped)
+                .filter { appState.settings.sectionModel.section(of: $0) == .hidden }
+        }
 
         // Hidden items have frames only under a reveal, and the plan is the
         // whole bar. Reveal everything and let the editor hold it. An own
@@ -480,7 +573,12 @@ enum ApplyPass {
         }
         // What the pass opened, the pass closes (a display set to always
         // show gets exactly its policy's reveal back).
-        defer { if revealedForPass { appState.restoreDisplayPolicyAfterPass() } }
+        defer {
+            if revealedForPass {
+                appState.liveMirror.passOver()
+                appState.restoreDisplayPolicyAfterPass()
+            }
+        }
         // Separators drawn in another section re-host here, not at the
         // editor drop: a fresh registration on the new helper lands where
         // the agent puts it, and the drag below moves it into its slot.
@@ -513,6 +611,19 @@ enum ApplyPass {
         defer { if case .wholeBar = scope { appState.detachIdleExtrasAfterApply() } }
 
         var snap = await engine.snapshot()
+        if case .wholeBar = scope {
+            // Live mode starting runs the pass's reveal once it has settled:
+            // planned meanwhile, the swap landed on the drags.
+            if revealedForPass { await appState.waitForQueuedReveal() }
+            snap = await revealedBar(snap, appState: appState)
+            let deferred = await engine.convergeDeferred
+            if snap.items.isEmpty || deferred || appState.liveMirror.revealWaits {
+                PelmetLog.log("apply: the bar can't be read — the edits wait")
+                report.abandoned = true
+                report.barUnread = true
+                return report
+            }
+        }
         appState.updateSnapshot(snap)
         // The keeper's passes read the bar live, the only read the stored
         // order may take: newcomers concealed since they came are listed
@@ -544,7 +655,9 @@ enum ApplyPass {
         case .wholeBar:
             planFor = { self.plan(for: appState, snapshot: $0) }
             trappedFor = {
-                trappedEdited($0, edits: appState.settings.orderEdits, appState: appState).union(trapped($0, appState: appState).intersection(counted))
+                trappedEdited($0, edits: appState.settings.orderEdits, appState: appState)
+                    .union(trapped($0, appState: appState).intersection(counted))
+                    .subtracting(leftToApply)
             }
         case .strays(let allowed):
             planFor = { self.plan(for: appState, snapshot: $0, strays: allowed) }
@@ -587,6 +700,9 @@ enum ApplyPass {
                 ? { ApplyPass.trapped($0, appState: appState).intersection([key]) }
                 : { _ in [] }
         }
+        // The ones this pass was not asked for wait for Apply, and their
+        // section's drawing (a drop among them) is no reason to open the «.
+        func leaveToApply() { report.skipped.removeAll { $0.why == .notOnScreen && leftToApply.contains($0.item.sectionKey) } }
         var plan = planFor(snap)
         if case .ownItem(let own, _) = scope, plan.moves.isEmpty, plan.skipped.isEmpty {
             PelmetLog.log("apply: \(own.sectionKey.rawValue) already in its slot (own)")
@@ -623,7 +739,8 @@ enum ApplyPass {
         // re-plans on the shifted bar, and collapses it after. Never for a
         // pass whose edits stay clear of the «.
         let trappedForPass = trappedFor(snap)
-        dropAbsentSkips(&report, snap: snap, scope: scope)
+        dropAbsentSkips(&report, snap: snap, scope: scope, created: appState.settings.orderEdits.created)
+        leaveToApply()
         guard !plan.moves.isEmpty || !trappedForPass.isEmpty else { return report }
 
         if scope.isAutomatic {
@@ -701,11 +818,13 @@ enum ApplyPass {
                 plan = planFor(snap)
                 report.planned = plan.moves.count
                 report.skipped = plan.skipped.map { ApplyReport.Skipped(item: $0.0, why: $0.1) }
-                dropAbsentSkips(&report, snap: snap, scope: scope)
+                dropAbsentSkips(&report, snap: snap, scope: scope, created: appState.settings.orderEdits.created)
+                leaveToApply()
                 let framed = trappedForPass.filter { primaryFrames(snap, appState: appState)[$0] != nil }.count
                 PelmetLog.log("apply: « expanded — \(framed)/\(trappedForPass.count) framed, replanned \(plan.moves.count) move(s), \(plan.skipped.count) skipped")
             } else {
                 PelmetLog.log("apply: « not expanded — trapped icons stay skipped")
+                report.stillBehind = trappedForPass.intersection(outOfPlace)
             }
         }
         // Not a defer: the collapse click needs the shielded door, so it
@@ -832,6 +951,7 @@ enum ApplyPass {
             if !ownItem, move.item.bundleID != nil, abs(finalX - frame.midX) < 0.5,
                appState.noteBounce(move.item, at: finalX) {
                 report.skipped.append(.init(item: move.item, why: .pinned))
+                report.gaveUp.append(move.item)
             } else {
                 report.failed.append(move.item)
             }

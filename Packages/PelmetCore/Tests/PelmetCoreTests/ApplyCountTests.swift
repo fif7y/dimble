@@ -176,6 +176,20 @@ import Testing
         #expect(leftover.total == 0)
     }
 
+    /// #171: no plan sees an icon behind the «, dropped or not.
+    @Test func anIconOutOfPlaceBehindTheOverflowCountsOnce() {
+        let eject = ItemID(rawValue: "bundle:eject"), rocket = ItemID(rawValue: "bundle:rocket")
+        func count(_ plan: MovePlan.Plan) -> Int {
+            ApplyCount.count(
+                plan, edits: OrderEdits(), trapped: [eject], drawn: { _ in true }, concealed: { _ in false },
+                outOfPlace: [eject]
+            ).total
+        }
+        #expect(count(MovePlan.Plan(moves: [], skipped: [])) == 1)
+        #expect(count(MovePlan.Plan(moves: [Move(item: rocket, after: nil, before: nil)], skipped: [])) == 2)
+        #expect(count(MovePlan.Plan(moves: [Move(item: eject, after: nil, before: nil)], skipped: [])) == 1)
+    }
+
     @Test func drawnWinsOverTheConcealedSet() {
         // An icon out on its own, or one macOS will not hide, stays on the bar.
         #expect(!isConcealed(b, drawn: [b], concealedKeys: [b], sections: [b: .hidden]))

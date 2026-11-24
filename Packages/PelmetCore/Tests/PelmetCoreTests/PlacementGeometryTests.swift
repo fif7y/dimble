@@ -78,6 +78,47 @@ struct PlacementGeometryTests {
         #expect(PlacementGeometry.overflowTrappedCount([]) == 0)
     }
 
+    @Test func aHiddenIconBehindTheChevronWithAlwaysHiddenDrawnIsOutOfPlace() {
+        func f(_ x: CGFloat) -> CGRect { CGRect(x: x, y: 0, width: 30, height: 24) }
+        func id(_ name: String) -> ItemID { ItemID(rawValue: "bundle:\(name)") }
+        let sections: [String: Section] = ["eject": .hidden, "snitch": .hidden, "rocket": .hidden, "numi": .hidden,
+                                           "super": .alwaysHidden, "quitter": .alwaysHidden]
+        func section(_ key: ItemID) -> Section { sections[String(key.rawValue.dropFirst(7))] ?? .visible }
+        // #171: « Supercharge, Quitter, Rocket Typist, Numi, with Ejectify and Little Snitch behind it.
+        let bar = [id("eject"): f(1040), id("snitch"): f(1045), id("super"): f(1090), id("quitter"): f(1125),
+                   id("rocket"): f(1160), id("numi"): f(1195)]
+        #expect(PlacementGeometry.hiddenBehindOverflow(bar, trapped: [id("eject"), id("snitch")], section: section)
+            == [id("eject"), id("snitch")])
+        // Two Hidden icons on top of each other in mid-bar: no « there.
+        let mid = [id("super"): f(1090), id("quitter"): f(1125), id("rocket"): f(1160), id("numi"): f(1165)]
+        #expect(PlacementGeometry.hiddenBehindOverflow(mid, trapped: [id("rocket"), id("numi")], section: section).isEmpty)
+        // Always Hidden behind it is in place, and with none drawn nothing says the order.
+        let full = [id("super"): f(1040), id("quitter"): f(1045), id("rocket"): f(1090), id("numi"): f(1125)]
+        #expect(PlacementGeometry.hiddenBehindOverflow(full, trapped: [id("super"), id("quitter")], section: section).isEmpty)
+        let none = [id("super"): f(1040), id("eject"): f(1045), id("rocket"): f(1090)]
+        #expect(PlacementGeometry.hiddenBehindOverflow(none, trapped: [id("super"), id("eject")], section: section).isEmpty)
+    }
+
+    /// A walk of a full bar (27.3, 2026-11-24): everything behind the « ends
+    /// on its right edge, whatever its width.
+    @Test func aMeasuredOverflowTrapsTheHiddenIconLeftOfAlwaysHidden() {
+        let sections: [String: Section] = ["ballast": .hidden, "velja": .alwaysHidden, "herd": .alwaysHidden,
+                                           "openclip": .alwaysHidden, "sconce": .alwaysHidden, "snib": .hidden]
+        let x: [(String, CGFloat, CGFloat)] = [
+            ("ballast", 1106, 1186), ("velja", 1149, 1186), ("herd", 1149, 1186), ("openclip", 1225, 1261),
+            ("wifi", 1268, 1290), ("sconce", 1305, 1329), ("vorssaint", 1415, 1459), ("bitwarden", 1457, 1491), ("snib", 1489, 1524),
+        ]
+        func name(_ key: ItemID) -> String { String(key.rawValue.dropFirst(7)) }
+        let frames = Dictionary(uniqueKeysWithValues: x.map {
+            (ItemID(rawValue: "bundle:\($0.0)"), CGRect(x: $0.1, y: 0, width: $0.2 - $0.1, height: 24))
+        })
+        let entries = Array(frames)
+        let trapped = Set(PlacementGeometry.overflowTrapped(entries.map(\.value)).map { entries[$0].key })
+        #expect(Set(trapped.map(name)) == ["ballast", "velja", "herd"])
+        let behind = PlacementGeometry.hiddenBehindOverflow(frames, trapped: trapped) { sections[name($0)] ?? .visible }
+        #expect(Set(behind.map(name)) == ["ballast"])
+    }
+
     @Test func aFrameNoLongerDrawnNeverTrapsADrawnOne() {
         func f(_ x: CGFloat, _ w: CGFloat = 30) -> CGRect { CGRect(x: x, y: 0, width: w, height: 24) }
         // Camera & mic collapsing onto the chevron: the chevron stays.

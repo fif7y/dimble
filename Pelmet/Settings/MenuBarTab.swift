@@ -61,7 +61,7 @@ struct ApplyBarButton: View {
                     icon: Image(systemName: failed ? "arrow.clockwise" : "wand.and.stars"),
                     tint: tint
                 ) {
-                    appState.applyOrderEdits()
+                    appState.applyOrderEdits(wholeOrder: true)
                 }
                 .disabled(appState.applying || !pending)
                 .transition(.opacity)

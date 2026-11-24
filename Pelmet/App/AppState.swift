@@ -439,8 +439,13 @@ final class AppState {
             repaired = settings.sectionModel.enroll(ExtrasManager.itemID(for: spec).sectionKey) || repaired
         }
         // The other side of the invariant: a removed extra left its order
-        // key behind (twenty dead launcher keys in one blob). Separators
-        // have their own manager and stay.
+        // key behind (twenty dead launcher keys in one blob), a removed
+        // separator its order key and its section (36 in one, 2026-11-24).
+        let liveSeparatorKeys = Set(settings.separators.map { SeparatorManager.itemID(for: $0).sectionKey })
+        for key in settings.sectionModel.assignments.keys where key.isPelmetSeparator && !liveSeparatorKeys.contains(key) {
+            settings.sectionModel.assignments.removeValue(forKey: key)
+            repaired = true
+        }
         let liveExtraKeys = Set(settings.extraItems.map { ExtrasManager.itemID(for: $0).sectionKey })
         // A singleton kind (Siri, Time Machine, timer…) keeps one key for
         // life: its section survives the toggle going off, so on again it
@@ -450,7 +455,7 @@ final class AppState {
             .map { ExtrasManager.itemID(for: ExtraItemSpec(kind: $0)).sectionKey })
         for (section, order) in settings.sectionModel.order {
             let kept = order.filter {
-                !MenuBarPolicy.isPelmetExtraID($0) || $0.isPelmetSeparator || liveExtraKeys.contains($0)
+                !MenuBarPolicy.isPelmetExtraID($0) || liveSeparatorKeys.contains($0) || liveExtraKeys.contains($0)
             }
             if kept.count != order.count {
                 settings.sectionModel.order[section] = kept
@@ -1705,6 +1710,22 @@ final class AppState {
         }
     }
 
+    /// Show Hidden Icons asked while live mode starts runs once that has
+    /// settled, 6s on (2026-11-24): the next action in the shortcut, an If
+    /// on Are Icons Shown, read them as still hidden.
+    func waitForQueuedReveal() async {
+        for _ in 0..<100 where liveMirror.revealWaits {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    /// Hide Icons from outside the app (#169): what live mode keeps for
+    /// itself goes too.
+    func hideIcons() {
+        liveMirror.hideAsked()
+        concealNow()
+    }
+
     func concealNow() {
         PelmetLog.log("concealNow state=\(rehide.state)")
         dispatch(rehide.handle(.concealRequested))
@@ -2558,8 +2579,9 @@ final class AppState {
     /// A separator asked for from outside the editor (#169, Automation):
     /// made, then drawn in front of `before` (nil: the end of `section`) and
     /// applied at once, like `moveItemNow`. The editor's own Add waits for
-    /// Apply instead. Returns its key.
-    func addSeparatorNow(in section: PelmetCore.Section, before: ItemID?) async -> ItemID? {
+    /// Apply instead.
+    /// The separator's key and its pass.
+    func addSeparatorNow(in section: PelmetCore.Section, before: ItemID?) async throws -> (key: ItemID, pass: Task<ApplyReport, Never>?) {
         let spec = SeparatorSpec(style: .dot)
         settings.separators.append(spec)
         let key = SeparatorManager.itemID(for: spec).sectionKey
@@ -2568,11 +2590,17 @@ final class AppState {
         await waitUntilHosted([key])
         guard await waitUntilApplyEnds() else {
             removeSeparator(spec.id)
-            return nil
+            throw AutomationError.busy
         }
+        // Drawn in Settings while it was hosted: they would go down with it.
+        guard settings.orderEdits.isEmpty else {
+            removeSeparator(spec.id)
+            throw AutomationError.editsWaiting
+        }
+        // Its edit waits for the pass that places it (`OrderEditSettle`).
+        settings.orderEdits.created.insert(key)
         PelmetLog.log("automation: separator \(key.rawValue) → \(section.rawValue) before \(before?.rawValue ?? "the end")")
-        moveItemNow(key, to: section, before: before, despiteDrift: true)
-        return key
+        return (key, moveItemNow(key, to: section, before: before, despiteDrift: true))
     }
 
     /// The agent hosts a new separator on its own beat, and a pass only
@@ -2600,9 +2628,9 @@ final class AppState {
 
     /// Set Menu Bar Layout (#169): the plan drawn with the editor's own
     /// moves (each section right to left, every icon in front of the one
-    /// after it), saved once and applied once. The separators it makes
-    /// are the editor's kind of new: Discard takes them away again.
-    func setLayoutNow(_ plan: LayoutRestore.Plan) async -> Bool {
+    /// after it), saved once and applied once. The separators it makes are
+    /// the editor's kind of new (`OrderEdits.created`).
+    func setLayoutNow(_ plan: LayoutRestore.Plan) async throws -> Task<ApplyReport, Never>? {
         var drawn: [PelmetCore.Section: [ItemID]] = [:]
         var made: [ItemID] = []
         for section in PelmetCore.Section.allCases {
@@ -2615,7 +2643,6 @@ final class AppState {
                     settings.separators.append(spec)
                     let key = SeparatorManager.itemID(for: spec).sectionKey
                     settings.sectionModel.enroll(key, in: section)
-                    settings.orderEdits.created.insert(key)
                     made.append(key)
                     drawn[section, default: []].append(key)
                 }
@@ -2625,14 +2652,15 @@ final class AppState {
             settingsChanged()
             await waitUntilHosted(made)
         }
-        guard await waitUntilApplyEnds() else {
+        let free = await waitUntilApplyEnds()
+        guard free, settings.orderEdits.isEmpty else {
             // Nothing drawn: the separators made for it go again.
             let keys = Set(made)
             settings.separators.removeAll { keys.contains(SeparatorManager.itemID(for: $0).sectionKey) }
-            settings.orderEdits.created.subtract(keys)
             settingsChanged()
-            return false
+            throw free ? AutomationError.editsWaiting : AutomationError.busy
         }
+        settings.orderEdits.created.formUnion(made)
         for section in PelmetCore.Section.allCases {
             var before: ItemID?
             for key in (drawn[section] ?? []).reversed() {
@@ -2642,8 +2670,32 @@ final class AppState {
         }
         drawingChanged()
         PelmetLog.log("automation: layout drawn, \(drawn.values.map(\.count).reduce(0, +)) icons, \(made.count) new separator(s), \(plan.missing.count) not here")
-        applyOrderEdits()
-        return true
+        return applyOrderEdits(wholeOrder: true)
+    }
+
+    /// The Apply a link or an action started, to its end: whether `key`
+    /// landed, with none every icon. Nobody is there to press Retry, so a pass that left
+    /// something goes once more. A separator made a moment before its pass
+    /// read as behind a « the bar didn't have, and the icon dragged with it
+    /// lost its frame (Set Layout, 2026-11-24 09:33:21); both were fine at
+    /// the next look. Edits drawn in Settings meanwhile are not its to
+    /// apply, sections that settled meanwhile are fine. Its bounces don't
+    /// count: two runs of one shortcut would mark the app immovable for good.
+    func applyLands(_ pass: Task<ApplyReport, Never>?, key: ItemID? = nil, wholeOrder: Bool = false) async -> Bool {
+        // No pass, nothing to apply: as long as the bar could be read.
+        guard let pass else { return snapshot?.items.isEmpty == false }
+        let first = await pass.value
+        guard !first.landed(key) else { return true }
+        guard !first.hopeless(key) else { return false }
+        let left = settings.orderEdits.order
+        try? await Task.sleep(for: AppTiming.automationRetryWait)
+        guard await waitUntilApplyEnds(), settings.orderEdits.order.allSatisfy({ left[$0] == $1 }) else { return false }
+        PelmetLog.log("automation: the pass left \(first.failed.count) failed, \(first.skipped.count) skipped\(first.abandoned ? ", abandoned" : "") — once more")
+        bouncesCount = false
+        defer { bouncesCount = true }
+        // An abandoned pass drops its edits: nothing left to apply says nothing.
+        guard let again = await applyOrderEdits(wholeOrder: wholeOrder)?.value else { return !first.abandoned }
+        return again.landed(key)
     }
 
     /// The separator behind this key, gone from the bar and the layout.
@@ -2990,9 +3042,10 @@ final class AppState {
     /// visible one (2026-10-04), so it is drawn at the chevron side of its
     /// new section and applied at once. Edits the editor already holds stay
     /// the person's to apply: then the move only joins them.
-    func moveItemNow(_ id: ItemID, to section: PelmetCore.Section, quiet: Bool = false, despiteDrift: Bool = false) {
+    @discardableResult
+    func moveItemNow(_ id: ItemID, to section: PelmetCore.Section, quiet: Bool = false, despiteDrift: Bool = false) -> Task<ApplyReport, Never>? {
         let before = section == .visible ? editorItems(in: .visible).first { $0.id != id }?.id : nil
-        moveItemNow(id, to: section, before: before, quiet: quiet, despiteDrift: despiteDrift)
+        return moveItemNow(id, to: section, before: before, quiet: quiet, despiteDrift: despiteDrift)
     }
 
     /// The same move with a place in its section: in front of `before` (nil is
@@ -3003,16 +3056,17 @@ final class AppState {
     /// `despiteDrift`: a link or a Shortcuts action (#169), which has no Apply
     /// button to wait for. Only edits the editor holds stop it; an icon out
     /// of place or a new separator waiting for its host goes with the Apply.
-    func moveItemNow(_ id: ItemID, to section: PelmetCore.Section, before: ItemID?, quiet: Bool = false, despiteDrift: Bool = false) {
-        let othersPending = despiteDrift ? !settings.orderEdits.isEmpty : applyPending
+    @discardableResult
+    func moveItemNow(_ id: ItemID, to section: PelmetCore.Section, before: ItemID?, quiet: Bool = false, despiteDrift: Bool = false) -> Task<ApplyReport, Never>? {
+        let othersPending = despiteDrift ? !settings.orderEdits.isEmpty : self.othersPending
         let accepted = !applying
         moveItem(id, to: section, before: before)
         if accepted { notePanelOrder(of: id, in: section) }
         guard !othersPending else {
             PelmetLog.log("editor: move of \(id.rawValue) joins pending edits, not applied")
-            return
+            return nil
         }
-        applyOrderEdits(quiet: quiet)
+        return applyOrderEdits(quiet: quiet)
     }
 
     /// The panel draws a section in the order the bar had at the last reveal
@@ -3413,6 +3467,38 @@ final class AppState {
         return target
     }
 
+    /// Hidden icons the last full reveal had behind the «, left of an Always
+    /// Hidden one (#171): no frame gives their place, at rest or under a
+    /// reveal. Apply counts them and expands the « for them. The keeper
+    /// leaves them to it: a pass of its own never clicks the « (#150).
+    private(set) var hiddenBehindOverflow: Set<ItemID> = []
+
+    /// A look at a full reveal. The « is read off the main thread, and only
+    /// with something to note: without one nothing is behind it.
+    func noteHiddenBehindOverflow(_ snap: EngineSnapshot) {
+        guard snap.itemsAtRest else { return }
+        var behind = ApplyPass.hiddenBehindOverflow(snap, appState: self)
+        guard !behind.isEmpty || !hiddenBehindOverflow.isEmpty else { return }
+        let bounds = CGDisplayBounds(CGMainDisplayID())
+        Task {
+            if !behind.isEmpty {
+                let there = await Task.detached(operation: { !OverflowToggle.toggleFrames(onDisplay: bounds).isEmpty }).value
+                guard !applying, currentRevealedSections.isSuperset(of: [.hidden, .alwaysHidden]) else { return }
+                if !there { behind = [] }
+            }
+            guard behind != hiddenBehindOverflow else { return }
+            hiddenBehindOverflow = behind
+            PelmetLog.log("order: behind the «, left of Always Hidden [\(behind.map(\.rawValue).sorted().joined(separator: ", "))] — left to Apply")
+        }
+    }
+
+    /// The noted ones that are still Hidden and still on the bar.
+    private func outOfPlaceNow(in snap: EngineSnapshot) -> Set<ItemID> {
+        guard !hiddenBehindOverflow.isEmpty else { return [] }
+        let here = Set(snap.items.map(\.id.sectionKey)).union(snap.concealed.map(\.sectionKey))
+        return hiddenBehindOverflow.filter { here.contains($0) && settings.sectionModel.section(of: $0) == .hidden }
+    }
+
     /// Moves the bar needs to match the editor as it stands: every
     /// section's stored order (`editorOrderTarget`), so drawn edits, drift
     /// and any icon on the wrong side of the chevron (0 with nothing on
@@ -3427,7 +3513,8 @@ final class AppState {
         let moves = plan.moves
         let count = ApplyCount.count(
             plan, edits: settings.orderEdits, trapped: ApplyPass.trapped(snapshot, appState: self),
-            drawn: drawnNow(in: snapshot), concealed: concealedNow(in: snapshot), unread: unreadNow(in: snapshot)
+            drawn: drawnNow(in: snapshot), concealed: concealedNow(in: snapshot), unread: unreadNow(in: snapshot),
+            outOfPlace: outOfPlaceNow(in: snapshot)
         )
         // Logged on change only (the button reads this every render): which
         // move pads the count when the drop read "Apply (2)" (2026-09-21).
@@ -3532,6 +3619,14 @@ final class AppState {
     /// disagreeing with the sections.
     var applyPending: Bool {
         !settings.orderEdits.isEmpty || pendingMoveCount > 0 || (separators?.needsRehost ?? false)
+    }
+
+    /// Other edits a drop would go down with: it waits for Apply with them.
+    /// Not the icons behind the « (#171): nothing lays those down but Apply,
+    /// and every drop waited until someone pressed it.
+    private var othersPending: Bool {
+        let behind = snapshot.map { outOfPlaceNow(in: $0).count } ?? 0
+        return !settings.orderEdits.isEmpty || pendingMoveCount > behind || (separators?.needsRehost ?? false)
     }
 
     /// Apply pass: separators drawn in another section move host now.
@@ -3656,21 +3751,26 @@ final class AppState {
     /// concealed again, so none of the pass shows (`holdBarForApply`). Any
     /// other Apply closes the panel and shows the bar, as it always has, and
     /// so does a quiet one that could not hold the bar or did not finish clean.
-    func applyOrderEdits(quiet: Bool = false) {
-        guard !applying, applyPending else { return }
+    /// `wholeOrder`: asked for the whole bar's order (the Apply button, Set
+    /// Menu Bar Layout), so it opens the « for the icons out of place behind
+    /// it (#171). A drop asks for its own move and never does.
+    /// Returns the pass, nil with nothing to apply or one already running.
+    @discardableResult
+    func applyOrderEdits(quiet: Bool = false, wholeOrder: Bool = false) -> Task<ApplyReport, Never>? {
+        guard !applying, applyPending else { return nil }
         applying = true
         applyReport = nil
         PelmetLog.log("apply: starting")
-        Task {
+        return Task {
             var held: ApplyReport?
             if quiet, panelShowsReveal, isRevealed, panelPresenter.isOpen {
                 held = await transitions.holdBarForApply(
                     revealing: [.hidden, .alwaysHidden],
-                    run: { await runApplyPass() },
+                    run: { await runApplyPass(wholeOrder: wholeOrder) },
                     lifted: { self.panelPresenter.quietApplyEnded() })
             }
             let report: ApplyReport
-            if let held { report = held } else { report = await runApplyPass() }
+            if let held { report = held } else { report = await runApplyPass(wholeOrder: wholeOrder) }
             applyReport = report
             applying = false
             // The bar is concealed and the panel is open on a clean quiet
@@ -3679,13 +3779,17 @@ final class AppState {
             if (held == nil || !clean), !settingsWindowVisible {
                 applyPointerDisplayPolicyAfterDismissal()
             }
+            return report
         }
     }
 
     /// The pass and what follows it: the edits it settled, the order hint.
-    private func runApplyPass() async -> ApplyReport {
-        let report = await ApplyPass.run(appState: self)
+    private func runApplyPass(wholeOrder: Bool) async -> ApplyReport {
+        let report = await ApplyPass.run(appState: self, outOfPlace: wholeOrder ? hiddenBehindOverflow : [])
+        // Placed, or no longer behind the «: the next full reveal says.
+        if wholeOrder, !report.abandoned { hiddenBehindOverflow = report.stillBehind }
         PelmetLog.log("apply: done applied=\(report.applied.count) failed=\(report.failed.count) skipped=\(report.skipped.count)")
+        guard !report.barUnread else { return report }
         // An edit whose item the pass could not reach (behind the «)
         // is not done either: it stays pending like a failed move.
         let unreachable = report.skipped.filter { $0.why == .notOnScreen }.map(\.item)
@@ -3962,7 +4066,8 @@ final class AppState {
     /// remembers its slot: one with none (its section not revealed since
     /// launch) keeps the edit pending.
     private func pruneSettledOrderEdits() {
-        guard let snapshot, !settings.orderEdits.isEmpty else { return }
+        // A walk that read nothing matches anything.
+        guard let snapshot, !snapshot.items.isEmpty, !settings.orderEdits.isEmpty else { return }
         let bar = ApplyPass.barOrder(ApplyPass.rememberedFrames(snapshot, appState: self))
         // Extras that are not idle are on the bar even while their section
         // hides them (out of the walk and the concealed set alike).
@@ -3988,28 +4093,13 @@ final class AppState {
         }
     }
 
-    /// A removed separator or extra leaves its drawn slot behind in the
-    /// pending edits, and every pass then skips it as not on screen (the Dot
-    /// removed at 20:43, 2026-09-20). Own items only: a third-party icon that
-    /// quit is still a member and comes back.
     private func pruneOrderEditsForRemovedOwnItems() {
-        guard !settings.orderEdits.isEmpty else { return }
         let managed = Set(((extras?.managedItemIDs ?? []) + (separators?.managedItemIDs ?? [])).map(\.sectionKey))
         var edits = settings.orderEdits
-        var dropped = 0
-        for (section, order) in edits.order {
-            let kept = order.filter { id in
-                guard let bundle = id.bundleID, PelmetBundle.ownIDs.contains(bundle),
-                      !id.isPelmetChevron else { return true }
-                return managed.contains(id.sectionKey)
-            }
-            dropped += order.count - kept.count
-            edits.order[section] = kept
-        }
-        guard dropped > 0 else { return }
+        guard edits.dropRemovedOwnItems(managed: managed) else { return }
         settings.orderEdits = edits
         settings.save()
-        PelmetLog.log("apply: \(dropped) pending edit(s) for removed own item(s) dropped")
+        PelmetLog.log("apply: pending edits for removed own items dropped")
     }
 
     /// The icon's physical side disagrees with its section (an editor drop
@@ -4699,10 +4789,12 @@ final class AppState {
     /// drags stops being retried every pass. Returns true once marked.
     private static let maxBounces = 3
     private var bounces: [ItemID: Int] = [:]
+    /// False while a link's or an action's second pass runs (`applyLands`).
+    private var bouncesCount = true
 
     @discardableResult
     func noteBounce(_ id: ItemID, at x: CGFloat) -> Bool {
-        guard let bundle = id.bundleID else { return false }
+        guard let bundle = id.bundleID, bouncesCount else { return false }
         let count = (bounces[id.sectionKey] ?? 0) + 1
         bounces[id.sectionKey] = count
         PelmetLog.log("apply: \(id.rawValue) bounced both drags (x=\(x)) — \(count)/\(Self.maxBounces)")

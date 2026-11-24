@@ -26,15 +26,19 @@ enum Automation {
         Task {
             await logFailureAsync {
                 let appState = try await ready()
+                // Launched by the link, Dimble came forward before it was ready.
+                handFocusBack()
                 switch link {
-                case .search(let text): appState.commandBar.open(source: "link", query: text)
+                case .search(let text):
+                    try await focusBack()
+                    appState.commandBar.open(source: "link", query: text)
                 case .show: appState.reveal([.hidden], reason: .hotkey)
                 case .showAll: appState.reveal([.hidden, .alwaysHidden], reason: .hotkey)
-                case .hide: appState.concealNow()
+                case .hide: appState.hideIcons()
                 case .toggle: appState.toggle(reason: .hotkey)
                 case .move(let icon, let section, let place):
                     try await settled(appState)
-                    try move(resolve(icon, appState), to: section, place: place, appState: appState)
+                    try await move(resolve(icon, appState), to: section, place: place, appState: appState)
                 case .addSeparator(let section, let place):
                     try await addSeparator(to: section, place: place, appState: appState)
                 case .removeSeparator(let id, let place):
@@ -42,10 +46,10 @@ enum Automation {
                     try removeSeparator(id: id, place: place, appState: appState)
                 }
             }
-            // Launched by the link, Dimble came forward before it was ready.
-            handFocusBack()
         }
         handFocusBack()
+        // Search waits for the focus instead (`focusBack`).
+        if case .search = link { return }
         // The activation can land after the link does.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { handFocusBack() }
     }
@@ -58,14 +62,28 @@ enum Automation {
     /// A link opened the plain way (`open`, Alfred, a browser) brings Dimble
     /// to the front, and the app you were typing in lost its keys
     /// (2026-11-24). Nothing a link does needs Dimble in front: Search's
-    /// panel takes keys without it, and takes them back once when the app
-    /// returns (`CommandBarController.panelResignedKey`). A menu bar app in
-    /// front keeps the bar on the app behind it, which is the one to return to.
+    /// panel takes keys without it. A menu bar app in front keeps the bar on
+    /// the app behind it, which is the one to return to.
     private static func handFocusBack() {
         guard NSApp.isActive, let owner = NSWorkspace.shared.menuBarOwningApplication,
               owner != .current else { return }
         PelmetLog.log("link: focus back to \(owner.bundleIdentifier ?? "pid \(owner.processIdentifier)")")
         owner.activate()
+    }
+
+    /// The app behind has focus again, so Search can open and keep the
+    /// keyboard. Opened before, it lost the keyboard to that app 35ms later
+    /// and what was typed missed it (2 of 2 plain links, 2026-11-24).
+    private static func focusBack() async throws {
+        var forward = NSApp.isActive
+        handFocusBack()
+        // The activation can land after the link does.
+        try await Task.sleep(for: .milliseconds(250))
+        forward = forward || NSApp.isActive
+        guard forward else { return }
+        handFocusBack()
+        for _ in 0..<20 where NSApp.isActive { try await Task.sleep(for: .milliseconds(50)) }
+        try await Task.sleep(for: AppTiming.promptHandover)
     }
 
     // MARK: - Actions
@@ -83,12 +101,42 @@ enum Automation {
         throw AutomationError.notReady
     }
 
+    /// The Shortcuts permission prompt, in front from the click that answers
+    /// it until the shortcut ends. macOS then brings the next app forward.
+    private static var promptInFront: Bool {
+        let prompt = UserDefaults.standard.string(forKey: "pelmet.debug.promptApp") ?? "com.apple.WorkflowKit.ShortcutsViewService"
+        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier == prompt
+    }
+
+    /// Opens something that takes the keyboard, once no prompt is in front:
+    /// Search opened behind one lost it 0.4s later and closed (2026-11-24).
+    /// The action has to answer first, since the prompt waits for it.
+    static func onceNoPrompt(_ open: @escaping @MainActor () -> Void) {
+        guard promptInFront else { return open() }
+        let start = Date()
+        Task {
+            // Gone, and still gone once the next app has the keyboard: the
+            // shortcut's next action can bring up a prompt of its own.
+            while Date().timeIntervalSince(start) < AppTiming.promptWait {
+                if !promptInFront {
+                    try await Task.sleep(for: AppTiming.promptHandover)
+                    if !promptInFront {
+                        PelmetLog.log(String(format: "action: waited %.0fms for the prompt", Date().timeIntervalSince(start) * 1000))
+                        return open()
+                    }
+                }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            PelmetLog.log("action: the prompt is still in front — dropped")
+        }
+    }
+
     /// Before a change to the layout: an Apply already running is waited
     /// for (a second move right after a first), and edits of yours waiting
     /// in Settings › Menu Bar stop it, since Apply would lay down both.
     static func settled(_ appState: AppState) async throws {
         var waited = 0
-        while appState.applying || changeInFlight, waited < 150 {
+        while appState.applying || changeInFlight, waited < 600 {
             try await Task.sleep(for: .milliseconds(100))
             waited += 1
         }
@@ -96,9 +144,13 @@ enum Automation {
         guard appState.settings.orderEdits.isEmpty else { throw AutomationError.editsWaiting }
     }
 
-    /// A change that waits between its start and its Apply (a new
-    /// separator being hosted): the next one waits for it in `settled`.
+    /// A change from its start (a new separator being hosted) to the end of
+    /// its Apply: the next one waits for it in `settled`.
     private static var changeInFlight = false
+
+    private static func landed(_ pass: Task<ApplyReport, Never>?, key: ItemID? = nil, wholeOrder: Bool = false, _ appState: AppState) async throws {
+        guard await appState.applyLands(pass, key: key, wholeOrder: wholeOrder) else { throw AutomationError.notAllMoved }
+    }
 
     /// Settings › Menu Bar's board, section by section.
     static func layout(_ appState: AppState) -> LayoutExport {
@@ -159,18 +211,20 @@ enum Automation {
     /// The same move as Search's ⌘K: to a section (Visible at its chevron
     /// end, the others at theirs), or next to an icon. A section that
     /// disagrees with the icon named is a mistake, not a choice.
-    static func move(_ key: ItemID, to section: PelmetCore.Section?, place: AutomationLink.Place?, appState: AppState) throws {
+    static func move(_ key: ItemID, to section: PelmetCore.Section?, place: AutomationLink.Place?, appState: AppState) async throws {
         guard board(appState).contains(where: { $0.key == key }) else { throw AutomationError.noSuchIcon(key.rawValue) }
         guard !appState.isImmovable(key) else { throw AutomationError.cantMove }
+        changeInFlight = true
+        defer { changeInFlight = false }
         if let place {
             let (target, before) = try spot(place, moving: key, appState)
             if let section, section != target { throw AutomationError.notInSection }
             PelmetLog.log("automation: move \(key.rawValue) → \(target.rawValue) before \(before?.rawValue ?? "the end")")
-            appState.moveItemNow(key, to: target, before: before, despiteDrift: true)
+            try await landed(appState.moveItemNow(key, to: target, before: before, despiteDrift: true), key: key, appState)
         } else if let section {
             guard appState.settings.sectionModel.section(of: key) != section else { return }
             PelmetLog.log("automation: move \(key.rawValue) → \(section.rawValue)")
-            appState.moveItemNow(key, to: section, despiteDrift: true)
+            try await landed(appState.moveItemNow(key, to: section, despiteDrift: true), key: key, appState)
         }
     }
 
@@ -188,7 +242,8 @@ enum Automation {
             target = section ?? .hidden
             before = target == .visible ? appState.editorItems(in: .visible).first?.id.sectionKey : nil
         }
-        guard await appState.addSeparatorNow(in: target, before: before) != nil else { throw AutomationError.busy }
+        let made = try await appState.addSeparatorNow(in: target, before: before)
+        try await landed(made.pass, key: made.key, appState)
     }
 
     /// The separator with this id, or the one right next to an icon.
@@ -234,7 +289,7 @@ enum Automation {
         let plan = LayoutRestore.plan(layout, board: board, movable: { !appState.isImmovable($0) })
         let missing = plan.missing.map(\.label)
         PelmetLog.log("automation: set layout, \(missing.count) not here \(missing.prefix(10).map { String($0.prefix(60)) })")
-        guard await appState.setLayoutNow(plan) else { throw AutomationError.busy }
+        try await landed(appState.setLayoutNow(plan), wholeOrder: true, appState)
         return missing
     }
 
@@ -270,7 +325,7 @@ enum Automation {
 
 enum AutomationError: Error, CustomLocalizedStringResourceConvertible, CustomStringConvertible {
     case notReady, cantMove, notInSection, nextToItself, noSeparator
-    case notALayout, newerLayout, editsWaiting, busy
+    case notALayout, newerLayout, editsWaiting, busy, notAllMoved
     case noSuchIcon(String)
     case ambiguous(String)
 
@@ -285,8 +340,9 @@ enum AutomationError: Error, CustomLocalizedStringResourceConvertible, CustomStr
         case .noSeparator: "There's no separator there."
         case .notALayout: "That isn't a menu bar layout. Use the text Get Menu Bar Layout gives back."
         case .newerLayout: "That layout is from a newer Dimble. Update Dimble to use it."
-        case .editsWaiting: "Settings › Menu Bar has changes waiting. Apply or discard them first."
+        case .editsWaiting: "Settings › Menu Bar has changes waiting. Press Apply there first."
         case .busy: "Dimble is moving icons. Try again in a moment."
+        case .notAllMoved: "Not every icon could be moved. Press Apply in Settings › Menu Bar to try again."
         }
     }
 
@@ -304,6 +360,7 @@ enum AutomationError: Error, CustomLocalizedStringResourceConvertible, CustomStr
         case .newerLayout: "a newer layout format"
         case .editsWaiting: "the editor has edits waiting"
         case .busy: "an Apply is running"
+        case .notAllMoved: "not every icon could be moved"
         }
     }
 }

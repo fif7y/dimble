@@ -208,6 +208,27 @@ struct EditorItemsBuilderTests {
         ])
     }
 
+    /// The walk can list a removed separator for seconds. A new one was filed
+    /// in front of it and landed on the wrong side (2026-11-24).
+    @Test func aRemovedSeparatorStillOnTheBarLeavesTheBoard() {
+        let gone = SeparatorSpec(style: .dot), kept = SeparatorSpec(style: .dot)
+        let goneID = SeparatorManager.itemID(for: gone), keptID = SeparatorManager.itemID(for: kept)
+        let hosted = ItemID(rawValue: goneID.rawValue.replacingOccurrences(of: "app.fif7y.Pelmet::", with: "app.fif7y.Pelmet.items.hidden::"))
+        let model = SectionModel(assignments: [goneID: .hidden, keptID: .hidden, velja.sectionKey: .hidden])
+        for id in [goneID, hosted] {
+            let result = build(
+                items: [
+                    ObservedItem(id: velja, frame: frame(x: 100), appName: nil),
+                    ObservedItem(id: id, frame: frame(x: 130), appName: nil),
+                    ObservedItem(id: keptID, frame: frame(x: 160), appName: nil),
+                ],
+                separators: [kept],
+                model: model
+            )
+            #expect(result.map(\.id) == [velja, keptID])
+        }
+    }
+
     @Test func appStandInCarriesItsAppNameAndBundlelessHostSurvives() {
         let launcher = ExtraItemSpec(kind: .appLauncher, bundleID: "com.openai.chat", appName: "ChatGPT")
         let helperItem = ItemID(rawValue: "status:com.openai.chat::Item-0")

@@ -60,6 +60,61 @@ import Testing
         ).isEmpty)
     }
 
+    /// A separator just made, hosted in a concealed Always Hidden: no frame
+    /// yet, and the walk may not have named it. Taken for absent or for drawn
+    /// back, its edit cleared before the pass and it stayed at the bar's far
+    /// left (2026-11-24 12:37).
+    @Test func aNewSeparatorTheBarCannotPlaceKeepsTheEditPending() {
+        let hosted = ItemID(rawValue: "status:\(PelmetBundle.alwaysHiddenHostID)::Pelmet.Separator.1")
+        let key = hosted.sectionKey
+        let roster = Roster(members: [a: .alwaysHidden, b: .alwaysHidden, key: .alwaysHidden])
+        for baseline in [[a, b], [a, b, key]] {
+            let edits = OrderEdits(
+                order: [.alwaysHidden: [a, b, key]], previousOrder: [.alwaysHidden: baseline], created: [key], dropped: [key]
+            )
+            for (live, concealed) in [([a, b], [hosted]), ([a, b], []), ([], [a, b, hosted]), ([a, b, hosted], [])] as [(Set<ItemID>, Set<ItemID>)] {
+                #expect(OrderEditSettle.settledSections(
+                    edits, bar: [a, b], live: live, concealed: concealed, roster: roster
+                ).isEmpty)
+            }
+            // Framed where it is drawn, it settles; framed elsewhere, it waits.
+            #expect(OrderEditSettle.settledSections(
+                edits, bar: [a, b, key], live: [a, b, hosted], concealed: [], roster: roster
+            ) == [.alwaysHidden])
+            #expect(OrderEditSettle.settledSections(
+                edits, bar: [key, a, b], live: [a, b, hosted], concealed: [], roster: roster
+            ).isEmpty)
+        }
+    }
+
+    /// A separator made in Hidden, dragged to Visible, then removed before
+    /// any Apply: its crossing kept Hidden unsettled and Apply lit with
+    /// nothing to move (review, 2026-11-24).
+    @Test func aRemovedSeparatorLeavesNothingPending() {
+        let key = ItemID(rawValue: "status:\(PelmetBundle.hiddenHostID)::Pelmet.Separator.1").sectionKey
+        let kept = ItemID(rawValue: "status:\(PelmetBundle.hiddenHostID)::Pelmet.Separator.2").sectionKey
+        var edits = OrderEdits(
+            order: [.hidden: [b, kept], .visible: [a, key]],
+            previousSection: [key: .hidden, b: .visible],
+            previousOrder: [.hidden: [b, key], .visible: [a]], created: [key, kept], dropped: [key, b]
+        )
+        let went = edits.dropRemovedOwnItems(managed: [kept])
+        #expect(went)
+        #expect(edits == OrderEdits(
+            order: [.hidden: [b, kept], .visible: [a]],
+            previousSection: [b: .visible],
+            previousOrder: [.hidden: [b], .visible: [a]], created: [kept], dropped: [b]
+        ))
+        let wentAgain = edits.dropRemovedOwnItems(managed: [kept])
+        #expect(!wentAgain)
+        edits = OrderEdits(order: [.hidden: [a], .visible: [b, key]], previousSection: [key: .hidden],
+                           previousOrder: [.hidden: [a, key], .visible: [b]], created: [key], dropped: [key])
+        _ = edits.dropRemovedOwnItems(managed: [])
+        #expect(OrderEditSettle.settledSections(
+            edits, bar: [a, b], live: [a, b], concealed: [], roster: Roster(members: [a: .hidden, b: .visible])
+        ) == [.hidden, .visible])
+    }
+
     @Test func anOwnExtraConcealedWithItsSectionKeepsTheEditPending() {
         // Shortcuts reordered while Hidden is concealed: it hides by its own
         // visibility, so the walk has it neither live nor concealed, and no
