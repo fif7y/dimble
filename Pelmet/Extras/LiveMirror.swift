@@ -746,6 +746,30 @@ final class LiveMirror {
     /// Starts called off for a reason that would call off the next one too
     /// (`abort(holdOff:)`), in a row: each waits longer, up to two minutes.
     private var abortStrikes = 0
+    /// Displays whose bar macOS isn't drawing: a full-screen app has it (or
+    /// the bar hides itself). A cover there sat over the app — a full-screen
+    /// video kept a block at the top for 13 s, until no pill read as every
+    /// pill turned off (Gab, 2026-11-23) — and with the assertion down the
+    /// bar coming down on a hover there shows every hidden icon. Live mode
+    /// steps aside while any display has one (`readBarless`).
+    private var barlessDisplays: Set<CGDirectDisplayID> = []
+    private var barlessReadAt = Date.distantPast
+    /// Set once live mode stepped aside for a missing bar: it comes back when
+    /// every bar has been drawn again (`barsBackSince`) for `barBackSettle`
+    /// if a Space change brought them (leaving full screen), else for
+    /// `barBackQuietSettle`: a hover brings a full-screen app's bar down
+    /// too, and live mode starting under the pointer moves the icons there.
+    private var waitingForBars = false
+    private var barsBackSince: Date?
+    private var lastSpaceChange = Date.distantPast
+    /// The frontmost window went full screen with the Space change (AX):
+    /// the band only shows ~0.5 s after the covers are back on the new Space
+    /// (topwin, 2026-11-23), this says it at once. Counted for a few seconds,
+    /// until the band takes over.
+    private var fullScreenHint: (display: CGDirectDisplayID, at: Date)?
+    private var barWatch: Task<Void, Never>?
+    static let barBackSettle: TimeInterval = 2
+    static let barBackQuietSettle: TimeInterval = 10
     static let noPillGrace: TimeInterval = 10
     /// Times in a row with no pill before an activity from before this launch
     /// counts as over. One could be a moment the bar couldn't be read.
@@ -1351,7 +1375,15 @@ final class LiveMirror {
         if spaceObserver == nil {
             spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
-            ) { [weak self] _ in Task { @MainActor in self?.backdropGeneration += 1; await self?.backdropMayHaveChanged("the Space changed") } }
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.lastSpaceChange = Date()
+                    self?.barlessReadAt = .distantPast
+                    self?.watchBarAfterSpaceChange()
+                    self?.backdropGeneration += 1
+                    await self?.backdropMayHaveChanged("the Space changed")
+                }
+            }
         }
         if themeObserver == nil {
             themeObserver = DistributedNotificationCenter.default().addObserver(
@@ -1388,6 +1420,8 @@ final class LiveMirror {
                     }
                 } else if !desired, self.isActive {
                     await self.exit(self.enabled ? "activity ended" : "setting turned off")
+                } else if self.isActive, let gone = self.barGoneWhy(maxAge: 1) {
+                    await self.exit(gone)
                 } else if self.isActive {
                     await self.tick()
                     // Every pill off for the whole grace, not one tick: right
@@ -1468,6 +1502,16 @@ final class LiveMirror {
         if appState.transitions.passInFlight { return "a picture pass has the bar" }
         if appState.chevronWindowFrame == nil { return "no chevron window" }
         if !(await appState.engine.holdsAssertion) { return "no assertion held — the pill shows on its own" }
+        if let gone = barGoneWhy(maxAge: 0.5) { return gone }
+        if waitingForBars {
+            guard let since = barsBackSince else { return "waiting for every bar to be drawn again" }
+            let withSpace = abs(since.timeIntervalSince(lastSpaceChange)) < 3
+            let settle = withSpace ? Self.barBackSettle : Self.barBackQuietSettle
+            guard Date().timeIntervalSince(since) >= settle else {
+                return "every bar is back\(withSpace ? " with the Space" : ", no Space change (a hover?)") — waiting \(Int(settle))s for it to stay"
+            }
+            waitingForBars = false
+        }
         return nil
     }
 
@@ -1880,7 +1924,135 @@ final class LiveMirror {
         if barIsOut { return "the bar came out" }
         if appState.isTransitioning { return "a transition started" }
         if appState.panelShowsReveal { return "the panel came up" }
+        if let gone = barGoneWhy(maxAge: 0) { return gone }
         return nil
+    }
+
+    /// Reads which displays' bars macOS isn't drawing (`barlessDisplays`),
+    /// again when the last read is older than `maxAge`. Mission Control
+    /// takes the bar away for a moment: a read then keeps the last one.
+    @discardableResult
+    private func readBarless(maxAge: TimeInterval) -> Set<CGDirectDisplayID> {
+        let now = Date()
+        guard now.timeIntervalSince(barlessReadAt) >= maxAge else { return barlessDisplays }
+        barlessReadAt = now
+        let windows = ConcealGhostOverlay.onScreenWindows()
+        // Without separate Spaces only the main display has a bar.
+        let screens = NSScreen.screensHaveSeparateSpaces ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
+        // MenuBarAgent's band says it on 27.3: up only while the bar is out
+        // of sight. The bar's own window stays listed at the top of a
+        // full-screen Space (2026-11-23, Chrome: the cover stayed), so it
+        // only counts when it's gone.
+        var missing = Set(screens.compactMap { screen -> CGDirectDisplayID? in
+            guard let id = screen.directDisplayID else { return nil }
+            let top = CGDisplayBounds(id)
+            if ItemMover.hiddenBarCovers(CGPoint(x: top.midX, y: top.minY + 12)) { return id }
+            // An app window over the whole display, the bar's rows too: an
+            // app going full screen draws one from the first frame of the
+            // Space slide (topwin2, 2026-11-23), before the band or AX say
+            // it. On the desktop no window sits over the bar.
+            if let windows, windows.contains(where: { w in
+                guard (w[kCGWindowLayer as String] as? Int) == 0, (w[kCGWindowOwnerPID as String] as? pid_t) != getpid(),
+                      (w[kCGWindowAlpha as String] as? Double ?? 1) > 0.01,
+                      let d = w[kCGWindowBounds as String] as? NSDictionary, let f = CGRect(dictionaryRepresentation: d)
+                else { return false }
+                return f.minX <= top.minX + 1 && f.minY <= top.minY + 1 && f.maxX >= top.maxX - 1 && f.maxY >= top.maxY - 1
+            }) { return id }
+            return GlassPanel.drawnBarHeight(of: screen, fresh: true, in: windows) == nil ? id : nil
+        })
+        if let hint = fullScreenHint, now.timeIntervalSince(hint.at) < 4 { missing.insert(hint.display) }
+        if !missing.isEmpty, missionControlUp || Self.missionControlIsUp() { return barlessDisplays }
+        if missing != barlessDisplays {
+            PelmetLog.log(missing.isEmpty
+                ? "livemirror: every bar is drawn again"
+                : "livemirror: no bar drawn on display \(missing.sorted().map(String.init).joined(separator: ", ")) — a full-screen app has it, or it hides itself")
+        }
+        if !missing.isEmpty {
+            waitingForBars = true
+            barsBackSince = nil
+        } else if waitingForBars, barsBackSince == nil {
+            barsBackSince = now
+        }
+        let newlyBarless = !missing.subtracting(barlessDisplays).isEmpty
+        barlessDisplays = missing
+        // Whoever reads it first takes the cover down: the covers rejoin a
+        // full-screen Space ~80 ms after the slide (topwin2, 2026-11-23),
+        // and waiting for the watcher's AX read let them flash.
+        if newlyBarless { dropCoversWhereNoBar("seen") }
+        return missing
+    }
+
+    /// Why live mode can't hold the bar for a display macOS isn't drawing
+    /// one on, or nil.
+    private func barGoneWhy(maxAge: TimeInterval) -> String? {
+        let gone = readBarless(maxAge: maxAge)
+        guard !gone.isEmpty else { return nil }
+        return "no bar drawn on display \(gone.sorted().map(String.init).joined(separator: ", ")) (a full-screen app)"
+    }
+
+    /// For 3 s after a Space change: the frontmost window's full screen (AX,
+    /// read off the main thread) and the band, every 100 ms. Either one takes
+    /// that display's cover down now, a start in flight included (it calls
+    /// itself off at its next check), and the loop leaves.
+    private func watchBarAfterSpaceChange() {
+        barWatch?.cancel()
+        fullScreenHint = nil
+        barWatch = Task { @MainActor [weak self] in
+            let until = Date().addingTimeInterval(3)
+            while !Task.isCancelled, Date() < until {
+                guard let self, self.isActive || self.entering else { return }
+                // The window list first: it's quick, AX can take 160 ms.
+                if !self.readBarless(maxAge: 0).isEmpty {
+                    self.dropCoversWhereNoBar("the Space changed")
+                    return
+                }
+                let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                if let pid = front, pid != getpid(),
+                   let display = await Task.detached(operation: { Self.fullScreenWindowDisplay(pid: pid) }).value {
+                    if self.fullScreenHint == nil { PelmetLog.log("livemirror: the frontmost window is full screen on display \(display) (AX)") }
+                    self.fullScreenHint = (display, Date())
+                }
+                if !self.readBarless(maxAge: 0).isEmpty {
+                    self.dropCoversWhereNoBar("the Space changed")
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+
+    /// The display of `pid`'s focused window when that window is full screen.
+    nonisolated private static func fullScreenWindowDisplay(pid: pid_t) -> CGDirectDisplayID? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.2)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &value) == .success,
+              let ref = value, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        let window = ref as! AXUIElement
+        var full: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &full) == .success,
+              (full as? Bool) == true else { return nil }
+        var pos: CFTypeRef?, size: CFTypeRef?
+        var origin = CGPoint.zero, extent = CGSize.zero
+        if AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &pos) == .success, let pos,
+           CFGetTypeID(pos) == AXValueGetTypeID() { AXValueGetValue(pos as! AXValue, .cgPoint, &origin) }
+        if AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &size) == .success, let size,
+           CFGetTypeID(size) == AXValueGetTypeID() { AXValueGetValue(size as! AXValue, .cgSize, &extent) }
+        let centre = CGPoint(x: origin.x + extent.width / 2, y: origin.y + extent.height / 2)
+        var ids = [CGDirectDisplayID](repeating: 0, count: 8), count: UInt32 = 0
+        guard CGGetDisplaysWithPoint(centre, 8, &ids, &count) == .success, count > 0 else { return CGMainDisplayID() }
+        return ids[0]
+    }
+
+    /// The covers on displays macOS draws no bar on go now, whatever live
+    /// mode is doing: nothing under them to keep, and they sat over a
+    /// full-screen video (2026-11-23).
+    private func dropCoversWhereNoBar(_ why: String) {
+        for side in sides where barlessDisplays.contains(side.id) && side.cover != nil {
+            side.cover?.dismiss()
+            side.cover = nil
+            PelmetLog.log("livemirror: display \(side.id) cover down at once — no bar drawn there (\(why))")
+        }
     }
 
     private func enter() async {
@@ -2045,6 +2217,7 @@ final class LiveMirror {
                 side.picture = ConcealGhostOverlay.smeared(picture, from: smearFrom)
             }
             guard buildCover(side, left: coverLeft(for: side, right: right), right: right, why: "enter") else {
+                if barlessDisplays.contains(side.id) { await abort("no bar drawn on display \(side.id) (cover)"); return }
                 await abort("cover won't crop on display \(side.id)", holdOff: true); return
             }
         }
@@ -2100,6 +2273,9 @@ final class LiveMirror {
             side.predictedRight = nil
         }
 
+        // A full-screen app took a bar while the pills came back: a cover
+        // built now would sit over it.
+        if let gone = barGoneWhy(maxAge: 0) { await abort("\(gone) (settled)"); return }
         // 4. The cover shrinks to the « where it is now; the pill is drawn.
         if let now = appState.chevronWindowFrame { lastChevron = now }
         if let chevron = lastChevron {
@@ -2213,6 +2389,17 @@ final class LiveMirror {
 
     private func buildCover(_ side: Side, left: CGFloat, right: CGFloat, why: String, keepMirrors: Bool = false) -> Bool {
         guard let picture = side.picture else { return false }
+        // No bar drawn there: a cover would sit over the full-screen app. A
+        // retake that started before the Space settled put one back for a
+        // second after the first went (2026-11-23).
+        if barlessDisplays.contains(side.id) {
+            if side.cover != nil {
+                side.cover?.dismiss()
+                side.cover = nil
+                PelmetLog.log("livemirror: display \(side.id) no cover (\(why)) — no bar drawn there")
+            }
+            return false
+        }
         // The Hidden icons did not move (a display that shows every icon):
         // nothing to end or grow.
         if side.showsAll, why == "settled" || why == "chevron moved", side.cover != nil,
@@ -3919,6 +4106,9 @@ final class LiveMirror {
     private func backdropMayHaveChanged(_ reason: String) async {
         try? await Task.sleep(for: .milliseconds(300))
         guard isActive, !handingOver, !entering, !exiting else { return }
+        // A full-screen app took a bar: the loop's next turn leaves, there is
+        // nothing to film.
+        guard barGoneWhy(maxAge: 0) == nil else { return }
         PelmetLog.log("livemirror: cover retake — \(reason)")
         await retake(reason)
     }
@@ -4188,6 +4378,10 @@ final class LiveMirror {
         mirrorsLeaving = true
         noteSystemPill(false)
         for side in sides { for mirror in side.mirrors { present(mirror, false) } }
+        // A display macOS draws no bar on has nothing under its cover to
+        // keep: it goes now, not once the assertion is back (it sat over a
+        // full-screen video, 2026-11-23).
+        dropCoversWhereNoBar("exit")
         liftedReturn?.cancel()
         kept = [:]; remembered = [:]; keptPictures = [:]
         // The card goes with the pill.
@@ -4208,7 +4402,7 @@ final class LiveMirror {
         // The « slides back and the extras leave: the cover reaches to the
         // concealed « again, where the picture ends. The mirrors stay where
         // they stand while they go.
-        for side in sides {
+        for side in sides where !barlessDisplays.contains(side.id) {
             if let chevron = lastChevron { side.predictedRight = coverEnd(chevron, on: side) - 1 }
             // (Not on a display that shows every icon: its Hidden icons stand
             // right of the cover, and the cover stays as it is until the bar
