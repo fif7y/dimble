@@ -105,6 +105,10 @@ targets:
         SUPublicEDKey: HyfGTw9yRC/C2CUxxamEhzxZuK+WWuG7WPI6F+BUOgE=
         SUEnableAutomaticChecks: true
         SUAutomaticallyUpdate: false
+        # dimble:// links (#146, #169): Pelmet/App/Automation.swift.
+        CFBundleURLTypes:
+          - CFBundleURLName: app.fif7y.Pelmet
+            CFBundleURLSchemes: [dimble]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.fif7y.Pelmet

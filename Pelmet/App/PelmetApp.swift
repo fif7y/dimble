@@ -28,6 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NookMigration.runIfNeeded()
         appState = AppState()
         super.init()
+        Automation.appState = appState
+    }
+
+    /// dimble:// links (#146, #169), see Automation.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard !relaunching else { return }
+        urls.forEach(Automation.handle)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

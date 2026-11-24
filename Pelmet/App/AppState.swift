@@ -1381,9 +1381,15 @@ final class AppState {
             }
             return
         }
+        // Anchored by a display that always shows, the section is out on
+        // the bar but under the covers of the other displays: "already out"
+        // would leave it hidden there. It opens the way the hotkey opens
+        // it, which lifts the cover where it was asked.
+        let covered = transitions.anchored && transitions.anchoredSections.contains(section)
+            && !sectionsShown.contains(section)
         // An Apply pass owns the bar's frames; the section reveal queues
         // behind it as it always did.
-        if !applying {
+        if !applying, !covered {
             if MenuBarPolicy.canRevealAlone(key) {
                 bringItemOut(key, section: section, waited: false)
                 return
@@ -1403,11 +1409,11 @@ final class AppState {
             }
         }
         let wanted: Set<PelmetCore.Section> = section == .alwaysHidden ? [.hidden, .alwaysHidden] : [.hidden]
-        guard !wanted.isSubset(of: currentRevealedSections) else {
+        guard !wanted.isSubset(of: covered ? sectionsShown : currentRevealedSections) else {
             PelmetLog.log("press: show \(key.rawValue) — its section is already revealed")
             return
         }
-        PelmetLog.log("press: show \(key.rawValue) — revealing \(wanted.map(\.rawValue).sorted())")
+        PelmetLog.log("press: show \(key.rawValue) — revealing \(wanted.map(\.rawValue).sorted())\(covered ? ", from under the covers" : "")")
         reveal(wanted.union(currentRevealedSections), reason: .itemInBar)
     }
 
@@ -1764,6 +1770,21 @@ final class AppState {
         case .transitioning(target: .reveal(let sections, _), queued: nil): return !sections.isEmpty
         default: return false
         }
+    }
+
+    /// The sections a reveal put out, read the way the chevron reads them.
+    /// Not the Hidden icons a display that always shows keeps out on its
+    /// own: Hide Icons can't put those away, so an If on them never flips
+    /// (#169's Are Icons Shown).
+    var sectionsShown: Set<PelmetCore.Section> {
+        var shown: Set<PelmetCore.Section> = liveMirror.hiddenIsOut ? [.hidden] : []
+        switch rehide.state {
+        case .revealed(let sections, _): shown.formUnion(sections)
+        case .transitioning(_, queued: .reveal(let sections, _)): shown.formUnion(sections)
+        case .transitioning(target: .reveal(let sections, _), queued: nil): shown.formUnion(sections)
+        default: break
+        }
+        return shown
     }
 
     /// Live mode put Hidden out or back under its covers, with no reveal.
@@ -2534,6 +2555,105 @@ final class AppState {
         settingsChanged()
     }
 
+    /// A separator asked for from outside the editor (#169, Automation):
+    /// made, then drawn in front of `before` (nil: the end of `section`) and
+    /// applied at once, like `moveItemNow`. The editor's own Add waits for
+    /// Apply instead. Returns its key.
+    func addSeparatorNow(in section: PelmetCore.Section, before: ItemID?) async -> ItemID? {
+        let spec = SeparatorSpec(style: .dot)
+        settings.separators.append(spec)
+        let key = SeparatorManager.itemID(for: spec).sectionKey
+        settings.sectionModel.enroll(key, in: section)
+        settingsChanged()
+        await waitUntilHosted([key])
+        guard await waitUntilApplyEnds() else {
+            removeSeparator(spec.id)
+            return nil
+        }
+        PelmetLog.log("automation: separator \(key.rawValue) → \(section.rawValue) before \(before?.rawValue ?? "the end")")
+        moveItemNow(key, to: section, before: before, despiteDrift: true)
+        return key
+    }
+
+    /// The agent hosts a new separator on its own beat, and a pass only
+    /// moves what it can see: on the bar, or concealed in a section.
+    private func waitUntilHosted(_ keys: [ItemID]) async {
+        for _ in 0..<20 {
+            let snap = await engine.snapshot()
+            updateSnapshot(snap)
+            let seen = Set(snap.items.map(\.id.sectionKey)).union(snap.concealed.map(\.sectionKey))
+            if seen.isSuperset(of: keys) { return }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        PelmetLog.log("automation: \(keys.count) new separator(s) not seen yet, applying anyway")
+    }
+
+    /// The order keeper can start a pass while a new separator is hosted,
+    /// and a move filed during a pass is dropped (`moveItem`): wait it out.
+    private func waitUntilApplyEnds() async -> Bool {
+        for _ in 0..<150 where applying {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        if applying { PelmetLog.log("automation: a pass is still running, nothing drawn") }
+        return !applying
+    }
+
+    /// Set Menu Bar Layout (#169): the plan drawn with the editor's own
+    /// moves (each section right to left, every icon in front of the one
+    /// after it), saved once and applied once. The separators it makes
+    /// are the editor's kind of new: Discard takes them away again.
+    func setLayoutNow(_ plan: LayoutRestore.Plan) async -> Bool {
+        var drawn: [PelmetCore.Section: [ItemID]] = [:]
+        var made: [ItemID] = []
+        for section in PelmetCore.Section.allCases {
+            for slot in plan.order[section] ?? [] {
+                switch slot {
+                case .item(let key):
+                    drawn[section, default: []].append(key)
+                case .newSeparator:
+                    let spec = SeparatorSpec(style: .dot)
+                    settings.separators.append(spec)
+                    let key = SeparatorManager.itemID(for: spec).sectionKey
+                    settings.sectionModel.enroll(key, in: section)
+                    settings.orderEdits.created.insert(key)
+                    made.append(key)
+                    drawn[section, default: []].append(key)
+                }
+            }
+        }
+        if !made.isEmpty {
+            settingsChanged()
+            await waitUntilHosted(made)
+        }
+        guard await waitUntilApplyEnds() else {
+            // Nothing drawn: the separators made for it go again.
+            let keys = Set(made)
+            settings.separators.removeAll { keys.contains(SeparatorManager.itemID(for: $0).sectionKey) }
+            settings.orderEdits.created.subtract(keys)
+            settingsChanged()
+            return false
+        }
+        for section in PelmetCore.Section.allCases {
+            var before: ItemID?
+            for key in (drawn[section] ?? []).reversed() {
+                moveItem(key, to: section, before: before, commit: false)
+                before = key
+            }
+        }
+        drawingChanged()
+        PelmetLog.log("automation: layout drawn, \(drawn.values.map(\.count).reduce(0, +)) icons, \(made.count) new separator(s), \(plan.missing.count) not here")
+        applyOrderEdits()
+        return true
+    }
+
+    /// The separator behind this key, gone from the bar and the layout.
+    func removeSeparator(key: ItemID) -> Bool {
+        guard let spec = settings.separators.first(where: { SeparatorManager.itemID(for: $0).sectionKey == key.sectionKey })
+        else { return false }
+        removeSeparator(spec.id)
+        return true
+    }
+
     func settingsChanged() {
         defer { refreshSectionDivider() }
         rehide.policy = settings.rehidePolicy
@@ -2870,9 +2990,9 @@ final class AppState {
     /// visible one (2026-10-04), so it is drawn at the chevron side of its
     /// new section and applied at once. Edits the editor already holds stay
     /// the person's to apply: then the move only joins them.
-    func moveItemNow(_ id: ItemID, to section: PelmetCore.Section, quiet: Bool = false) {
+    func moveItemNow(_ id: ItemID, to section: PelmetCore.Section, quiet: Bool = false, despiteDrift: Bool = false) {
         let before = section == .visible ? editorItems(in: .visible).first { $0.id != id }?.id : nil
-        moveItemNow(id, to: section, before: before, quiet: quiet)
+        moveItemNow(id, to: section, before: before, quiet: quiet, despiteDrift: despiteDrift)
     }
 
     /// The same move with a place in its section: in front of `before` (nil is
@@ -2880,8 +3000,11 @@ final class AppState {
     /// the panel lands where it was aimed (reorder in the panel, 2026-10-12).
     /// `quiet`: a drop on the open panel, whose Apply leaves the panel up and
     /// the bar under its cover (`applyOrderEdits`).
-    func moveItemNow(_ id: ItemID, to section: PelmetCore.Section, before: ItemID?, quiet: Bool = false) {
-        let othersPending = applyPending
+    /// `despiteDrift`: a link or a Shortcuts action (#169), which has no Apply
+    /// button to wait for. Only edits the editor holds stop it; an icon out
+    /// of place or a new separator waiting for its host goes with the Apply.
+    func moveItemNow(_ id: ItemID, to section: PelmetCore.Section, before: ItemID?, quiet: Bool = false, despiteDrift: Bool = false) {
+        let othersPending = despiteDrift ? !settings.orderEdits.isEmpty : applyPending
         let accepted = !applying
         moveItem(id, to: section, before: before)
         if accepted { notePanelOrder(of: id, in: section) }
@@ -2985,7 +3108,7 @@ final class AppState {
             .min { $0.distance < $1.distance }?.id
     }
 
-    func moveItem(_ id: ItemID, to section: PelmetCore.Section, before beforeID: ItemID?) {
+    func moveItem(_ id: ItemID, to section: PelmetCore.Section, before beforeID: ItemID?, commit: Bool = true) {
         // A drop that lands while a pass runs would be cleared with the
         // pass's own edits on success; the editor is inert meanwhile, this
         // is the backstop for a drop already in flight.
@@ -3048,13 +3171,20 @@ final class AppState {
         }
         settings.orderEdits.order[section] = order
         settings.orderEdits.dropped.insert(key)
+        PelmetLog.log("editor: move \(id.rawValue) → \(section) before=\(beforeID?.rawValue ?? "end")")
+        if commit { drawingChanged() }
+    }
+
+    /// A drawing changed: saved, and handed to the engine. `moveItem` does
+    /// it per move; a layout set from outside (#169) once for all of them.
+    func drawingChanged() {
+        let model = settings.sectionModel
         pruneSettledOrderEdits()
         applyReport = nil
         settings.save()
         // A separator's host follows its drawn section at Apply
         // (`SeparatorManager.hostedSection`); `sync` keeps the specs current.
         separators?.sync(with: settings.separators)
-        PelmetLog.log("editor: move \(id.rawValue) → \(section) before=\(beforeID?.rawValue ?? "end")")
         // Extras visibility applies via the engine's reflow companion during
         // the converge below — same reflow, same motion as everything else.
         Task {

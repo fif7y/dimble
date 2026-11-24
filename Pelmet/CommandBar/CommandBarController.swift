@@ -48,6 +48,10 @@ final class CommandBarController {
     private var generation = 0
     private var placement: (screen: NSScreen, right: CGFloat)?
     private var reKeyed = false
+    /// The text a dimble:// link typed in (#146). Any page can open a link,
+    /// so until the person changes that text Search lists icons only: a
+    /// link can't line up Quit or a setting for the next Return.
+    private var linkQuery: String?
     private var keyMonitor: Any?
     private var clickMonitor: Any?
     private var moveMonitors: [Any] = []
@@ -101,6 +105,8 @@ final class CommandBarController {
         isOpen = true
         openedAt = .now
         reKeyed = false
+        // `dimble://search` alone holds the recent picks the same way.
+        linkQuery = source == "link" ? (query ?? "") : nil
         clearModel()
         placement = (screen, anchorRight(on: screen, appState: appState))
         // Reopened mid-exit it fades back in from where it is.
@@ -148,6 +154,7 @@ final class CommandBarController {
     /// Fade out first; whatever the caller does next (an action) does not
     /// wait for it.
     func close(reason: String) {
+        linkQuery = nil
         if embedded {
             settle(reason: reason)
             return
@@ -493,6 +500,10 @@ final class CommandBarController {
     }
 
     private func apply(_ matches: [SearchMatch], rest: Bool) {
+        var matches = matches
+        if let linkQuery, model.query == linkQuery {
+            matches = matches.filter { entries[$0.candidate.id]?.isItem == true }
+        }
         model.rows = matches.compactMap(row(for:))
         model.selected = 0
         model.showsNoResults = !rest && matches.isEmpty
@@ -727,6 +738,11 @@ final class CommandBarController {
         // ⌘ changes what a press of an item does; nothing else has a second
         // meaning, so ⌘↩ on it is not a Return.
         if modifiers.contains(.command), !entry.isItem { return }
+        // Opened by a link and not touched since: icons only (`linkQuery`).
+        if let linkQuery, model.query == linkQuery, !entry.isItem {
+            PelmetLog.log("search: \(Self.describe(entry.action, modifiers: [])) held, the link's text is untouched")
+            return
+        }
         commit(entry, modifiers: modifiers, query: model.query, row: index, of: model.rows.count, appState: appState)
     }
 
