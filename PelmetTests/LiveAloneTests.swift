@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Testing
 @testable import Pelmet
@@ -66,5 +67,47 @@ struct LiveAloneTests {
         #expect(g(14, 1) == 200 && g(16, 1) == 200, "1 px either side of it")
         #expect(g(12, 1) == 40, "bar elsewhere in the slot")
         #expect(g(3, 1) == 40, "bar outside every slot")
+    }
+}
+
+/// An Always Hidden icon that stands among the Hidden ones: live mode's cover
+/// ends left of it, so it gets a patch of its own (`LiveMirror.coverStrays`).
+struct LiveStrayTests {
+    func icon(_ x: CGFloat, _ width: CGFloat) -> CGRect { CGRect(x: x, y: 0, width: width, height: 24) }
+
+    @Test func alwaysHiddenLeftOfTheHiddenRunIsNoStray() {
+        #expect(LiveMirror.strays([icon(4634, 34), icon(4780, 34)], past: 4813).isEmpty)
+    }
+
+    @Test func batteryBetweenTwoHiddenIconsIsOne() {
+        // The LG, 2026-11-25 16:01:46: Hidden from 4814, Always Hidden to 4886.
+        #expect(LiveMirror.strays([icon(4634, 34), icon(4852, 34)], past: 4813) == [4852...4886])
+    }
+
+    @Test func theIconAtTheEdgeItselfIsNot() {
+        // Its frame reaches a point past the edge (they overlap by rounding).
+        #expect(LiveMirror.strays([icon(4781, 34)], past: 4813).isEmpty)
+    }
+
+    @Test func anIconThatSlidPastTheCoversEndIsOne() {
+        // The leftmost Hidden icon quit: the icon beside it took its place,
+        // the cover ends where it did.
+        #expect(LiveMirror.strays([icon(4790, 34)], past: 4813) == [4790...4824])
+    }
+
+    @Test func sideBySideIsOneSpanAndApartIsTwo() {
+        #expect(LiveMirror.strays([icon(140, 30), icon(170, 30), icon(260, 30)], past: 100) == [140...200, 260...290])
+    }
+
+    @Test func aNarrowIconIsWideEnoughToCrop() {
+        #expect(LiveMirror.strays([icon(140, 16)], past: 100) == [136...160])
+    }
+
+    @Test @MainActor func aClearedPictureHoldsNothingThere() throws {
+        let image = LiveAloneTests().image(width: 40) { _, _ in (200, 255) }
+        let snap = ConcealGhostOverlay.BarSnapshot(image: image, windowFrame: NSRect(x: 1000, y: 0, width: 20, height: 2), takenAt: Date())
+        let out = ConcealGhostOverlay.cleared(snap, over: [1005...1010])
+        let grey = LiveAloneTests().greys(out.image)
+        #expect([9, 10, 19, 20].map { grey($0, 1) } == [200, 0, 0, 200])
     }
 }

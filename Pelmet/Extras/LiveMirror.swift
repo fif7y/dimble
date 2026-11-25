@@ -582,6 +582,11 @@ final class LiveMirror {
         var runEdge: CGFloat?
         var alwaysRun: ClosedRange<CGFloat>?
         var runNote = ""
+        /// The Always Hidden icons macOS draws on this bar, and the patches
+        /// over those right of the cover's end (`coverStrays`).
+        var alwaysDrawn: [CGRect] = []
+        var patch: (set: ConcealGhostOverlay.GhostSet, spans: [ClosedRange<CGFloat>], pictureAt: Date)?
+        var strayNote = ""
         var picture: ConcealGhostOverlay.BarSnapshot?
         /// The icons standing under the cover, cut out of the bar: what a
         /// Smooth reveal slides out from behind the « (#154). `edge`: the
@@ -600,6 +605,8 @@ final class LiveMirror {
         /// cover's end on its way out still hides the real ones.
         var aloneHeldUntil: Date?
         var cover: ConcealGhostOverlay.GhostSet?
+        /// Everything of live mode's on this bar: the cover and its patches.
+        var covers: [ConcealGhostOverlay.GhostSet] { [cover, patch?.set].compactMap { $0 } }
         var coverMinX: CGFloat = 0
         var coverMaxX: CGFloat = 0
         /// The right edge of the frontmost app's menus on this display (0:
@@ -1245,6 +1252,7 @@ final class LiveMirror {
             PelmetLog.log("livemirror: a reveal is taking the bar with no hand-over under way — handing over now")
             beginHandOver(nil)
         }
+        patchesLeave()
         released = true
         handOverWatchdog?.cancel()
         ConcealGhostOverlay.liveModeBlocksCaptures = false
@@ -1559,14 +1567,19 @@ final class LiveMirror {
     /// A display that shows every icon: the left edge of its Hidden icons
     /// (the leftmost visible one when it has none) and the span of the Always
     /// Hidden icons, from a fresh walk of the agent's bar for that display.
-    private func measureRunEdge(_ side: Side, fresh: Bool = true) async {
+    /// `edge` false: the Always Hidden icons alone (`coverStrays`), the cover
+    /// stays where it ends.
+    private func measureRunEdge(_ side: Side, fresh: Bool = true, edge: Bool = true) async {
         guard let appState else { return }
         if fresh { _ = await appState.engine.freshSnapshot() }
         let copies = await appState.engine.barCopies()
         let model = appState.settings.sectionModel
         let bounds = side.bounds
+        let alone = await appState.engine.itemsShownAlone()
         var hidden: CGFloat?, visible: CGFloat?
         var always: ClosedRange<CGFloat>?
+        var drawn: [CGRect] = []
+        var read = false
         // A hiding bar's icon left of its cover is not in the run the cover
         // hides. With macOS's own « open the Hidden icons stand left of the
         // notch, shown by it, and their edge there (572, the cover from 1012)
@@ -1580,18 +1593,119 @@ final class LiveMirror {
         let toggles = await Task.detached { OverflowToggle.toggleFrames(onDisplay: bounds) }.value
         for (id, rects) in copies {
             guard var r = rects.first(where: { bounds.contains(CGPoint(x: $0.midX, y: $0.midY)) && $0.midX >= from }) else { continue }
-            if let held = toggles.first(where: { min($0.maxX, r.maxX) - max($0.minX, r.minX) > 4 }) {
+            read = true
+            let held = toggles.first { min($0.maxX, r.maxX) - max($0.minX, r.minX) > 4 }
+            if let held {
                 r = CGRect(x: held.minX, y: r.minY, width: held.width, height: r.height)
             }
             switch model.section(of: id) {
             case .hidden: hidden = min(hidden ?? r.minX, r.minX)
             case .visible: visible = min(visible ?? r.minX, r.minX)
-            case .alwaysHidden: always = min(always?.lowerBound ?? r.minX, r.minX)...max(always?.upperBound ?? r.maxX, r.maxX)
+            case .alwaysHidden:
+                always = min(always?.lowerBound ?? r.minX, r.minX)...max(always?.upperBound ?? r.maxX, r.maxX)
+                // One a show rule or a press brought out is meant to show,
+                // one behind macOS's « is not drawn where it stands.
+                if held == nil, !alone.contains(id) { drawn.append(r) }
             }
         }
-        side.runEdge = hidden ?? visible
-        side.alwaysRun = always
+        // An unreadable bar tells nothing: what was read stands. (On a bar
+        // that shows every icon no edge is the «: a cover over every Hidden
+        // icon, and the picture now reaches that far.)
+        if edge, read || !side.showsAll {
+            side.runEdge = hidden ?? visible
+            side.alwaysRun = always
+        }
+        if read || !copies.isEmpty && !side.showsAll, !Task.isCancelled { side.alwaysDrawn = drawn }
     }
+
+    /// The spans of the Always Hidden icons that reach past `end`, where the
+    /// cover stops: nothing is over them. Side by side ones are one span,
+    /// and a span is wide enough to crop.
+    nonisolated static func strays(_ always: [CGRect], past end: CGFloat) -> [ClosedRange<CGFloat>] {
+        var out: [ClosedRange<CGFloat>] = []
+        for r in always.filter({ $0.maxX > end + 4 }).sorted(by: { $0.minX < $1.minX }) {
+            if let last = out.last, r.minX - last.upperBound < 2 {
+                out[out.count - 1] = last.lowerBound...max(last.upperBound, r.maxX)
+            } else {
+                out.append(r.minX...r.maxX)
+            }
+        }
+        return out.map { span in
+            let short = max(0, 24 - (span.upperBound - span.lowerBound)) / 2
+            return (span.lowerBound - short)...(span.upperBound + short)
+        }
+    }
+
+    /// The cover on a bar whose Hidden icons are out ends at the leftmost of
+    /// them, and macOS draws every icon right of there: an Always Hidden one
+    /// that ended up among them showed (Battery between two Hidden icons, on
+    /// the LG all through a call and on the MacBook at each hover,
+    /// 2026-11-25). A patch of the same picture goes over each, beneath the
+    /// cover: an end on its way out or back passes over it, and a mirror in
+    /// the cover is never under it. `leaving`: whatever live mode is doing.
+    private func coverStrays(_ side: Side, leaving: Bool = false) {
+        // On the way out the patches stay as they are (`patchesLeave`), and a
+        // bar live mode has let go of gets none.
+        guard leaving || !exiting && !handingOver, sides.contains(where: { $0 === side }) else { return }
+        let open = side.cover != nil && assertionDropped && (side.showsAll || isOut(side))
+        var spans = open ? Self.strays(side.alwaysDrawn, past: side.coverMaxX) : []
+        let shift = side.screen.frame.maxX - primaryMaxX
+        var pieces: [ConcealGhostOverlay.BarSnapshot] = []
+        if let picture = side.picture {
+            pieces = spans.flatMap { span in
+                coverSpan(left: span.lowerBound, right: span.upperBound, shift: shift)
+                    .map { ConcealGhostOverlay.cropped([picture], toPrimaryX: $0) } ?? []
+            }
+        }
+        let note = spans.map { "\(Int($0.lowerBound))..\(Int($0.upperBound))" }.joined(separator: ", ")
+        // Right of the « the picture has nothing to put over it.
+        if pieces.count < spans.count, note != side.strayNote {
+            PelmetLog.log("livemirror: display \(side.id) Always Hidden past the cover's end \(note) — \(spans.count - pieces.count) past the picture too, left as it is")
+        }
+        side.strayNote = note
+        if pieces.isEmpty { spans = [] }
+        let old = side.patch
+        if let old, !spans.isEmpty, old.pictureAt == side.pictureAt, old.spans.count == spans.count,
+           zip(old.spans, spans).allSatisfy({ abs($0.lowerBound - $1.lowerBound) < 0.5 && abs($0.upperBound - $1.upperBound) < 0.5 }) { return }
+        side.patch = nil
+        if !spans.isEmpty, let set = ConcealGhostOverlay.begin(from: pieces, safety: Self.coverSafety, holdsBar: true) {
+            side.patch = (set, spans, side.pictureAt)
+            for overlay in set.members {
+                overlay.isLiveCover = true
+                overlay.setClickHook { [weak self, weak side] point, event in
+                    guard let self, let side else { return }
+                    self.clicked(side, at: point, event: event)
+                }
+                if pressPassesClicks { overlay.passClicks(true) }
+                if let cover = side.cover?.members.first { overlay.order(beneath: cover) }
+                if coverLifted { overlay.setShown(false) }
+            }
+            PelmetLog.log("livemirror: display \(side.id) Always Hidden past the cover's end \(note) — patched (\(set.ids))")
+        }
+        guard let old else { return }
+        guard side.cover != nil else { old.set.dismiss(); return }
+        // Until the new patch is on screen, or the cover is whole again over
+        // a hiding bar (its end fades back over this).
+        let linger = side.patch == nil && !side.showsAll ? Self.patchLinger : 0.12
+        DispatchQueue.main.asyncAfter(deadline: .now() + linger) { old.set.dismiss() }
+    }
+    private static let patchLinger: TimeInterval = 0.6
+
+    /// The assertion is about to come back: the Always Hidden icons leave,
+    /// and the Hidden ones slide to where the patches are. A fade, and before
+    /// the swap: once it has landed the main thread can stall for seconds on
+    /// the agent, and a patch taken off by a timer then sat on the icon that
+    /// had slid under it for 2 s (2026-11-25). All of it at the end: an icon
+    /// fading beneath showed through an even one.
+    private func patchesLeave() {
+        for side in sides {
+            side.alwaysDrawn = []
+            for patch in side.patch?.set.members ?? [] { patch.fadeOut(duration: Self.patchLeave, controlPoints: (1, 0, 1, 0)) }
+            side.patch = nil
+        }
+    }
+    /// The icons beneath are gone in about 0.3 s (filmed 2026-11-25).
+    private static let patchLeave: TimeInterval = 0.3
 
     /// The concealed bar's icons out on their own on `side` (a show rule's
     /// Battery, a press's item) sit beside the «, where the mirrors are
@@ -1920,7 +2034,7 @@ final class LiveMirror {
             noPillHold = false
             holdOffWhy = "the last start was called off (\(why)) — holding off \(Int(hold))s (a new activity ends the hold-off)"
         }
-        for side in sides { side.cover?.dismiss() }
+        for side in sides { for cover in side.covers { cover.dismiss() } }
         sides = []
         // The assertion goes back if it was let go (a start that gave up
         // after the drop must not leave the hidden icons showing).
@@ -2072,6 +2186,7 @@ final class LiveMirror {
         for side in sides where barlessDisplays.contains(side.id) && side.cover != nil {
             side.cover?.dismiss()
             side.cover = nil
+            coverStrays(side, leaving: true)
             PelmetLog.log("livemirror: display \(side.id) cover down at once — no bar drawn there (\(why))")
         }
     }
@@ -2232,7 +2347,10 @@ final class LiveMirror {
                 swap = settled
                 await measureAlone(side, left: left, right: right)
                 await measureSystemPill(side, left: left, right: right)
-                let rect = CGRect(x: left - shift, y: 0, width: right - left, height: 40)
+                // To the « on a display that shows every icon: the bare bar,
+                // what goes over an Always Hidden icon among the Hidden ones.
+                let reach = side.showsAll && underAnchor ? max(right, chevronMinX(chevron, on: side) - 1) : right
+                let rect = CGRect(x: left - shift, y: 0, width: reach - left, height: 40)
                 // Under the anchor the hidden icons are out on the bar: the bare
                 // bar (the system's bar window left out) is the concealed bar.
                 // Dimble's own windows are left out: a retake keeps the old cover
@@ -2284,13 +2402,18 @@ final class LiveMirror {
                 if let edge = side.systemPillEdge, side.aloneRun == nil || side.alone != nil {
                     smearFrom = min(smearFrom, edge - 4)
                 }
-                side.picture = ConcealGhostOverlay.smeared(picture, from: smearFrom)
+                // (Bare to the « on a display that shows every icon, with
+                // nothing in it to smear.)
+                if !(side.showsAll && underAnchor) { side.picture = ConcealGhostOverlay.smeared(picture, from: smearFrom) }
             }
             guard buildCover(side, left: coverLeft(for: side, right: right), right: right, why: "enter") else {
                 if barlessDisplays.contains(side.id) { await abort("no bar drawn on display \(side.id) (cover)"); return }
                 await abort("cover won't crop on display \(side.id)", holdOff: true); return
             }
         }
+        // As the bar stands, for `strayLook`. Before the last look at what may
+        // call the start off: nothing suspends between that and the drop.
+        let copies = sides.contains(where: \.showsAll) ? await appState.engine.barCopies() : [:]
         if let issue = prepIssue() { await abort("\(issue) (covers up)"); return }
         ConcealGhostOverlay.liveModeBlocksCaptures = true
         PelmetLog.log("livemirror: covers up at \(ms())ms — \(sides.map { "d\($0.id) \(Int($0.coverMinX))..\(Int($0.coverMaxX))" }.joined(separator: ", "))")
@@ -2316,6 +2439,26 @@ final class LiveMirror {
         let droppedAt = Date()
         var movedAt = Date(), seen = chevron
         var firstPill: Int?
+        // An Always Hidden icon among the Hidden ones comes back with the
+        // rest. The agent lays the bar out about 4 s after the drop and
+        // answers no walk until then (2026-11-25), so the patch goes up at
+        // the engine's own first reading that differs, not at the settle.
+        // Sooner, where it last stood, it hid the icon still standing there.
+        let strayLook = Task { [weak self] in
+            var last = copies
+            while !Task.isCancelled, let self, let engine = self.appState?.engine, self.sides.contains(where: \.showsAll) {
+                let now = await engine.barCopies()
+                if now != last, !Task.isCancelled {
+                    last = now
+                    for side in self.sides where side.showsAll {
+                        await self.measureRunEdge(side, fresh: false, edge: false)
+                        if !Task.isCancelled { self.coverStrays(side) }
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        defer { strayLook.cancel() }
         func real(_ side: Side) -> Bool { side.mirrors.contains { !$0.provisional } }
         func waiting(_ side: Side) -> Bool { side.mirrors.contains { $0.provisional } }
         while Date() < by, wanted {
@@ -2332,6 +2475,7 @@ final class LiveMirror {
             if sides.allSatisfy({ real($0) }), still, Date().timeIntervalSince(droppedAt) > 1.5 { break }
             try? await Task.sleep(for: .milliseconds(60))
         }
+        strayLook.cancel()
         PelmetLog.log("livemirror: settled at \(ms())ms — chevron \(Int(chevron.minX)) → \(Int(seen.minX)), pill \(firstPill.map { "\($0)ms" } ?? "never seen")")
         // A mirror drawn from memory whose pill did not come back has nothing to mirror.
         for side in sides {
@@ -2459,6 +2603,7 @@ final class LiveMirror {
 
     private func buildCover(_ side: Side, left: CGFloat, right: CGFloat, why: String, keepMirrors: Bool = false) -> Bool {
         guard let picture = side.picture else { return false }
+        defer { coverStrays(side) }
         // No bar drawn there: a cover would sit over the full-screen app. A
         // retake that started before the Space settled put one back for a
         // second after the first went (2026-11-23).
@@ -2721,6 +2866,7 @@ final class LiveMirror {
         await measureRunEdge(side, fresh: true)
         guard !Task.isCancelled, isActive, !exiting, !handingOver, out || !isOut(side), let edge = side.runEdge,
               let stood = appState?.chevronWindowFrame?.minX else { return }
+        let strays = Self.strays(side.alwaysDrawn, past: edge)
         // One just taken is kept: a film lights the capture indicator, so
         // nothing that asks for one over and over gets more than this. Read
         // against the «: the same bar 3pt over is the same picture.
@@ -2754,7 +2900,9 @@ final class LiveMirror {
             return
         }
         let filmedEdge = edge + (chevron - stood)
-        side.icons = (cut, filmedEdge, chevron, generation, out)
+        // An Always Hidden icon among them has no place in what slides out.
+        let icons = ConcealGhostOverlay.cleared(cut, over: strays.map { ($0.lowerBound + chevron - stood)...($0.upperBound + chevron - stood) })
+        side.icons = (icons, filmedEdge, chevron, generation, out)
         PelmetLog.log("livemirror: display \(side.id) icons under the cover filmed \(Int(cut.windowFrame.minX))..\(Int(cut.windowFrame.maxX)), Hidden from \(Int(filmedEdge)), « at \(Int(chevron))\(out ? " (Hidden out)" : "")")
     }
 
@@ -3989,6 +4137,10 @@ final class LiveMirror {
             guard let overlay = side.cover?.members.first else { continue }
             overlay.setShown(shown)
             if shown { logOrder(overlay, why: why) }
+            for patch in side.patch?.set.members ?? [] {
+                patch.setShown(shown)
+                if shown { patch.order(beneath: overlay) }
+            }
         }
     }
 
@@ -4259,6 +4411,7 @@ final class LiveMirror {
         // staying up until the new one is.
         assertionDropped = false
         standDown = false
+        patchesLeave()
         await appState.engine.holdLift(false)
         PelmetLog.log("livemirror: retake — assertion back at \(ms())ms")
         await appState.waitUntilQuiesced(interval: 0.15, deadline: 2, poll: .milliseconds(30))
@@ -4370,6 +4523,13 @@ final class LiveMirror {
             let net = tickCount % Self.fallbackEvery == 0
             let discoverNet = tickCount % (Self.fallbackEvery * 2) == 0
             let deep = tickCount % (Self.fallbackEvery * 5) == 0
+            // A patch follows its icon, and a bar that shows every icon is
+            // looked at for one that needs a patch (one walk can miss it).
+            if side.patch != nil ? discoverNet : deep && side.showsAll {
+                await measureRunEdge(side, edge: false)
+                guard isActive, !entering, !exiting, !handingOver else { return }
+                coverStrays(side)
+            }
             var looked = false
             if !side.mirrors.contains(where: { !$0.provisional }) || side.needsDiscovery || discoverNet || now < lookEagerlyUntil {
                 await discoverPills(side)
@@ -4377,7 +4537,7 @@ final class LiveMirror {
             }
             if side.mirrors.contains(where: { !$0.provisional }), moving || net || looked { await refreshSide(side, why: looked ? "found" : "poll", full: deep) }
         }
-        for side in sides { side.cover?.keepUp(for: Self.coverSafety) }
+        for side in sides { for cover in side.covers { cover.keepUp(for: Self.coverSafety) } }
         for side in sides where side.aloneFresh || tickCount % 20 == 0 { await refreshAlone(side) }
         // Hidden out under live mode goes back once the pointer has been off
         // the bar for the re-hide delay (the tick's quarter second at least),
@@ -4479,6 +4639,7 @@ final class LiveMirror {
             // beneath is bare.)
             if !side.showsAll, let picture = side.picture { buildCover(side, left: side.coverMinX, right: picture.windowFrame.maxX, why: "exit", keepMirrors: true) }
         }
+        patchesLeave()
         await appState.engine.holdLift(false)
         PelmetLog.log("livemirror: assertion back at \(Int(-started.timeIntervalSinceNow * 1000))ms")
         // The assertion is held again: the coordinator's lift tail (`endLive`)

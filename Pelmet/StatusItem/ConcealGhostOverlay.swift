@@ -779,6 +779,23 @@ final class ConcealGhostOverlay {
         return out
     }
 
+    /// A cut-out picture with nothing in `spans` (global Cocoa x).
+    static func cleared(_ snap: BarSnapshot, over spans: [ClosedRange<CGFloat>]) -> BarSnapshot {
+        let w = snap.image.width, h = snap.image.height
+        let scale = CGFloat(w) / snap.windowFrame.width
+        guard !spans.isEmpty, let ctx = CGContext(
+            data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: snap.image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return snap }
+        ctx.draw(snap.image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        for span in spans {
+            ctx.clear(CGRect(x: (span.lowerBound - snap.windowFrame.minX) * scale, y: 0, width: (span.upperBound - span.lowerBound) * scale, height: CGFloat(h)))
+        }
+        guard let image = ctx.makeImage() else { return snap }
+        return BarSnapshot(image: image, windowFrame: snap.windowFrame, takenAt: snap.takenAt)
+    }
+
     /// The pixel columns of `span` inside a picture that floats at `frame`,
     /// padded the way `snapshotSet` pads a capture of that span. Nil when
     /// the picture does not reach both ends, or when what is left is too
