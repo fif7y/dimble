@@ -77,11 +77,14 @@ public enum PlacementGeometry {
     /// them. The « takes the bar's left end, so they sit left of it: out of
     /// place, though nothing behind it has a frame that gives its order
     /// (#171). Only a phantom left of every drawn Always Hidden icon counts:
-    /// two icons that overlap in mid-bar are no «.
+    /// two icons that overlap in mid-bar are no «. The clock and the others
+    /// macOS keeps at the bar's end (`pinned`) sit right of everything
+    /// whatever their section, and no Apply puts an icon right of them.
     public static func hiddenBehindOverflow(
-        _ frames: [ItemID: CGRect], trapped: Set<ItemID>, section: (ItemID) -> Section
+        _ frames: [ItemID: CGRect], trapped: Set<ItemID>, pinned: (ItemID) -> Bool = { _ in false },
+        section: (ItemID) -> Section
     ) -> Set<ItemID> {
-        let drawn = frames.filter { !trapped.contains($0.key) && section($0.key) == .alwaysHidden }
+        let drawn = frames.filter { !trapped.contains($0.key) && section($0.key) == .alwaysHidden && !pinned($0.key) }
         guard let left = drawn.map(\.value.minX).min() else { return [] }
         return trapped.filter { section($0) == .hidden && (frames[$0]?.minX ?? left) < left }
     }

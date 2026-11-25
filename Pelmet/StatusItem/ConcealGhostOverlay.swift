@@ -637,21 +637,27 @@ final class ConcealGhostOverlay {
     /// against ~45ms for the still; the reveal's picture is precaptured, so
     /// none of it lands on the hover path.
     private static let captureQueue = DispatchQueue(label: "app.fif7y.Pelmet.ghost.capture")
+    /// A quit closes these before the process goes.
+    static let openCaptures = OpenCaptures()
 
     private static func captureFrame(filter: SCContentFilter, configuration: SCStreamConfiguration) async -> CGImage? {
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled, openCaptures.begin() else { return nil }
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         let sink = FirstFrameSink()
         do {
             try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: captureQueue)
             try await stream.startCapture()
         } catch {
+            openCaptures.end()
             PelmetLog.log("ghost: stream capture failed to start — \(error.localizedDescription)")
             return nil
         }
         let image = await sink.firstImage(timeout: .milliseconds(600))
         // The stop is ~20ms the caller never needs to wait for.
-        Task { try? await stream.stopCapture() }
+        Task {
+            try? await stream.stopCapture()
+            openCaptures.end()
+        }
         return image
     }
 

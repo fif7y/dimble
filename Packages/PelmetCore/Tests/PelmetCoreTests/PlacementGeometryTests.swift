@@ -99,6 +99,22 @@ struct PlacementGeometryTests {
         #expect(PlacementGeometry.hiddenBehindOverflow(none, trapped: [id("super"), id("eject")], section: section).isEmpty)
     }
 
+    /// The clock hidden through the allowlist sits at the bar's right end
+    /// whatever its section: no Hidden icon is out of place left of it, and
+    /// no Apply could put one right of it.
+    @Test func aPinnedClockInAlwaysHiddenPutsNothingOutOfPlace() {
+        func f(_ x: CGFloat) -> CGRect { CGRect(x: x, y: 0, width: 30, height: 24) }
+        func id(_ name: String) -> ItemID { ItemID(rawValue: "bundle:\(name)") }
+        func section(_ key: ItemID) -> Section { ["clock", "super"].contains(String(key.rawValue.dropFirst(7))) ? .alwaysHidden : .hidden }
+        let pinned: (ItemID) -> Bool = { $0 == id("clock") }
+        let bar = [id("super"): f(1035), id("eject"): f(1040), id("snitch"): f(1045), id("rocket"): f(1090), id("clock"): f(1600)]
+        #expect(PlacementGeometry.hiddenBehindOverflow(bar, trapped: [id("super"), id("eject"), id("snitch")], pinned: pinned, section: section).isEmpty)
+        // A drawn Always Hidden icon that can move still says so (#171).
+        #expect(PlacementGeometry.hiddenBehindOverflow(bar, trapped: [id("super"), id("eject"), id("snitch")], pinned: pinned) {
+            $0 == id("rocket") ? .alwaysHidden : section($0)
+        } == [id("eject"), id("snitch")])
+    }
+
     /// A walk of a full bar (27.3, 2026-11-24): everything behind the « ends
     /// on its right edge, whatever its width.
     @Test func aMeasuredOverflowTrapsTheHiddenIconLeftOfAlwaysHidden() {

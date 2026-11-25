@@ -392,9 +392,28 @@ public actor AgentBarEngine: MenuBarEngine {
     /// bar never changes.
     public var holdsAssertion: Bool { assertion != nil }
 
+    /// When the hide assertion last changed: a picture of the concealed bar
+    /// is one only if this reads the same before and after it.
+    public var lastSwap: Date { lastSwapAt }
+
+    private var openAdoptionWindows = 0
+    private var lastAdoptionEnd = Date.distantPast
+
+    /// `openAdoptionWindow` has the concealed icons out, or had them a moment
+    /// ago and they are still leaving. For the whole window: a converge in
+    /// the middle of it can take the assertion back before it ends.
+    public var adoptionLettingOut: Bool {
+        openAdoptionWindows > 0 || Date().timeIntervalSince(lastAdoptionEnd) < EngineTiming.adoptionLeaving
+    }
+
     public func openAdoptionWindow(for bundleID: String, expecting item: ItemID? = nil) async -> Bool {
         guard assertion != nil else { return true }
         PelmetLog.log("adoptWindow: dropping assertion for \(item?.rawValue ?? bundleID)")
+        openAdoptionWindows += 1
+        defer {
+            openAdoptionWindows -= 1
+            lastAdoptionEnd = Date()
+        }
         invalidateAssertion()
         var adopted = false
         let deadline = Date().addingTimeInterval(EngineTiming.adoptionWindowDeadline)
@@ -1021,6 +1040,14 @@ public actor AgentBarEngine: MenuBarEngine {
         guard let concealable = activeConcealable, !concealable.isEmpty else { return false }
         let snap = await refreshSnapshot()
         return snap.items.contains { $0.id.bundleID.map(concealable.contains) ?? false }
+    }
+
+    /// The concealed icons have left, by a walk that read the bar: an empty
+    /// one (the agent's tree unreadable) tells nothing.
+    public func concealedItemsLeft() async -> Bool {
+        let concealable = activeConcealable ?? []
+        let items = await refreshSnapshot().items
+        return !items.isEmpty && !items.contains { $0.id.bundleID.map(concealable.contains) ?? false }
     }
 
     private func invalidateAssertion() {

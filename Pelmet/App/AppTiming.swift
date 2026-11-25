@@ -221,6 +221,16 @@ enum AppTiming {
     static let concealMenuWait: TimeInterval = 0.6
     /// Termination: max wait for engine.stop() before replying anyway.
     static let terminationStopDeadline: TimeInterval = 2
+    /// Live mode's picture waits this long for an adoption window
+    /// (`EngineTiming.adoptionWindowDeadline`, 2.5s) to end and its icons to
+    /// go, read by a walk that can take 5.5s on a busy agent.
+    static let concealedBarWait: TimeInterval = 10
+    /// A quit waits this long for a capture stream to start and stop (90ms,
+    /// 600ms at worst waiting for its frame). Below terminationStopDeadline.
+    static let quitCaptureDeadline: TimeInterval = 1.5
+    /// How long a starting copy waits for an earlier one to quit before
+    /// forcing it (InstanceGuard): past terminationStopDeadline.
+    static let earlierCopyQuitDeadline: TimeInterval = 5
     /// Accessibility grant poll. A revoked grant only shows up as empty AX
     /// walks, so the app reads TCC directly; 2s keeps a flipped toggle in
     /// System Settings visible within a breath without a hot loop.

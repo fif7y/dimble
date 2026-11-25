@@ -39,6 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !relaunching else { return }
+        // Plain exit: nothing started, and a quit would run the teardown.
+        guard InstanceGuard.claim() else { exit(0) }
         BundleRelocation.reregisterLoginItemIfRelocated()
         appState.start()
         if let tab = AppLanguage.takeReopenSettingsTab() {

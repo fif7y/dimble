@@ -113,6 +113,7 @@ enum ApplyPass {
         let model = appState.settings.sectionModel
         return PlacementGeometry.hiddenBehindOverflow(
             frames, trapped: trappedKeys(in: frames, drawn: appState.drawnNow(in: snap)),
+            pinned: { MenuBarPolicy.isPinnedAppleHost($0.bundleID) || MenuBarPolicy.isPinnedSystemItem($0) },
             section: { model.section(of: $0) }
         ).filter { !appState.isImmovable($0) }
     }
@@ -375,12 +376,13 @@ enum ApplyPass {
 
     /// False when the drag is put off: a mouse button is held and the pass
     /// is not one the user asked for (`PointerBorrow`, #159).
-    private static func waitForIdlePointer(upTo wait: TimeInterval = AppTiming.applyIdleMaxWait, askedByUser: Bool) async -> Bool {
+    private static func waitForIdlePointer(upTo wait: TimeInterval = AppTiming.applyIdleMaxWait, askedByUser: Bool, unattended: Bool) async -> Bool {
         let deadline = Date.now.addingTimeInterval(wait)
         while true {
             let verdict = PointerBorrow.verdict(
                 quietFor: secondsSincePointerActivity(), gap: AppTiming.applyIdleGap,
-                buttonDown: NSEvent.pressedMouseButtons != 0, waitedOut: Date.now >= deadline, askedByUser: askedByUser
+                buttonDown: NSEvent.pressedMouseButtons != 0, waitedOut: Date.now >= deadline, askedByUser: askedByUser,
+                unattended: unattended
             )
             switch verdict {
             case .now: return true
@@ -504,8 +506,11 @@ enum ApplyPass {
 
     /// Runs the whole pass. The caller owns `applying` and the report.
     /// `outOfPlace`: icons behind the « a whole-bar pass was asked to put
-    /// right (#171), counted like the plan's own.
-    static func run(appState: AppState, scope: Scope = .wholeBar, outOfPlace: Set<ItemID> = []) async -> ApplyReport {
+    /// right (#171), counted like the plan's own. `unattended`: a link or an
+    /// action asked, so a held button puts the drags off (#159).
+    static func run(
+        appState: AppState, scope: Scope = .wholeBar, outOfPlace: Set<ItemID> = [], unattended: Bool = false
+    ) async -> ApplyReport {
         let engine = appState.engine
         var report = ApplyReport()
         let screenMaxX = NSScreen.screens.first?.frame.maxX ?? .greatestFiniteMagnitude
@@ -772,7 +777,7 @@ enum ApplyPass {
             if case .ownItem = scope { askedByUser = false }
             guard await waitForIdlePointer(
                 upTo: appState.transitions.quietApplyInFlight ? AppTiming.quietApplyIdleMaxWait : AppTiming.applyIdleMaxWait,
-                askedByUser: askedByUser
+                askedByUser: askedByUser, unattended: unattended
             ) else {
                 PelmetLog.log("apply: a mouse button is held — the drag is put off")
                 report.abandoned = true

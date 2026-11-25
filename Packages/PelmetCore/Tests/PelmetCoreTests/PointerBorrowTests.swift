@@ -21,6 +21,19 @@ import Testing
         #expect(verdict(quiet: 3, down: true, waitedOut: true, asked: true) == .shielded)
     }
 
+    /// A link's or an action's Apply (#169): nobody is at Settings, so a
+    /// button still held when the wait runs out puts the pass off.
+    @Test func aHeldButtonPutsOffAnUnattendedPassAfterTheWait() {
+        func verdict(quiet: Double, down: Bool, waitedOut: Bool) -> PointerBorrow {
+            PointerBorrow.verdict(quietFor: quiet, gap: 1.5, buttonDown: down, waitedOut: waitedOut, askedByUser: true, unattended: true)
+        }
+        #expect(verdict(quiet: 3, down: true, waitedOut: false) == .wait)
+        #expect(verdict(quiet: 8, down: true, waitedOut: true) == .putOff)
+        #expect(verdict(quiet: 0, down: true, waitedOut: true) == .putOff)
+        #expect(verdict(quiet: 2, down: false, waitedOut: false) == .now)
+        #expect(verdict(quiet: 0.2, down: false, waitedOut: true) == .shielded)
+    }
+
     /// #159, again: a screen recording's Stop Recording pill was dragged
     /// 1.5s into a held Telegram button, the gap with no input since the
     /// press, and the recording ended (Fra's video, 2026-11-19).

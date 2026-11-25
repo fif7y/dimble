@@ -496,6 +496,7 @@ final class AppState {
             case .toggle: self?.toggle(reason: .hotkey)
             case .settings: self?.openSettings()
             case .notificationCenter: self?.openNotificationCenter()
+            case .controlCenter: self?.openControlCenter()
             case .alwaysHidden: self?.toggleAll(reason: .hotkey)
             case .alwaysHiddenOnly: self?.toggleOnly([.alwaysHidden], reason: .hotkey)
             case .search:
@@ -515,6 +516,7 @@ final class AppState {
         alwaysHiddenOnlyHotkeyConflict = !hotkey.register(settings.alwaysHiddenOnlyHotkey, slot: .alwaysHiddenOnly)
         notificationCenterHotkeyConflict = !hotkey.register(activeNotificationCenterHotkey, slot: .notificationCenter)
         searchHotkeyConflict = !hotkey.register(settings.searchHotkey, slot: .search)
+        hotkey.register(.controlCenter, slot: .controlCenter)
         registeredHotkey = settings.hotkey
         registeredSettingsHotkey = settings.settingsHotkey
         registeredAlwaysHiddenHotkey = settings.alwaysHiddenHotkey
@@ -1148,6 +1150,9 @@ final class AppState {
         SparkleController.shared.clearUpdateNotification()
         Task { [engine] in
             await engine.stop()
+            if await !ConcealGhostOverlay.openCaptures.close(within: AppTiming.quitCaptureDeadline) {
+                PelmetLog.log("stop: a capture is still open, quitting anyway")
+            }
             self.replyTerminate()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + AppTiming.terminationStopDeadline) { [weak self] in
@@ -1967,6 +1972,18 @@ final class AppState {
         clockClicked(at: target, pointer: pointer == target ? CGPoint(x: -1, y: -1) : pointer, viaShortcut: true)
     }
 
+    /// fn C (#179): Control Center hears its shortcut and opens nothing while
+    /// a hide assertion is held, yet a press on its icon goes through. With
+    /// none held (live mode) macOS opens it, and a press would close it again.
+    private func openControlCenter() {
+        Task {
+            guard await engine.holdsAssertion else { return }
+            let display = CGEvent(source: nil).flatMap { ClockClickRelay.display(under: $0.location) }
+            PelmetLog.log("hotkey: fn C → Control Center, refused while icons are hidden")
+            openItemMenu(ItemID(rawValue: "status:\(PelmetBundle.agentID)::com.apple.menuextra.controlcenter"), display: display)
+        }
+    }
+
     /// When the relay last opened the panel: the window list lags an
     /// opening by ~250ms, too slow for a second click right after.
     private var panelOpenedAt = Date.distantPast
@@ -2661,6 +2678,9 @@ final class AppState {
             throw free ? AutomationError.editsWaiting : AutomationError.busy
         }
         settings.orderEdits.created.formUnion(made)
+        let stored = Dictionary(uniqueKeysWithValues: drawn.keys.map {
+            ($0, barBasedOrder(in: $0, model: settings.sectionModel))
+        })
         for section in PelmetCore.Section.allCases {
             var before: ItemID?
             for key in (drawn[section] ?? []).reversed() {
@@ -2668,9 +2688,17 @@ final class AppState {
                 before = key
             }
         }
+        // The moves slide what they can't draw (an app not running, the
+        // clock) to the front of its section: it goes back where it was.
+        for (section, keys) in drawn {
+            let elsewhere = Set(drawn.filter { $0.key != section }.flatMap(\.value))
+            let order = LayoutRestore.laid(keys, over: stored[section] ?? [], elsewhere: elsewhere)
+            settings.orderEdits.order[section] = order
+            settings.sectionModel.order[section] = order
+        }
         drawingChanged()
         PelmetLog.log("automation: layout drawn, \(drawn.values.map(\.count).reduce(0, +)) icons, \(made.count) new separator(s), \(plan.missing.count) not here")
-        return applyOrderEdits(wholeOrder: true)
+        return applyOrderEdits(wholeOrder: true, unattended: true)
     }
 
     /// The Apply a link or an action started, to its end: whether `key`
@@ -2694,7 +2722,7 @@ final class AppState {
         bouncesCount = false
         defer { bouncesCount = true }
         // An abandoned pass drops its edits: nothing left to apply says nothing.
-        guard let again = await applyOrderEdits(wholeOrder: wholeOrder)?.value else { return !first.abandoned }
+        guard let again = await applyOrderEdits(wholeOrder: wholeOrder, unattended: true)?.value else { return !first.abandoned }
         return again.landed(key)
     }
 
@@ -3066,7 +3094,7 @@ final class AppState {
             PelmetLog.log("editor: move of \(id.rawValue) joins pending edits, not applied")
             return nil
         }
-        return applyOrderEdits(quiet: quiet)
+        return applyOrderEdits(quiet: quiet, unattended: despiteDrift)
     }
 
     /// The panel draws a section in the order the bar had at the last reveal
@@ -3754,9 +3782,10 @@ final class AppState {
     /// `wholeOrder`: asked for the whole bar's order (the Apply button, Set
     /// Menu Bar Layout), so it opens the « for the icons out of place behind
     /// it (#171). A drop asks for its own move and never does.
+    /// `unattended`: a link or a Shortcuts action asked, nobody is at Settings.
     /// Returns the pass, nil with nothing to apply or one already running.
     @discardableResult
-    func applyOrderEdits(quiet: Bool = false, wholeOrder: Bool = false) -> Task<ApplyReport, Never>? {
+    func applyOrderEdits(quiet: Bool = false, wholeOrder: Bool = false, unattended: Bool = false) -> Task<ApplyReport, Never>? {
         guard !applying, applyPending else { return nil }
         applying = true
         applyReport = nil
@@ -3766,11 +3795,11 @@ final class AppState {
             if quiet, panelShowsReveal, isRevealed, panelPresenter.isOpen {
                 held = await transitions.holdBarForApply(
                     revealing: [.hidden, .alwaysHidden],
-                    run: { await runApplyPass(wholeOrder: wholeOrder) },
+                    run: { await runApplyPass(wholeOrder: wholeOrder, unattended: unattended) },
                     lifted: { self.panelPresenter.quietApplyEnded() })
             }
             let report: ApplyReport
-            if let held { report = held } else { report = await runApplyPass(wholeOrder: wholeOrder) }
+            if let held { report = held } else { report = await runApplyPass(wholeOrder: wholeOrder, unattended: unattended) }
             applyReport = report
             applying = false
             // The bar is concealed and the panel is open on a clean quiet
@@ -3784,8 +3813,10 @@ final class AppState {
     }
 
     /// The pass and what follows it: the edits it settled, the order hint.
-    private func runApplyPass(wholeOrder: Bool) async -> ApplyReport {
-        let report = await ApplyPass.run(appState: self, outOfPlace: wholeOrder ? hiddenBehindOverflow : [])
+    private func runApplyPass(wholeOrder: Bool, unattended: Bool) async -> ApplyReport {
+        let report = await ApplyPass.run(
+            appState: self, outOfPlace: wholeOrder ? hiddenBehindOverflow : [], unattended: unattended
+        )
         // Placed, or no longer behind the «: the next full reveal says.
         if wholeOrder, !report.abandoned { hiddenBehindOverflow = report.stillBehind }
         PelmetLog.log("apply: done applied=\(report.applied.count) failed=\(report.failed.count) skipped=\(report.skipped.count)")
@@ -3794,7 +3825,8 @@ final class AppState {
         // is not done either: it stays pending like a failed move.
         let unreachable = report.skipped.filter { $0.why == .notOnScreen }.map(\.item)
         if report.failed.isEmpty, unreachable.isEmpty {
-            noteAppliedOrder(of: settings.orderEdits.order.keys)
+            // Put off, it laid nothing down: the order keeper does later.
+            if !report.abandoned { noteAppliedOrder(of: settings.orderEdits.order.keys) }
             settings.orderEdits = OrderEdits()
             settings.save()
         } else if report.failed.isEmpty {

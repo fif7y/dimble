@@ -2142,6 +2142,38 @@ final class LiveMirror {
         await goLive(chevron: chevron, started: started, retake: false)
     }
 
+    /// Waits for the concealed bar to stand still with its assertion held.
+    /// The icons are walked (`look`) only where an adoption window may have
+    /// let them out: the walk is slow. Returns the assertion's last change,
+    /// read before the bar is judged so one after it shows; nil when the bar
+    /// doesn't settle.
+    private func waitForConcealedBar(look: Bool) async -> Date? {
+        guard let appState else { return nil }
+        await appState.waitUntilQuiesced(interval: 0.2, deadline: 2, poll: .milliseconds(30))
+        var swap = await appState.engine.lastSwap
+        // Under the anchor the icons are out: the picture leaves them out.
+        if underAnchor { return swap }
+        let held = await appState.engine.holdsAssertion
+        let lettingOut = await appState.engine.adoptionLettingOut
+        if held, !lettingOut, !look { return swap }
+        PelmetLog.log("livemirror: \(held ? "icons let out a moment ago may still be leaving" : "the assertion is down") — the picture waits")
+        let deadline = Date().addingTimeInterval(AppTiming.concealedBarWait)
+        // A reveal asked meanwhile goes first (`abort` runs it).
+        while Date() < deadline, !standDown, pendingReveal == nil {
+            try? await Task.sleep(for: .milliseconds(60))
+            swap = await appState.engine.lastSwap
+            guard await appState.engine.holdsAssertion, await appState.engine.quiesced(for: 0.2) else { continue }
+            if await appState.engine.concealedItemsLeft() { return swap }
+        }
+        return nil
+    }
+
+    private func barChangedUnderPicture(since swap: Date, _ side: Side) async -> Bool {
+        guard let appState, !underAnchor, await appState.engine.lastSwap != swap else { return false }
+        PelmetLog.log("livemirror: display \(side.id) the bar changed while its picture was taken — again")
+        return true
+    }
+
     /// The pictures, the covers, the assertion and the pills: the start of
     /// live mode, or with `retake` the same again under a new backdrop with
     /// the mirrors staying on screen (they were made provisional, so the
@@ -2181,19 +2213,36 @@ final class LiveMirror {
             }
             // The start read the bar a moment ago: a converge since (a show
             // rule's icon coming out at an unlock) may still be reflowing.
-            await appState.waitUntilQuiesced(interval: 0.2, deadline: 2, poll: .milliseconds(30))
-            await measureAlone(side, left: left, right: right)
-            await measureSystemPill(side, left: left, right: right)
-            let rect = CGRect(x: left - shift, y: 0, width: right - left, height: 40)
-            // Under the anchor the hidden icons are out on the bar: the bare
-            // bar (the system's bar window left out) is the concealed bar.
-            // Dimble's own windows are left out: a retake keeps the old cover
-            // and its mirrors up over the bar, and filmed, the old picture
-            // (a Battery a rule just took back) and the old mirror (a slice of
-            // pill once the « moved) came back in the new one.
-            side.picture = await ConcealGhostOverlay.snapshotSet(
-                of: rect, excludingOwnWindows: true, displays: [side.id], bare: underAnchor, liveMirror: true
-            ).first
+            // And an app that just launched gets the assertion dropped for up
+            // to 2.5 s (`openAdoptionWindow`): a picture taken then holds
+            // every icon, kept for as long as the picture is (2026-11-24, a
+            // pill turned off in Settings stood at the far left, Claude
+            // relaunching 3 s before). One the bar changed under is taken
+            // again.
+            var swap = Date.distantPast
+            var tries = 0
+            repeat {
+                tries += 1
+                guard tries <= 3, let settled = await waitForConcealedBar(look: tries > 1) else {
+                    // A reveal comes back on its own; a bar that won't
+                    // settle isn't filmed again at once, capture after capture.
+                    await abort("the bar isn't concealed for its picture on display \(side.id)", holdOff: pendingReveal == nil && prepIssue() == nil)
+                    return
+                }
+                swap = settled
+                await measureAlone(side, left: left, right: right)
+                await measureSystemPill(side, left: left, right: right)
+                let rect = CGRect(x: left - shift, y: 0, width: right - left, height: 40)
+                // Under the anchor the hidden icons are out on the bar: the bare
+                // bar (the system's bar window left out) is the concealed bar.
+                // Dimble's own windows are left out: a retake keeps the old cover
+                // and its mirrors up over the bar, and filmed, the old picture
+                // (a Battery a rule just took back) and the old mirror (a slice of
+                // pill once the « moved) came back in the new one.
+                side.picture = await ConcealGhostOverlay.snapshotSet(
+                    of: rect, excludingOwnWindows: true, displays: [side.id], bare: underAnchor, liveMirror: true
+                ).first
+            } while await barChangedUnderPicture(since: swap, side)
             guard let picture = side.picture else { await abort("no picture of display \(side.id)", holdOff: true); return }
             side.pictureAt = Date()
             side.pictureGeneration = backdropGeneration

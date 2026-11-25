@@ -12,7 +12,8 @@ public enum PointerBorrow: Equatable, Sendable {
     /// The wait ran out on a pass the user asked for: drag behind the
     /// shield, as Apply always has.
     case shielded
-    /// A button is held and nobody asked for this pass: no drag. A held,
+    /// A button is held and nobody asked for this pass, or a link or an
+    /// action asked for it (`unattended`) and the wait ran out: no drag. A held,
     /// still button reads as a quiet pointer, and a drag posted into it
     /// lets go of whatever the user is holding (#159: a press-and-hold
     /// recording in another app ended a few seconds after the mic came on,
@@ -20,9 +21,10 @@ public enum PointerBorrow: Equatable, Sendable {
     case putOff
 
     public static func verdict(
-        quietFor: TimeInterval, gap: TimeInterval, buttonDown: Bool, waitedOut: Bool, askedByUser: Bool
+        quietFor: TimeInterval, gap: TimeInterval, buttonDown: Bool, waitedOut: Bool, askedByUser: Bool,
+        unattended: Bool = false
     ) -> PointerBorrow {
-        if buttonDown, !askedByUser { return .putOff }
+        if buttonDown, !askedByUser || (unattended && waitedOut) { return .putOff }
         if !buttonDown, quietFor >= gap { return .now }
         return waitedOut ? .shielded : .wait
     }

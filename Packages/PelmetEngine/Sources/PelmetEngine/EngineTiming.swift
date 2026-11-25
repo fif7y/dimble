@@ -69,4 +69,6 @@ enum EngineTiming {
     /// land (lands instantly in practice; the deadline bounds the flash).
     static let adoptionWindowDeadline: TimeInterval = 2.5
     static let adoptionWindowPoll: Duration = .milliseconds(200)
+    /// How long after a window the icons it let out can still be leaving.
+    static let adoptionLeaving: TimeInterval = 1
 }

@@ -196,4 +196,28 @@ public enum LayoutRestore {
         }
         return Plan(order: order, missing: missing)
     }
+
+    /// A section's stored order with `drawn` laid in it. What the plan can't
+    /// draw keeps its place: an app not running stays after the icon it stood
+    /// after, and the ones macOS pins stay at the end. Drawn one move at a
+    /// time, the same layout set again left every quit app's icon at its
+    /// section's left end. `elsewhere`: keys drawn in another section.
+    public static func laid(_ drawn: [ItemID], over stored: [ItemID], elsewhere: Set<ItemID>) -> [ItemID] {
+        let here = Set(drawn)
+        let lastDrawn = stored.lastIndex(where: here.contains) ?? -1
+        var order = drawn
+        var anchor: ItemID?
+        for (index, key) in stored.enumerated() where !elsewhere.contains(key) {
+            if here.contains(key) {
+                anchor = key
+            } else if index > lastDrawn {
+                order.append(key)
+            } else {
+                let after = anchor.flatMap { order.firstIndex(of: $0) }
+                order.insert(key, at: after.map { $0 + 1 } ?? 0)
+                anchor = key
+            }
+        }
+        return order
+    }
 }

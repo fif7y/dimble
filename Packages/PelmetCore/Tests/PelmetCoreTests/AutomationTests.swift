@@ -310,4 +310,33 @@ struct LayoutRestoreTests {
         let layout = try LayoutRestore.read(#"{"sections":[{"section":"hidden","items":[{},{"id":"  "},{"name":"Snib"}]}]}"#)
         #expect(layout.sections.first?.1 == [.init(id: nil, name: "Snib")])
     }
+
+    /// beta.8: the same layout set again, with Q's app quit (stored, not on
+    /// the bar), put Q at its section's left end.
+    @Test func anIconNotOnTheBarKeepsItsPlaceInTheOrder() {
+        func k(_ names: String...) -> [ItemID] { names.map { ItemID(rawValue: "bundle:\($0)") } }
+        // The same layout changes nothing, wherever the quit apps sit.
+        #expect(LayoutRestore.laid(k("a", "b", "c"), over: k("a", "q", "b", "c"), elsewhere: []) == k("a", "q", "b", "c"))
+        #expect(LayoutRestore.laid(k("a", "b"), over: k("p", "q", "a", "b"), elsewhere: []) == k("p", "q", "a", "b"))
+        #expect(LayoutRestore.laid(k("a", "b"), over: k("a", "p", "q", "b"), elsewhere: []) == k("a", "p", "q", "b"))
+        #expect(LayoutRestore.laid(k("a", "b"), over: k("a", "b", "q"), elsewhere: []) == k("a", "b", "q"))
+        // Reordered, it follows the icon it stood after.
+        #expect(LayoutRestore.laid(k("c", "b", "a"), over: k("a", "b", "q", "c"), elsewhere: []) == k("c", "b", "q", "a"))
+        // That icon goes to another section: the one before it, else the front.
+        #expect(LayoutRestore.laid(k("a", "c"), over: k("a", "b", "q", "c"), elsewhere: Set(k("b"))) == k("a", "q", "c"))
+        #expect(LayoutRestore.laid(k("b", "c"), over: k("a", "q", "b", "c"), elsewhere: Set(k("a"))) == k("q", "b", "c"))
+        // Newcomers land where the layout has them.
+        #expect(LayoutRestore.laid(k("n", "a", "m", "b"), over: k("a", "q", "b"), elsewhere: []) == k("n", "a", "q", "m", "b"))
+        // Nothing of this section was here before.
+        #expect(LayoutRestore.laid(k("n"), over: [], elsewhere: []) == k("n"))
+    }
+
+    /// The ones macOS pins are in no layout plan (`movable`): Visible still
+    /// ends with them, reordered or joined by a new icon.
+    @Test func thePinnedEndOfVisibleStaysTheEnd() {
+        func k(_ names: String...) -> [ItemID] { names.map { ItemID(rawValue: "bundle:\($0)") } }
+        #expect(LayoutRestore.laid(k("b", "a"), over: k("a", "b", "cc", "clock"), elsewhere: []) == k("b", "a", "cc", "clock"))
+        #expect(LayoutRestore.laid(k("a", "n"), over: k("a", "b", "cc", "clock"), elsewhere: Set(k("b"))) == k("a", "n", "cc", "clock"))
+        #expect(LayoutRestore.laid(k("n"), over: k("cc", "clock"), elsewhere: []) == k("n", "cc", "clock"))
+    }
 }

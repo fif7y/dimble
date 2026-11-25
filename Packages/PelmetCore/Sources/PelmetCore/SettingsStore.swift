@@ -35,6 +35,10 @@ public struct HotkeySpec: Codable, Equatable, Sendable {
     /// ⌥⌘K opens the command bar (⌥⌘Space belongs to Finder's search
     /// window). kVK_ANSI_K = 0x28.
     public static let searchDefault = HotkeySpec(keyCode: 0x28, modifiers: 0x900, display: "⌥⌘K")
+    /// fn C, macOS's own for Control Center (#179), not one to set. Refused
+    /// like Notification Center's while a hide assertion holds.
+    /// kVK_ANSI_C = 0x08, kEventKeyModifierFnMask = 0x20000.
+    public static let controlCenter = HotkeySpec(keyCode: 0x08, modifiers: 0x20000, display: "fn C")
     /// A shortcut the user turned off (#79: Pelmet's combos clashed with
     /// Keyboard Maestro). A value, not nil: a missing or null field still
     /// decodes to the default, and no key has this code. A build from before
