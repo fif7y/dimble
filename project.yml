@@ -37,8 +37,8 @@ targetTemplates:
         NSPrincipalClass: NSApplication
     settings:
       base:
-        MARKETING_VERSION: "0.4.1-beta.8"
-        CURRENT_PROJECT_VERSION: "103"
+        MARKETING_VERSION: "0.4.1-beta.9"
+        CURRENT_PROJECT_VERSION: "104"
         SWIFT_VERSION: "6.0"
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: "YES"
@@ -118,8 +118,8 @@ targets:
         PRODUCT_NAME: Dimble
         PRODUCT_MODULE_NAME: Pelmet
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        MARKETING_VERSION: "0.4.1-beta.8"
-        CURRENT_PROJECT_VERSION: "103"
+        MARKETING_VERSION: "0.4.1-beta.9"
+        CURRENT_PROJECT_VERSION: "104"
         SWIFT_VERSION: "6.0"
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
         SWIFT_APPROACHABLE_CONCURRENCY: "YES"
