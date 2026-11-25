@@ -7,7 +7,7 @@
   <a href="https://github.com/fif7y/dimble/releases/latest"><img src="https://img.shields.io/github/v/release/fif7y/dimble?label=download&color=2ea44f" alt="Download latest release"></a>
   <a href="#install"><img src="https://img.shields.io/badge/requirements-macOS_27%2B-E8A33D" alt="Requires macOS 27 or later"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/fif7y/dimble" alt="License: GPL-3.0"></a>
-  <a href="https://alternativeto.net/software/pelmet/about/"><img src="https://img.shields.io/badge/AlternativeTo-Pelmet-1f6feb" alt="Pelmet on AlternativeTo"></a>
+  <a href="https://alternativeto.net/software/pelmet/about/"><img src="https://img.shields.io/badge/AlternativeTo-Dimble-1f6feb" alt="Dimble on AlternativeTo"></a>
   <a href="https://github.com/sponsors/fif7y"><img src="https://img.shields.io/badge/sponsor-%E2%9D%A4-ea4aaa" alt="Sponsor Dimble"></a>
 </p>
 
@@ -33,7 +33,7 @@ no account, no analytics.
 
 Three sections, one rule: **Visible** is always there, **Hidden** comes back
 on a hover or a click, and **Always Hidden** only appears when you ask for it
-(double-click or ⌥-click the chevron). Arrange them in the layout editor
+(double-click or ⌥-click the chevron, or a middle-click once you turn it on). Arrange them in the layout editor
 (real app-icon previews, drag-and-drop ordering): the editor is a drawing
 the bar follows, and **Apply** lays the bar out to match it in one pass. Or
 skip the window entirely and ⌘-drag icons across the chevron right in the
@@ -69,7 +69,8 @@ Every way back in is a setting: hover (with a delay from 0.1 to 0.5 seconds),
 a click on empty menu bar space, a double-click for the always-hidden section,
 or the chevron itself. The keyboard works too, from any app. ⌥⌘, shows the
 hidden icons and ⌃⌥⌘, brings the always-hidden ones with them (you can change
-both in Settings › General). Pick how it looks (**Instant**, **Smooth** or **Fade**)
+both in Settings › General). Always Hidden on its own can get a key too, and
+a middle-click on the chevron can show either section. Pick how it looks (**Instant**, **Smooth** or **Fade**)
 and how it ends, either auto-rehide after a delay you set (instant to 5
 seconds) or the moment you click somewhere else.
 
@@ -125,18 +126,64 @@ keeps it there. The pill sits next to the chevron for as long as the activity
 runs, a click opens its card, and the system icons come back alongside it.
 It's on by default, and it needs Screen Recording.
 Settings › Menu Bar › "Show Live Activities" turns it off. New in 0.3.4.
+macOS 27.3's "System & App Protection Override" pill is the one left out by
+default. A Mac with Dimble has it up all day, so Settings › Menu Bar › Live
+Activities brings it back if you want it.
 
 <p align="center">
   <img src="https://dimble.fif7y.com/assets/live-bar.gif" alt="A hockey game's Live Activity next to the chevron while Dimble hides the rest of the icons: the pill comes out of the bar, a click opens its card, the score rolls from 2 to 3, a second click closes the card, and the pill goes away at the final buzzer" width="640"><br>
   <sub>The game's pill stays on the bar. A click opens its card.</sub>
 </p>
 
+## Shortcuts and links
+
+Dimble has twelve Shortcuts actions. Get Menu Bar Layout gives back your whole
+layout as text (JSON). Set Menu Bar Layout puts every icon where that text says,
+in one go. Keep the text in a file to bring the layout back later, or on another
+Mac. You get a list of the icons it couldn't find. New in 1.0.0.
+
+- **Move things.** Move an icon to a section or right after another one, and add
+  or remove a separator. Dimble drags the real icons, so leave the mouse alone
+  while it runs.
+- **Show or open.** Bring out the hidden icons or just one, and open an icon's
+  menu wherever it sits. Are Icons Shown answers yes or no, for an If in your
+  shortcut.
+- **The rest.** Open Search with text typed in, or turn reveal on hover or on
+  click on and off.
+
+`dimble://` links do the smaller changes without Shortcuts, from a launcher or a
+script.
+
+| Link | What it does |
+| --- | --- |
+| `dimble://show` | Shows the Hidden icons (`show-all` adds Always Hidden) |
+| `dimble://hide` | Puts them back (`toggle` does one or the other) |
+| `dimble://search?q=Tailscale` | Opens Search with the text typed in |
+| `dimble://move?icon=Tailscale&to=hidden` | Moves an icon to `visible`, `hidden` or `always-hidden` |
+| `dimble://move?icon=Tailscale&after=Bluetooth` | Moves it next to another icon (`before` works too) |
+| `dimble://add-separator?after=Tailscale` | Adds a separator (`to=hidden` adds it to that section) |
+| `dimble://remove-separator?after=Tailscale` | Removes that separator |
+
+An icon goes by the name Settings shows. If two share a name, use the `id` from
+the layout. A space is `%20`, as in `Little%20Snitch`. Any web page can open a
+link, so a link can't read your layout, click an icon or change a setting.
+
+In Terminal, `open -g` runs a link. An action goes in a shortcut first. Run that
+once in the Shortcuts app and pick Always Allow, or Terminal waits on macOS's
+prompt. With Get Menu Bar Layout in a shortcut named Menu Bar Layout, the second
+line saves your layout to a file.
+
+```sh
+open -g "dimble://toggle"
+shortcuts run "Menu Bar Layout" --output-path layout.json --output-type public.plain-text < /dev/null
+```
+
 ## And the rest
 
 - **Per-display behavior.** Set a display to always show everything or to
   collapse. Whichever display your pointer is on wins.
 - **Built-in replacements.** Media controls, AirDrop, camera/mic indicator,
-  a timer, Focus, fast user switching and Shortcuts items that survive hiding, since macOS temporarily removes
+  a timer, Focus, fast user switching and Shortcut buttons (with an icon you pick) that survive hiding, since macOS temporarily removes
   its own extras while hiding is active. Media controls, Time Machine and Focus
   show when active or always, and a ⌘-drag off the bar turns any of them off.
 - **App launchers.** A Dimble icon for any app: click opens it, and it hides
@@ -149,9 +196,9 @@ Settings › Menu Bar › "Show Live Activities" turns it off. New in 0.3.4.
   The only connection Dimble ever makes is checking for its own updates.
 - **Signed updates.** Sparkle with EdDSA signatures, checked against a
   signed appcast.
-- **Your icon, or none.** Seven menu bar icon styles (chevron, arrow, eye,
-  dots, grid, panel, dot), or turn the icon off entirely and reach Settings by
-  shortcut or right-click.
+- **Your icon, or none.** Nine menu bar icon styles (two chevrons, arrow,
+  eye, dots, grid, panel, two dots), or turn the icon off entirely and reach
+  Settings by shortcut or right-click.
 - **Tighter icons.** One slider for the gap macOS leaves between menu bar
   icons, down to 1 point. Dimble relaunches itself and the system icons so the
   clock and Control Center follow at once, other apps pick it up the next time

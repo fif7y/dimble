@@ -5,9 +5,9 @@ Everything below the one-time setup is: bump version → run script → publish.
 
 ## One-time setup (on the dev Mac)
 
-1. **Developer ID Application certificate** — currently the blocker; the keychain
-   has none. In Xcode → Settings → Accounts → team `YW9UY68SQ7` → Manage
-   Certificates → “+” → Developer ID Application (needs Account Holder role, or
+1. **Developer ID Application certificate** (in the dev Mac's keychain, needed
+   again only on a new Mac or once it expires). In Xcode → Settings → Accounts →
+   team `YW9UY68SQ7` → Manage Certificates → “+” → Developer ID Application (needs Account Holder role, or
    create at developer.apple.com/account/resources/certificates). Verify:
    `security find-identity -v -p codesigning` lists `Developer ID Application: …`.
 
@@ -109,8 +109,8 @@ Plan and rationale: `docs/BETA-CHANNEL-PLAN.md`. Mechanics:
 - `CHANNEL=beta scripts/release.sh` — `generate_appcast --channel beta` tags
   the new items; stable items stay untagged in the same `appcast.xml`.
 - GitHub release `vX.Y.Z-beta.N` with `--prerelease` (the download badge and
-  "Latest" stay on stable). Push the appcast to gh-pages as usual (not the
-  frozen nook mirror). Skip the Homebrew cask.
+  "Latest" stay on stable). Push the appcast to both feeds as in step 4.
+  Homebrew's livecheck skips beta items, so the cask stays put.
 - Notes in `docs/release-notes/vX.Y.Z-beta.N.md`; the stable's notes are the
   roll-up.
 - The notes file is also what users see in the app: `release.sh` renders it

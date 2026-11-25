@@ -13,7 +13,7 @@ body:
     id: versions
     attributes:
       label: Dimble and macOS versions
-      placeholder: "Dimble 0.3.2 · macOS 27.0 (25A000)"
+      placeholder: "Dimble 1.0.0 · macOS 27.0 (25A000)"
     validations:
       required: true
   - type: dropdown
