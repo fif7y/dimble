@@ -3140,7 +3140,12 @@ extension TransitionCoordinator {
         if let sharper, sharp == nil {
             PelmetLog.log("pass: no cut-out of display \(sharper.display)'s bar, all from the primary")
         }
-        if dump, let sharp { dumpPass([sharp.raw], name: "_strip_sharper") }
+        if dump, let sharp {
+            dumpPass([sharp.raw], name: "_strip_sharper")
+            // Its own empty bar too: #156's built-in refused three columns
+            // for ink there, and only the primary's empty bar was saved.
+            if let under = sharp.under { dumpPass([under], name: "_empty_sharper") }
+        }
         var pictures: [ItemID: ItemPictures.Picture] = [:]
         var contaminated: [(ItemID, Double)] = []
         var fromSharper = 0
