@@ -481,6 +481,44 @@ nonisolated enum PillProbe {
     }
 }
 
+/// The blank an Always Hidden icon among the Hidden ones leaves under live
+/// mode, closed (`LiveMirror.gapPlan`): `run` from the leftmost Hidden icon to
+/// the last stray's right end, `width` the strays' own widths, and each other
+/// icon in the run, where it stands and where it is drawn, as if the strays
+/// weren't there. The cover then ends at `run`'s end, the slid icons drawn
+/// in it, the pills left of them.
+nonisolated struct GapPlan: Equatable, Sendable {
+    struct Slide: Equatable, Sendable {
+        let id: ItemID
+        let from: CGFloat
+        let to: CGFloat
+        let width: CGFloat
+    }
+    let run: ClosedRange<CGFloat>
+    let width: CGFloat
+    let icons: [Slide]
+    /// Where the slid icons begin.
+    var start: CGFloat { run.lowerBound + width }
+
+    /// The same plan `dx` points over: the bar slid as a whole (the « moved).
+    func moved(by dx: CGFloat) -> GapPlan {
+        GapPlan(run: (run.lowerBound + dx)...(run.upperBound + dx), width: width,
+                icons: icons.map { Slide(id: $0.id, from: $0.from + dx, to: $0.to + dx, width: $0.width) })
+    }
+
+    /// The same icons in the same places, within half a point.
+    func same(as other: GapPlan) -> Bool {
+        func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 0.5 }
+        return near(run.lowerBound, other.run.lowerBound) && near(run.upperBound, other.run.upperBound)
+            && near(width, other.width) && icons.count == other.icons.count
+            && zip(icons, other.icons).allSatisfy { $0.id == $1.id && near($0.from, $1.from) && near($0.to, $1.to) && near($0.width, $1.width) }
+    }
+
+    /// The same plan wherever the bar stands: the same icons, the same sizes.
+    func sameShape(as other: GapPlan) -> Bool {
+        same(as: other.moved(by: run.lowerBound - other.run.lowerBound))
+    }
+}
 
 // MARK: - Live mode
 
@@ -595,6 +633,47 @@ final class LiveMirror {
         var drawnHiddenEdge: CGFloat?
         var patch:(set: ConcealGhostOverlay.GhostSet, spans: [ClosedRange<CGFloat>], pictureAt: Date)?
         var strayNote = ""
+        /// Every icon the last walk read on this bar, and how many walks
+        /// there have been: the keeper hears each one once (`coverStrays`).
+        var walked: [(id: ItemID, frame: CGRect)] = []
+        var walks = 0
+        var toldWalk = 0
+        /// When that walk was, and where the « stood then: a film for its
+        /// plan is only taken soon after, and kept only if the « didn't
+        /// move with it (the capture indicator, up to 27.2).
+        var walkedAt = Date.distantPast
+        var walkChevron: CGFloat?
+        /// The blank a stray leaves, closed (`GapPlan`): the last walk's plan,
+        /// and the Hidden icons left of the strays filmed live and drawn slid
+        /// right in the cover, which then ends past them. Only while the plan
+        /// it was filmed for is the walk's.
+        var gapWanted: GapPlan?
+        var gap: (plan: GapPlan, layer: CALayer, filmedAt: Date)?
+        var gapFilming = false
+        /// A plan that couldn't be filmed or drawn, and when (`canFilmGap`).
+        var gapFailed: (plan: GapPlan, at: Date)?
+        /// What MenuBarAgent's icons among the slid ones said when filmed
+        /// (`refreshGap`).
+        var gapSaid: [String: String] = [:]
+        var gapNote = ""
+        /// The walk's plan, and the first walk that read it so: a film only
+        /// once walks `gapSteady` apart agree (one can be taken as the « moves).
+        var gapSeen: (plan: GapPlan, at: Date)?
+        /// The last closed gap a walk dropped: back without a film when a
+        /// walk reads the same icons again (the one that dropped it was
+        /// taken as the « moved).
+        var gapKept: (plan: GapPlan, layer: CALayer, filmedAt: Date)?
+        /// The gap's layer on the cover shown now, and since when it may
+        /// show (Hidden's move out arriving).
+        var gapAttached: CALayer?
+        var gapHeldUntil: Date?
+        /// When Hidden's move out arrives on a hiding bar: the gap closes after.
+        var endArrives: Date?
+        /// The gap went while the cover was over it: the cover ends at the
+        /// Hidden icons again at the next `coverStrays`. `gapMoved`: the bar
+        /// slid as a whole beneath it, the cover's end follows.
+        var gapShrink = false
+        var gapMoved = false
         var picture: ConcealGhostOverlay.BarSnapshot?
         /// The icons standing under the cover, cut out of the bar: what a
         /// Smooth reveal slides out from behind the « (#154). `edge`: the
@@ -1106,7 +1185,10 @@ final class LiveMirror {
                 PelmetLog.log("livemirror: display \(side.id) Hidden edge \(side.runEdge.map { "\(Int($0))" } ?? "-") outside the cover \(Int(side.coverMinX))..\(Int(side.coverMaxX)) — left covered")
                 continue
             }
-            buildCover(side, left: side.coverMinX, right: edge - 1, why: "hidden out")
+            // Past the slid icons when the blank beside a stray was filmed
+            // for this very walk (an earlier hover, or Hidden in).
+            let end = gapApplies(side).map { $0.plan.run.upperBound } ?? edge
+            _ = buildCover(side, left: side.coverMinX, right: min(end, side.coverMaxX) - 1, why: "hidden out")
         }
         PelmetLog.log("livemirror: reveal(\(reason)) — Hidden out under live mode on display(s) \(targets.map(\.id).sorted()) in \(Int(-started.timeIntervalSinceNow * 1000))ms, the assertion stays down")
     }
@@ -1568,8 +1650,17 @@ final class LiveMirror {
     /// that shows every icon, the left edge of the Hidden icons (they stay
     /// out, the cover is only over what the assertion hides left of them).
     private func coverEnd(_ chevron: NSRect, on side: Side) -> CGFloat {
-        if side.showsAll || isOut(side), let edge = side.runEdge { return edge }
+        if side.showsAll || isOut(side), let edge = side.runEdge { return gapApplies(side)?.plan.run.upperBound ?? edge }
         return chevronMinX(chevron, on: side)
+    }
+
+    /// A closed gap that belongs on this bar now: its cover ends at the Hidden
+    /// icons, and at the edge it was filmed against (an always-show bar's
+    /// edge is read with the « and its walks can be newer).
+    private func gapApplies(_ side: Side) -> (plan: GapPlan, layer: CALayer, filmedAt: Date)? {
+        guard let gap = side.gap, side.showsAll || isOut(side), let edge = side.runEdge,
+              abs(edge - gap.plan.run.lowerBound) < 1 else { return nil }
+        return gap
     }
 
     /// A display that shows every icon: the left edge of its Hidden icons
@@ -1588,6 +1679,7 @@ final class LiveMirror {
         var always: ClosedRange<CGFloat>?
         var drawn: [CGRect] = []
         var drawnIDs: [ItemID] = []
+        var walked: [(id: ItemID, frame: CGRect)] = []
         var read = false
         // A hiding bar's icon left of its cover is not in the run the cover
         // hides. With macOS's own « open the Hidden icons stand left of the
@@ -1607,6 +1699,7 @@ final class LiveMirror {
             if let held {
                 r = CGRect(x: held.minX, y: r.minY, width: held.width, height: r.height)
             }
+            walked.append((id, r))
             switch model.section(of: id) {
             case .hidden: hidden = min(hidden ?? r.minX, r.minX)
             case .visible: visible = min(visible ?? r.minX, r.minX)
@@ -1630,7 +1723,101 @@ final class LiveMirror {
             side.alwaysDrawn = drawn
             side.alwaysDrawnIDs = drawnIDs
             side.drawnHiddenEdge = hidden
+            side.walked = walked
+            side.walks &+= 1
+            side.walkedAt = Date()
+            side.walkChevron = appState.chevronWindowFrame?.minX
+            noteGapPlan(side, edgeRead: edge && (read || !side.showsAll))
         }
+    }
+
+    /// The last walk's `GapPlan`, and a closed gap filmed for another one
+    /// gone: the bar beneath moved, the slid icons would stand wrong or over
+    /// an icon (`coverStrays` ends the cover at the Hidden icons again).
+    /// `edgeRead`: the walk read the cover's end too, and its caller ends
+    /// the cover there: a bar that slid as a whole (the « moved) keeps its
+    /// slid icons, moved with it.
+    private func noteGapPlan(_ side: Side, edgeRead: Bool) {
+        let plan = Self.closesGap ? side.drawnHiddenEdge.flatMap { edge in
+            Self.gapPlan(side.walked, strays: Self.strayIDs(side.alwaysDrawnIDs, side.alwaysDrawn, past: edge), edge: edge)
+        } : nil
+        side.gapWanted = plan
+        if let plan {
+            if !(side.gapSeen.map { $0.plan.same(as: plan) } ?? false) { side.gapSeen = (plan, side.walkedAt) }
+        } else {
+            side.gapSeen = nil
+        }
+        // A stray with no plan: what the walk read around it, once per change.
+        if plan == nil, Self.closesGap, let edge = side.drawnHiddenEdge,
+           case let strays = Self.strayIDs(side.alwaysDrawnIDs, side.alwaysDrawn, past: edge), !strays.isEmpty {
+            let end = side.alwaysDrawn.map(\.maxX).max() ?? edge
+            let near = side.walked.filter { $0.frame.maxX > edge - 40 && $0.frame.minX < end + 40 }.sorted { $0.frame.minX < $1.frame.minX }
+            let note = near.map { "\($0.id.rawValue.split(separator: ":").last ?? "") \(Int($0.frame.minX))..\(Int($0.frame.maxX))" }.joined(separator: ", ")
+            if note != side.gapNote {
+                side.gapNote = note
+                PelmetLog.log("livemirror: display \(side.id) the blank beside [\(strays.map(\.rawValue).joined(separator: ", "))] stays — the walk from the Hidden edge \(Int(edge)): \(note)")
+            }
+        }
+        if side.gap == nil, let plan, let kept = side.gapKept, kept.plan.sameShape(as: plan),
+           Date().timeIntervalSince(kept.filmedAt) < Self.graphicRefresh {
+            side.gapKept = nil
+            side.gap = (plan, kept.layer, kept.filmedAt)
+            side.gapMoved = true
+            recheckGap(side)
+            PelmetLog.log("livemirror: display \(side.id) the icons beside the stray read as before — the slid icons back, no film")
+            return
+        }
+        if edgeRead, let gap = side.gap, let plan, gap.plan.moved(by: plan.run.lowerBound - gap.plan.run.lowerBound).same(as: plan) {
+            if !gap.plan.same(as: plan) {
+                side.gapMoved = true
+                recheckGap(side)
+            }
+            side.gap = (plan, gap.layer, gap.filmedAt)
+            return
+        }
+        guard let gap = side.gap, !(plan.map { gap.plan.same(as: $0) } ?? false) else { return }
+        side.gap = nil
+        side.gapKept = gap
+        if side.gapAttached != nil {
+            side.gapShrink = true
+            recheckGap(side)
+        }
+        PelmetLog.log("livemirror: display \(side.id) the icons under the closed gap moved (\(plan.map { "\(Int($0.run.lowerBound))..\(Int($0.run.upperBound))" } ?? "no stray")) — the slid icons go")
+    }
+
+    /// The blank a stray leaves is closed unless `pelmet.closeStrayGap` is
+    /// false: then each stray gets a patch and nothing moves.
+    private static var closesGap: Bool { UserDefaults.standard.object(forKey: "pelmet.closeStrayGap") as? Bool ?? true }
+
+    /// A walk moved or dropped the closed gap: the cover's end follows once
+    /// the move under way has arrived, whoever walked (`coverStrays`).
+    private func recheckGap(_ side: Side) {
+        let wait = max(0, side.endArrives?.timeIntervalSinceNow ?? 0) + 0.02
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self, weak side] in
+            guard let self, let side, self.isActive, side.gapShrink || side.gapMoved else { return }
+            self.coverStrays(side)
+        }
+    }
+
+    /// Whether a film for `plan` may be taken now: soon after the walk it
+    /// came from, with the « where that walk had it, once walks `gapSteady`
+    /// apart agree on it, and not within `graphicRefresh` of a failed one
+    /// for the same icons wherever they stood (30 s for others: walks that
+    /// disagree don't film again and again).
+    private func canFilmGap(_ side: Side, _ plan: GapPlan) -> Bool {
+        guard !side.gapFilming, !coverLifted, !missionControlUp, Date().timeIntervalSince(side.walkedAt) < 1.5, chevronStill(side),
+              let seen = side.gapSeen, seen.plan.same(as: plan), side.walkedAt.timeIntervalSince(seen.at) >= Self.gapSteady
+        else { return false }
+        guard let failed = side.gapFailed else { return true }
+        let since = Date().timeIntervalSince(failed.at)
+        return since > Self.graphicRefresh || !failed.plan.sameShape(as: plan) && since > 30
+    }
+    private static let gapSteady: TimeInterval = 1
+
+    /// The « where the last walk had it: the bar hasn't slid since.
+    private func chevronStill(_ side: Side) -> Bool {
+        guard let stood = side.walkChevron, let now = appState?.chevronWindowFrame?.minX else { return true }
+        return abs(now - stood) < 0.5
     }
 
     /// The spans of the Always Hidden icons that reach past `end`, where the
@@ -1657,6 +1844,57 @@ final class LiveMirror {
         zip(ids, frames).filter { $0.1.maxX > end + 4 }.map(\.0)
     }
 
+    /// The strays' blank closed: every other icon from `edge` (the leftmost
+    /// Hidden one) to the last stray slides right by the widths of the strays
+    /// right of it, where macOS puts it once they're hidden. `icons` is the
+    /// whole walk of the bar, the strays in it. Nil with no stray, or unless
+    /// the run is wholly icons the walk read, side by side (gaps up to 4pt,
+    /// overlaps up to 2): an icon it missed would sit hidden under the cover.
+    /// MenuBarAgent's icons read without the room macOS keeps around them
+    /// (Battery 4934..4960 between Bitwarden ending at 4926 and Snib from
+    /// 4968, the LG, 2026-11-26): the slot they leave is that much wider.
+    /// An app's own icon reads with its room, side by side with the next.
+    nonisolated static func padded(_ id: ItemID) -> Bool {
+        id.rawValue.hasPrefix("status:com.apple.MenuBarAgent::")
+    }
+
+    nonisolated static func gapPlan(_ icons: [(id: ItemID, frame: CGRect)], strays: [ItemID], edge: CGFloat) -> GapPlan? {
+        let stray = Set(strays)
+        guard let last = icons.filter({ stray.contains($0.id) }).max(by: { $0.frame.maxX < $1.frame.maxX }),
+              last.frame.maxX > edge + 4 else { return nil }
+        let end = last.frame.maxX
+        let run = icons.filter { $0.frame.maxX > edge + 2 && $0.frame.minX < end - 2 }.sorted { $0.frame.minX < $1.frame.minX }
+        guard let first = run.first, abs(first.frame.minX - edge) <= 2,
+              run.allSatisfy({ $0.frame.minX >= edge - 2 && $0.frame.maxX <= end + 2 })
+        else { return nil }
+        // The icon right of the last stray, its slot's end. None: the stray
+        // ends the run, and only one read with its room can.
+        let next = icons.filter { $0.frame.minX >= end - 2 && $0.frame.minX <= end + 20 }.min { $0.frame.minX < $1.frame.minX }
+        let row = run + (next.map { [$0] } ?? [])
+        // Where each icon's slot meets the next one's: the room between them
+        // is MenuBarAgent's, half each when both are, and only that room:
+        // a wider space may hold an icon the walk missed.
+        var cuts: [CGFloat] = []
+        for (a, b) in zip(row, row.dropFirst()) {
+            let gap = b.frame.minX - a.frame.maxX
+            let pa = padded(a.id), pb = padded(b.id)
+            guard gap >= -2, gap <= 4 + (pa ? 8 : 0) + (pb ? 8 : 0) else { return nil }
+            cuts.append(pa == pb ? a.frame.maxX + gap / 2 : pa ? b.frame.minX : a.frame.maxX)
+        }
+        if next == nil {
+            guard !padded(last.id) else { return nil }
+            cuts.append(end)
+        }
+        func slot(_ i: Int) -> CGFloat { cuts[i] - (i == 0 ? run[0].frame.minX : cuts[i - 1]) }
+        let slides = run.indices.filter { !stray.contains(run[$0].id) }.map { i in
+            let by = run.indices.filter { $0 > i && stray.contains(run[$0].id) }.reduce(0) { $0 + slot($1) }
+            return GapPlan.Slide(id: run[i].id, from: run[i].frame.minX, to: run[i].frame.minX + by, width: run[i].frame.width)
+        }
+        guard !slides.isEmpty else { return nil }
+        let width = run.indices.filter { stray.contains(run[$0].id) }.reduce(0) { $0 + slot($1) }
+        return GapPlan(run: edge...cuts[run.count - 1], width: width, icons: slides)
+    }
+
     /// The cover on a bar whose Hidden icons are out ends at the leftmost of
     /// them, and macOS draws every icon right of there: an Always Hidden one
     /// that ended up among them showed (Battery between two Hidden icons, on
@@ -1669,15 +1907,48 @@ final class LiveMirror {
         // bar live mode has let go of gets none.
         guard leaving || !exiting && !handingOver, sides.contains(where: { $0 === side }) else { return }
         let open = side.cover != nil && assertionDropped && (side.showsAll || isOut(side))
+        // A closed gap went with the bar beneath: the cover ends at the
+        // Hidden icons again (this runs once more from `buildCover`).
+        if side.gapShrink {
+            side.gapShrink = false
+            side.gapMoved = false
+            if open, !leaving, let chevron = lastChevron {
+                let right = coverEnd(chevron, on: side) - 1
+                if side.coverMaxX > right + 0.5 {
+                    _ = buildCover(side, left: side.coverMinX, right: right, why: "strays")
+                    return
+                }
+            }
+        }
+        if side.gapMoved {
+            side.gapMoved = false
+            if open, !leaving, !entering, gapApplies(side) != nil, let chevron = lastChevron {
+                if abs(side.coverMaxX - (coverEnd(chevron, on: side) - 1)) <= 0.5 {
+                    layoutMirrors(side)
+                } else if applyGap(side, slide: false) {
+                    return
+                }
+            }
+        }
         var spans = open ? Self.strays(side.alwaysDrawn, past: side.coverMaxX) : []
         // The patch only hides it, a blank where it stands: the keeper puts
         // it back once live mode lets go of the bar, which at rest it can't
         // tell is out of place (2026-11-26).
-        // Judged against the Hidden icons of the same walk, and told every
-        // reading, an empty one too: one that finds it back in place takes
-        // the carry back (review, 2026-11-26).
-        if open, let edge = side.drawnHiddenEdge {
+        // Judged against the Hidden icons of the same walk, never the cover's
+        // end, and told each walk once, an empty one too: two in a row that
+        // find it back in place take the carry back. Not while live mode
+        // starts: the bar is still being laid out.
+        if open, !entering, side.toldWalk != side.walks, let edge = side.drawnHiddenEdge {
+            side.toldWalk = side.walks
             appState?.grouper.liveModeStrays(Self.strayIDs(side.alwaysDrawnIDs, side.alwaysDrawn, past: edge), on: side.id)
+        }
+        // The blank itself closes once the icons left of it are filmed
+        // (`filmGap`; again now and then, `refreshGap`). A hiding bar's are
+        // filmed while Hidden is in (`prefilmGap`), never at a hover: a film
+        // lights the capture indicator.
+        if open, side.showsAll, !leaving, !retaking, !entering, side.gap == nil, let plan = side.gapWanted,
+           canFilmGap(side, plan), let edge = side.runEdge, abs(edge - plan.run.lowerBound) < 1 {
+            filmGap(side, plan)
         }
         let shift = side.screen.frame.maxX - primaryMaxX
         var pieces: [ConcealGhostOverlay.BarSnapshot] = []
@@ -1732,12 +2003,292 @@ final class LiveMirror {
             side.alwaysDrawn = []
             side.alwaysDrawnIDs = []
             side.drawnHiddenEdge = nil
+            // A closed gap stays drawn: the Hidden icons slide to where it
+            // has them as the strays leave, and its cover goes as it goes.
+            side.gapWanted = nil
+            side.gapKept = nil
             for patch in side.patch?.set.members ?? [] { patch.fadeOut(duration: Self.patchLeave, controlPoints: (1, 0, 1, 0)) }
             side.patch = nil
         }
     }
     /// The icons beneath are gone in about 0.3 s (filmed 2026-11-25).
     private static let patchLeave: TimeInterval = 0.3
+
+    /// Films the icons left of the strays where they stand (the assertion is
+    /// down, every icon out, under the cover or not) and draws them slid
+    /// right over the blank, where macOS puts them once the strays are
+    /// hidden: their ink from the screen where the bar's own window has ink
+    /// (`aloneImage`), on clear, over the cover's bare bar. Then the cover
+    /// ends past them (`applyGap`). Filmed for a plan the walk no longer
+    /// has, it is dropped; not filmed, nothing moves and the patch stays.
+    private func filmGap(_ side: Side, _ plan: GapPlan) {
+        side.gapFilming = true
+        Task { @MainActor [weak self, weak side] in
+            defer { side?.gapFilming = false }
+            guard let self, let side else { return }
+            let started = Date()
+            let stood = self.appState?.chevronWindowFrame?.minX
+            let cover = side.cover?.ids
+            let ids = Set(plan.icons.compactMap { Self.axIdentifier($0.id) })
+            let said = await Task.detached(priority: .userInitiated) { Self.agentItems(ids) }.value.mapValues(\.said)
+            let image = await self.gapImage(side, plan)
+            // The capture indicator's move, if any, comes this long after (`takeIcons`).
+            if image != nil { try? await Task.sleep(for: .milliseconds(350)) }
+            guard self.isActive, !self.entering, !self.exiting, !self.handingOver, self.assertionDropped,
+                  self.sides.contains(where: { $0 === side }), side.cover != nil
+            else { return }
+            guard let wanted = side.gapWanted, wanted.same(as: plan) else {
+                PelmetLog.log("livemirror: display \(side.id) the bar moved while the icons beside the stray were filmed — again at the next walk")
+                return
+            }
+            // The film lit the capture indicator and the bar slid with it
+            // (up to 27.2): the icons were caught part-way. Again once a
+            // walk has the bar where it stands.
+            if let stood, let now = self.appState?.chevronWindowFrame?.minX, abs(now - stood) > 0.5 {
+                PelmetLog.log("livemirror: display \(side.id) the « moved \(Int(stood)) → \(Int(now)) while the icons beside the stray were filmed — again at the next walk")
+                return
+            }
+            guard let image else {
+                // A reveal (or Mission Control, a lift, a retake) came while
+                // filming: not a failure, filmed again once the icons hide.
+                // A cover rebuilt meanwhile (a hover come and gone) was in neither capture's leave-out list.
+                if !(side.showsAll || !self.isOut(side)) || self.retaking || self.missionControlUp || self.coverLifted || side.cover?.ids != cover {
+                    PelmetLog.log("livemirror: display \(side.id) the film of the icons beside the stray gave way to a reveal — again once they hide")
+                    return
+                }
+                side.gapFailed = (plan, Date())
+                PelmetLog.log("livemirror: display \(side.id) the icons beside the stray (\(Int(plan.run.lowerBound))..\(Int(plan.run.upperBound))) couldn't be filmed — the patch stays, nothing moves")
+                return
+            }
+            side.gapSaid = said
+            if let gap = side.gap, gap.plan.same(as: plan) {
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                gap.layer.contents = image
+                CATransaction.commit()
+                side.gap = (plan, gap.layer, Date())
+                return
+            }
+            let layer = CALayer()
+            layer.contents = image
+            layer.contentsScale = side.scale
+            side.gap = (plan, layer, Date())
+            side.gapKept = nil
+            PelmetLog.log("livemirror: display \(side.id) icons beside the stray filmed in \(Int(-started.timeIntervalSinceNow * 1000))ms — [\(plan.icons.map { "\($0.id.rawValue) \(Int($0.from))→\(Int($0.to))" }.joined(separator: ", "))], the blank \(Int(plan.width))pt")
+            self.applyGap(side)
+        }
+    }
+
+    /// The slid icons over [`plan.start`, the run's end], clear between
+    /// them; nil when the bar or its glyphs can't be filmed, or an icon
+    /// shows no ink (missed by the film, it would be left hidden).
+    private func gapImage(_ side: Side, _ plan: GapPlan) async -> CGImage? {
+        // A cover can't end past its picture (a bar that shows every icon,
+        // not under the anchor, is pictured to the Hidden icons only): no
+        // film, which would light the capture indicator for nothing.
+        func failed(_ why: String) -> CGImage? {
+            PelmetLog.log("livemirror: display \(side.id) film beside the stray: \(why)")
+            return nil
+        }
+        // The picture's frame and the plan are both in the display's own
+        // global x.
+        guard let picture = side.picture, picture.windowFrame.width > 0,
+              picture.windowFrame.maxX >= plan.run.upperBound - 1
+        else { return failed("the picture ends at \(side.picture.map { Int($0.windowFrame.maxX) } ?? -1), short of \(Int(plan.run.upperBound))") }
+        let scale = side.scale
+        let height = CGFloat(picture.image.height) / (CGFloat(picture.image.width) / picture.windowFrame.width)
+        let rect = CGRect(x: plan.run.lowerBound, y: side.bounds.minY, width: plan.run.upperBound - plan.run.lowerBound, height: height)
+        let excluded = await windowsToExclude(over: rect, on: side)
+        // Never at a hover on a hiding bar, nor over Mission Control.
+        guard isActive, assertionDropped, !entering, !exiting, !handingOver, !retaking, !missionControlUp, !coverLifted,
+              side.showsAll || !isOut(side), sides.contains(where: { $0 === side }) else { return nil }
+        let config = SCStreamConfiguration()
+        let local = rect.offsetBy(dx: -side.bounds.minX, dy: -side.bounds.minY)
+        config.sourceRect = local
+        config.width = max(2, Int((local.width * scale).rounded()))
+        config.height = max(2, Int((local.height * scale).rounded()))
+        config.showsCursor = false
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.shouldBeOpaque = true
+        config.ignoreShadowsDisplay = true
+        let cocoa = NSRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
+        guard let seen = try? await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: side.scDisplay, excludingWindows: excluded), configuration: config)
+        else { return failed("the bar's capture failed") }
+        // The same strip with WindowServer's Menubar window left out too:
+        // the bar with no icon on it, Apple's or anyone's. The icons are cut
+        // out by difference, as the icons' film is (`takeIcons`): the
+        // Menubar window filmed alone holds Apple's icons only (27.3,
+        // 2026-11-26), not the others'.
+        let bars = (try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true))?
+            .windows.filter { ConcealGhostOverlay.isSystemBar($0) && $0.frame.intersects(rect) } ?? []
+        guard !bars.isEmpty,
+              let bare = try? await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: side.scDisplay, excludingWindows: excluded + bars), configuration: config)
+        else { return failed("the empty bar couldn't be filmed") }
+        guard let glyphs = ConcealGhostOverlay.iconsOnly(
+            [.init(image: seen, windowFrame: cocoa, takenAt: Date())],
+            background: [.init(image: bare, windowFrame: cocoa, takenAt: Date())])?.first?.image
+        else { return failed("the icons couldn't be cut from the empty bar") }
+        let width = Int(((plan.run.upperBound - plan.start) * scale).rounded())
+        let slots = plan.icons.map { icon in
+            (source: Int(((icon.from - plan.run.lowerBound) * scale).rounded()),
+             target: Int(((icon.to - plan.start) * scale).rounded()),
+             width: Int((icon.width * scale).rounded()))
+        }
+        // Ink kept whole (26+ levels off the empty bar): a faint shift of
+        // the whole strip is no icon.
+        guard width > 0, Self.everySlotInked(glyphs, slots: slots, above: 250) else {
+            let blank = zip(plan.icons, slots).filter { !Self.everySlotInked(glyphs, slots: [$0.1], above: 250) }.map { "\($0.0.id.rawValue) \(Int($0.0.from))" }
+            return failed("no ink for [\(blank.joined(separator: ", "))] in the glyphs (\(glyphs.width)×\(glyphs.height)px)")
+        }
+        guard let clear = Self.clearColumn(height: seen.height, space: seen.colorSpace) else { return failed("no clear column") }
+        return Self.aloneImage(column: clear, width: width, seen: seen, glyphs: glyphs, slots: slots)
+    }
+
+    /// A 1 px column of nothing: `aloneImage` over it paints the ink alone.
+    nonisolated static func clearColumn(height: Int, space: CGColorSpace?) -> CGImage? {
+        guard height > 0, let ctx = CGContext(
+            data: nil, width: 1, height: height, bitsPerComponent: 8, bytesPerRow: 4,
+            space: space ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return nil }
+        ctx.clear(CGRect(x: 0, y: 0, width: 1, height: height))
+        return ctx.makeImage()
+    }
+
+    /// Whether `glyphs` has ink in each slot's source columns.
+    nonisolated static func everySlotInked(_ glyphs: CGImage, slots: [(source: Int, target: Int, width: Int)], above: UInt8 = 24) -> Bool {
+        let w = glyphs.width, h = glyphs.height
+        guard w > 0, h > 0, let ctx = CGContext(
+            data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return false }
+        ctx.clear(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.draw(glyphs, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let px = ctx.data?.assumingMemoryBound(to: UInt8.self) else { return false }
+        return slots.allSatisfy { slot in
+            let lo = max(0, slot.source), hi = min(w, slot.source + slot.width)
+            guard lo < hi else { return false }
+            for y in 0..<h { for x in lo..<hi where px[(y * w + x) * 4 + 3] > above { return true } }
+            return false
+        }
+    }
+
+    /// The cover ends past the slid icons, drawn in it, and the pills slide
+    /// right beside them. On a hiding bar not before Hidden's move out has
+    /// arrived (that move is the cover's end). If the cover can't reach that
+    /// far, nothing moves: it ends at the Hidden icons, the patch stays.
+    /// `slide`: the icons slide in (not when the bar moved beneath them).
+    /// True when a cover was built.
+    @discardableResult
+    private func applyGap(_ side: Side, slide: Bool = true) -> Bool {
+        guard isActive, !entering, !exiting, !handingOver, assertionDropped, side.cover != nil,
+              let gap = gapApplies(side), let chevron = lastChevron else { return false }
+        if let arrives = side.endArrives, arrives > Date() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + arrives.timeIntervalSinceNow + 0.02) { [weak self, weak side] in
+                guard let self, let side, side.gap?.layer === gap.layer else { return }
+                self.applyGap(side, slide: slide)
+            }
+            return false
+        }
+        let right = coverEnd(chevron, on: side) - 1
+        guard abs(side.coverMaxX - right) > 0.5 else { layoutMirrors(side); return false }
+        guard buildCover(side, left: side.coverMinX, right: right, why: "strays slid"),
+              side.coverMaxX >= gap.plan.run.upperBound - 1.5 else {
+            side.gapFailed = (gap.plan, Date())
+            side.gap = nil
+            PelmetLog.log("livemirror: display \(side.id) the cover can't reach past the slid icons (to \(Int(right))) — the patch stays, nothing moves")
+            let back = coverEnd(chevron, on: side) - 1
+            if side.coverMaxX > back + 0.5 { _ = buildCover(side, left: side.coverMinX, right: back, why: "strays") } else { layoutMirrors(side) }
+            return true
+        }
+        guard slide else {
+            PelmetLog.log("livemirror: display \(side.id) the bar moved beneath the closed gap — cover to \(Int(side.coverMaxX)), the slid icons with it")
+            return true
+        }
+        // The blank closes: the icons move in from where they stood, the
+        // pills with them (`layoutMirrors` slides those the same 0.22 s).
+        if let layer = side.gapAttached {
+            let slide = CABasicAnimation(keyPath: "position.x")
+            slide.isAdditive = true
+            slide.fromValue = -gap.plan.width
+            slide.toValue = 0
+            slide.duration = 0.22
+            slide.timingFunction = Self.enterCurve
+            layer.add(slide, forKey: "pelmetGap")
+        }
+        PelmetLog.log("livemirror: display \(side.id) the blank closed — cover to \(Int(side.coverMaxX)), the icons from \(Int(gap.plan.run.lowerBound)) drawn \(Int(gap.plan.width))pt right")
+        return true
+    }
+
+    /// The slid icons are pictures. Filmed again when one of MenuBarAgent's
+    /// among them says something else (read every 5 s, as the icons out on
+    /// their own are), at most every 20 s, and after `graphicRefresh`
+    /// whatever they say, as the cover's own picture is: each film lights
+    /// the capture indicator. Not while Hidden is out on a hiding bar.
+    private func refreshGap(_ side: Side) async {
+        guard let gap = side.gap, let plan = side.gapWanted, gap.plan.same(as: plan), !side.gapFilming,
+              side.showsAll || !isOut(side), isActive, assertionDropped, !entering, !exiting, !handingOver, !retaking,
+              !coverLifted, side.cover != nil
+        else { return }
+        let age = Date().timeIntervalSince(gap.filmedAt)
+        guard age > 20 else { return }
+        let ids = Set(plan.icons.compactMap { Self.axIdentifier($0.id) })
+        let said = await Task.detached(priority: .userInitiated) { Self.agentItems(ids) }.value.mapValues(\.said)
+        let changed = said.filter { side.gapSaid[$0.key] != $0.value }.map(\.key)
+        guard !changed.isEmpty || age > Self.graphicRefresh else { return }
+        if Date().timeIntervalSince(side.walkedAt) > 1 { await measureRunEdge(side, fresh: true) }
+        guard isActive, assertionDropped, !entering, !exiting, !handingOver, side.showsAll || !isOut(side),
+              let now = side.gapWanted, now.same(as: plan), let edge = side.runEdge, abs(edge - plan.run.lowerBound) < 1,
+              canFilmGap(side, now)
+        else { return }
+        PelmetLog.log("livemirror: display \(side.id) the slid icons filmed again — \(changed.isEmpty ? "\(Int(age))s old" : "changed: \(changed.sorted().joined(separator: ", "))")")
+        filmGap(side, now)
+    }
+
+    /// The slid icon under `point` on the cover, nil when there's none.
+    private func gapIcon(_ side: Side, at point: NSPoint) -> ItemID? {
+        guard let layer = side.gapAttached, !layer.isHidden, let gap = side.gap, gap.layer === layer else { return nil }
+        return gap.plan.icons.first { point.x >= $0.to && point.x < $0.to + $0.width }?.id
+    }
+
+    /// The icons sliding out from behind the « or back, with the blank
+    /// closed: their picture with the gap's run cut away, and the slid icons
+    /// where the cover draws them. One layer, over the whole cover.
+    private func riding(_ icons: CALayer, gap: (plan: GapPlan, layer: CALayer, filmedAt: Date), on overlay: ConcealGhostOverlay) -> CALayer {
+        let window = overlay.windowFrame
+        let rider = CALayer()
+        rider.frame = CGRect(x: 0, y: 0, width: window.width, height: window.height)
+        let cut = max(0, gap.plan.run.upperBound - window.minX - icons.frame.minX)
+        let mask = CALayer()
+        mask.backgroundColor = CGColor(gray: 0, alpha: 1)
+        mask.frame = CGRect(x: cut, y: 0, width: max(0, icons.bounds.width - cut), height: icons.bounds.height)
+        icons.mask = mask
+        rider.addSublayer(icons)
+        rider.addSublayer(gapCopy(gap, in: window))
+        return rider
+    }
+
+    /// The slid icons fading out on `overlay` (Hidden going back), beneath
+    /// the mirrors that move over them.
+    private func fadeGapOut(_ gap: (plan: GapPlan, layer: CALayer, filmedAt: Date), on overlay: ConcealGhostOverlay,
+                            _ duration: CFTimeInterval, _ curve: CAMediaTimingFunction) {
+        let copy = gapCopy(gap, in: overlay.windowFrame)
+        overlay.insertLayer(copy)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock { copy.removeFromSuperlayer() }
+        copy.add(animation("opacity", from: 1, to: 0, duration, curve), forKey: "pelmetGapOut")
+        copy.opacity = 0
+        CATransaction.commit()
+    }
+
+    /// The slid icons as a layer of their own, where a cover at `window` draws them.
+    private func gapCopy(_ gap: (plan: GapPlan, layer: CALayer, filmedAt: Date), in window: NSRect) -> CALayer {
+        let copy = CALayer()
+        copy.contents = gap.layer.contents
+        copy.contentsScale = gap.layer.contentsScale
+        copy.frame = CGRect(x: gap.plan.start - window.minX, y: 0, width: gap.plan.run.upperBound - gap.plan.start, height: window.height)
+        return copy
+    }
 
     /// The concealed bar's icons out on their own on `side` (a show rule's
     /// Battery, a press's item) sit beside the «, where the mirrors are
@@ -2218,6 +2769,7 @@ final class LiveMirror {
         for side in sides where barlessDisplays.contains(side.id) && side.cover != nil {
             side.cover?.dismiss()
             side.cover = nil
+            side.gapAttached = nil
             coverStrays(side, leaving: true)
             PelmetLog.log("livemirror: display \(side.id) cover down at once — no bar drawn there (\(why))")
         }
@@ -2225,7 +2777,15 @@ final class LiveMirror {
 
     private func enter() async {
         await enterOnce()
+        strayWalksAfterStart()
         await leaveForDisplayChange()
+    }
+
+    /// The start's last walk is the settled bar: the keeper hears it, and a
+    /// stray's blank is filmed to close, now rather than at the next walk.
+    private func strayWalksAfterStart() {
+        guard isActive, !entering, !exiting, !handingOver else { return }
+        for side in sides { coverStrays(side) }
     }
 
     /// The displays changed while a start or a retake ran: its sides and
@@ -2649,11 +3209,11 @@ final class LiveMirror {
         }
         // The Hidden icons did not move (a display that shows every icon):
         // nothing to end or grow.
-        if side.showsAll, why == "settled" || why == "chevron moved", side.cover != nil,
+        if side.showsAll, why == "settled" || why == "chevron moved" || why == "strays" || why == "strays slid", side.cover != nil,
            abs(left - side.coverMinX) < 0.5, abs(right - side.coverMaxX) < 0.5 { return true }
         // A shorter cover with the same left edge is the cover itself, ended
         // sooner: no new window, nothing moves, no frame without a cover.
-        if why == "settled" || why == "chevron moved" || why == "hidden out", let current = side.cover?.members.first, abs(left - side.coverMinX) < 0.5,
+        if why == "settled" || why == "chevron moved" || why == "hidden out" || why == "strays", let current = side.cover?.members.first, abs(left - side.coverMinX) < 0.5,
            right < side.coverMaxX - 0.5, right > side.coverMinX + 40 {
             // Hidden comes out the way the user chose (#154), and a pill
             // it pushes moves in the same time.
@@ -2662,15 +3222,32 @@ final class LiveMirror {
                 var slid: CFTimeInterval = 0, took: CFTimeInterval
                 side.leavingIcons?.removeFromSuperlayer()
                 side.leavingIcons = nil
+                // A closed gap comes out closed: the cover ends past the slid
+                // icons, which come out with the rest (`showHidden`).
+                let closed = gapApplies(side).flatMap { abs(right - ($0.plan.run.upperBound - 1)) < 0.5 ? $0 : nil }
+                side.gapHeldUntil = nil
                 if case .slide(let dx, let whole) = end.move {
                     // Smooth: the icons are in place under the cover, so a
                     // picture of them slides out from behind the «, as the
                     // bar's own do, and the cover ends once it has arrived.
-                    if let icons = iconsLayer(side, from: right, to: aloneStart(side) ?? side.coverMaxX, on: current) {
-                        current.insertLayer(icons)
-                        icons.add(animation("position.x", from: icons.position.x + dx, to: icons.position.x, whole, end.curve), forKey: "pelmetIn")
-                        icons.add(animation("opacity", from: 0, to: 1, min(whole, 0.14), end.curve), forKey: "pelmetInFade")
-                        current.clip(toMaxX: right, after: whole, removing: icons)
+                    if let icons = iconsLayer(side, from: closed.map { $0.plan.run.lowerBound - 1 } ?? right, to: aloneStart(side) ?? side.coverMaxX, on: current) {
+                        let rider = closed.map { riding(icons, gap: $0, on: current) } ?? icons
+                        current.insertLayer(rider)
+                        rider.add(animation("position.x", from: rider.position.x + dx, to: rider.position.x, whole, end.curve), forKey: "pelmetIn")
+                        rider.add(animation("opacity", from: 0, to: 1, min(whole, 0.14), end.curve), forKey: "pelmetInFade")
+                        current.clip(toMaxX: right, after: whole, removing: rider)
+                        // The cover's own slid icons show once the ride has arrived.
+                        if closed != nil {
+                            let until = Date().addingTimeInterval(whole)
+                            side.gapHeldUntil = until
+                            DispatchQueue.main.asyncAfter(deadline: .now() + whole) { [weak side] in
+                                guard let side, side.gapHeldUntil == until else { return }
+                                side.gapHeldUntil = nil
+                                CATransaction.begin(); CATransaction.setDisableActions(true)
+                                side.gapAttached?.isHidden = false
+                                CATransaction.commit()
+                            }
+                        }
                         slid = whole
                         took = whole
                         played = ", slid"
@@ -2687,7 +3264,13 @@ final class LiveMirror {
                     if took > 0 { played = ", faded" }
                 }
                 side.coverMaxX = right
+                side.endArrives = took > 0 ? Date().addingTimeInterval(took) : nil
                 layoutMirrors(side, shift: (slid, end.curve), hold: took)
+                // Faded: the slid icons fade in as the cover's end fades out.
+                if closed != nil, slid == 0, took > 0, let layer = side.gapAttached {
+                    layer.add(animation("opacity", from: 0, to: 1, took, Self.fadeCurve), forKey: "pelmetGapIn")
+                }
+                if closed != nil { played += ", the blank closed" }
             } else {
                 current.clip(toMaxX: right)
                 side.coverMaxX = current.windowFrame.maxX
@@ -2716,30 +3299,35 @@ final class LiveMirror {
         if why == "hidden back", old?.members.first != nil, let end = endMove(entering: false),
            abs(overlay.windowFrame.minX - side.coverMinX) < 0.5,
            side.coverMaxX > overlay.windowFrame.minX + 40, side.coverMaxX < overlay.windowFrame.maxX - 0.5 {
+            // A closed gap goes back closed: its slid icons leave with the rest.
+            let closed = side.gapAttached.flatMap { layer in side.gap.flatMap { $0.layer === layer ? $0 : nil } }
             if case .slide(let dx, let whole) = end.move {
                 // Smooth: the picture of the icons slides back behind the «
                 // over the new cover.
-                if let icons = iconsLayer(side, from: side.coverMaxX, to: aloneStart(side) ?? overlay.windowFrame.maxX, on: overlay) {
-                    overlay.insertLayer(icons)
+                if let icons = iconsLayer(side, from: closed.map { $0.plan.run.lowerBound - 1 } ?? side.coverMaxX, to: aloneStart(side) ?? overlay.windowFrame.maxX, on: overlay) {
+                    let rider = closed.map { riding(icons, gap: $0, on: overlay) } ?? icons
+                    overlay.insertLayer(rider)
                     side.leavingIcons?.removeFromSuperlayer()
-                    side.leavingIcons = icons
+                    side.leavingIcons = rider
                     CATransaction.begin(); CATransaction.setDisableActions(true)
                     CATransaction.setCompletionBlock { [weak side] in
-                        icons.removeFromSuperlayer()
-                        if side?.leavingIcons === icons { side?.leavingIcons = nil }
+                        rider.removeFromSuperlayer()
+                        if side?.leavingIcons === rider { side?.leavingIcons = nil }
                     }
-                    icons.add(animation("position.x", from: icons.position.x, to: icons.position.x + dx, whole, end.curve), forKey: "pelmetOut")
-                    icons.add(animation("opacity", from: 1, to: 0, whole, end.curve), forKey: "pelmetOutFade")
-                    icons.opacity = 0
+                    rider.add(animation("position.x", from: rider.position.x, to: rider.position.x + dx, whole, end.curve), forKey: "pelmetOut")
+                    rider.add(animation("opacity", from: 1, to: 0, whole, end.curve), forKey: "pelmetOutFade")
+                    rider.opacity = 0
                     CATransaction.commit()
                     ride = (whole, end.curve)
                 } else {
                     overlay.moveEnd(pastX: side.coverMaxX, from: 0, to: 1, as: .fade(whole), curve: Self.fadeCurve)
+                    if let closed { fadeGapOut(closed, on: overlay, whole, Self.fadeCurve) }
                 }
             } else {
                 // From nothing: an old cover caught mid-fade still has its
                 // own stretch fading beneath this one.
-                overlay.moveEnd(pastX: side.coverMaxX, from: 0, to: 1, as: end.move, curve: end.curve)
+                let took = overlay.moveEnd(pastX: side.coverMaxX, from: 0, to: 1, as: end.move, curve: end.curve)
+                if let closed, took > 0 { fadeGapOut(closed, on: overlay, took, end.curve) }
             }
         }
         side.cover = cover
@@ -2763,9 +3351,14 @@ final class LiveMirror {
                 for mirror in side.mirrors where mirror.shown && mirror.attached && !mirror.container.isHidden {
                     if let still = Self.still(of: mirror.container, scale: side.scale) { from.addLayer(still) }
                 }
+                // The slid icons too, which move to this cover.
+                if let layer = side.gapAttached, !layer.isHidden, let gap = side.gap, gap.layer === layer {
+                    from.addLayer(gapCopy(gap, in: from.windowFrame))
+                }
             }
             for mirror in side.mirrors { mirror.attached = false }
             side.aloneAttached = false
+            side.gapAttached = nil
             layoutMirrors(side, shift: ride ?? (why == "hidden back" ? (0, Self.exitCurve) : nil))
         } else if let alone = side.alone, let run = side.aloneRun {
             // The icons out on their own leave with the mirrors: this cover
@@ -2871,9 +3464,34 @@ final class LiveMirror {
             if !out { try? await Task.sleep(for: .seconds(1.2)) }
             guard !Task.isCancelled, let self, let side else { return }
             side.filming = true
-            defer { side.filming = false }
             await self.takeIcons(side, out: out)
+            side.filming = false
+            await self.prefilmGap(side)
         }
+    }
+
+    /// A hiding bar's stray blank is filmed while Hidden is in, from the walk
+    /// the icons' picture just took (or one of its own: Fade and Instant
+    /// take no picture): the next hover comes out closed.
+    private func prefilmGap(_ side: Side) async {
+        func ready() -> Bool {
+            !side.showsAll && !isOut(side) && isActive && !entering && !exiting && !handingOver && assertionDropped
+                && !coverLifted && side.cover != nil && side.gapWanted != nil && !side.gapFilming && side.gap == nil
+        }
+        guard ready() else { return }
+        // Walks `gapSteady` apart that agree, the last one fresh: up to two
+        // more of its own (the icons' film may have moved the «).
+        for _ in 0..<2 {
+            if let plan = side.gapWanted, canFilmGap(side, plan) { break }
+            let since = Date().timeIntervalSince(side.walkedAt)
+            if since < Self.gapSteady { try? await Task.sleep(for: .seconds(Self.gapSteady - since + 0.05)) }
+            guard !Task.isCancelled, ready() else { return }
+            await measureRunEdge(side, fresh: true)
+            guard !Task.isCancelled, ready() else { return }
+        }
+        guard let plan = side.gapWanted, canFilmGap(side, plan),
+              let edge = side.runEdge, abs(edge - plan.run.lowerBound) < 1 else { return }
+        filmGap(side, plan)
     }
 
     /// Films the icons where they stand under the cover (the assertion is
@@ -3673,6 +4291,11 @@ final class LiveMirror {
         }
         let gap = gaps.isEmpty ? Self.pillGap : gaps.sorted()[gaps.count / 2]
         var right = min(side.coverMaxX, side.predictedRight ?? .greatestFiniteMagnitude)
+        // A closed gap: the slid icons at the cover's end, where the cover
+        // reaches past them, and the pills (and the icons out on their own)
+        // left of them as macOS puts those left of the Hidden icons.
+        let closed = gapApplies(side).flatMap { side.coverMaxX >= $0.plan.run.upperBound - 1.5 ? $0 : nil }
+        if let closed { right = min(right, closed.plan.start - 1) }
         var besideIcon = false
         if let alone = side.alone {
             // Beside the « only: a cover ended at the Hidden icons (a hover
@@ -3705,13 +4328,29 @@ final class LiveMirror {
             if beside { right -= alone.bounds.width }
             besideIcon = beside
         }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        if let attached = side.gapAttached, attached !== closed?.layer {
+            attached.removeFromSuperlayer()
+            side.gapAttached = nil
+        }
+        if let closed {
+            if side.gapAttached == nil {
+                closed.layer.removeFromSuperlayer()
+                overlay.addLayer(closed.layer)
+                side.gapAttached = closed.layer
+            }
+            closed.layer.frame = CGRect(x: closed.plan.start - window.minX, y: 0, width: closed.plan.run.upperBound - closed.plan.start, height: window.height)
+            closed.layer.isHidden = side.gapHeldUntil.map { Date() < $0 } ?? false
+        }
+        CATransaction.commit()
         // An icon next to the last pill keeps the gap pills keep from each other.
         right -= besideIcon ? gap : Self.gap
         // The pill nearest the cover's end, standing just before that end on
         // the real bar, is drawn where macOS draws it. A hover that ends the
         // cover at macOS's « put it 3 pt off that tight-framed «, where
-        // macOS keeps 15 (2026-11-20).
-        if !besideIcon, let lead = placed.last?.visual, lead.maxX <= side.coverMaxX, lead.maxX > right - 30 {
+        // macOS keeps 15 (2026-11-20). (Not beside slid icons: the real pill
+        // stands left of the stray too.)
+        if !besideIcon, closed == nil, let lead = placed.last?.visual, lead.maxX <= side.coverMaxX, lead.maxX > right - 30 {
             right = lead.maxX
         }
         let left = side.coverMinX + 4
@@ -4069,6 +4708,19 @@ final class LiveMirror {
     // MARK: Clicks
 
     private func clicked(_ side: Side, at point: NSPoint, event: NSEvent) {
+        // An icon drawn slid over a stray's blank opens, where it really
+        // stands beneath the cover: the press clicks through (`ItemPress`).
+        if let id = gapIcon(side, at: point) {
+            let secondary = event.type == .rightMouseDown
+            if !secondary {
+                for ms in [0, 20, 60, 120] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(ms)) { [weak self] in self?.enforceOrder("click +\(ms)ms") }
+                }
+            }
+            PelmetLog.log("livemirror: \(secondary ? "right " : "")click at \(Int(point.x)),\(Int(point.y)) on display \(side.id) — on \(id.rawValue), slid beside a stray: opened")
+            appState?.openItemMenu(id, button: secondary ? .secondary : .primary, display: side.id)
+            return
+        }
         let visible = side.mirrors.filter { !$0.dropped && $0.global != nil }
         // The rest of the cover is empty bar, and its menu lives there too. A
         // real pill has no right-click, so neither has its mirror.
@@ -4382,6 +5034,7 @@ final class LiveMirror {
 
     private func retake(_ reason: String) async {
         await retakeOnce(reason)
+        strayWalksAfterStart()
         await leaveForDisplayChange()
     }
 
@@ -4557,7 +5210,7 @@ final class LiveMirror {
             let deep = tickCount % (Self.fallbackEvery * 5) == 0
             // A patch follows its icon, and a bar that shows every icon is
             // looked at for one that needs a patch (one walk can miss it).
-            if side.patch != nil ? discoverNet : deep && side.showsAll {
+            if side.patch != nil || side.gapAttached != nil ? discoverNet : deep && side.showsAll {
                 await measureRunEdge(side, edge: false)
                 guard isActive, !entering, !exiting, !handingOver else { return }
                 coverStrays(side)
@@ -4571,6 +5224,7 @@ final class LiveMirror {
         }
         for side in sides { for cover in side.covers { cover.keepUp(for: Self.coverSafety) } }
         for side in sides where side.aloneFresh || tickCount % 20 == 0 { await refreshAlone(side) }
+        for side in sides where side.gap != nil && tickCount % 20 == 0 { await refreshGap(side) }
         // Hidden out under live mode goes back once the pointer has been off
         // the bar for the re-hide delay (the tick's quarter second at least),
         // with no button down (a ⌘-drag may pass below the bar).

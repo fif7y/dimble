@@ -82,6 +82,9 @@ final class SectionGrouper {
     /// (`liveModeStrays`): carried like `seenAtFullReveal`, and each
     /// display's next reading replaces its own.
     private var seenInLiveMode: [CGDirectDisplayID: Set<ItemID>] = [:]
+    /// Carried icons walks on a display found back in place, and since when:
+    /// a later one still finding them so takes them back (`liveModeReading`).
+    private var liveModeInPlace: [CGDirectDisplayID: [ItemID: Date]] = [:]
     private var lastCarried = ""
     private var lastLiftWaiting: String?
     private var observers: [NSObjectProtocol] = []
@@ -403,6 +406,7 @@ final class SectionGrouper {
         if appState.currentRevealedSections.isSuperset(of: [.hidden, .alwaysHidden]) {
             seenAtFullReveal = Set(read)
             seenInLiveMode = [:]
+            liveModeInPlace = [:]
             lastCarried = ""
             appState.noteHiddenBehindOverflow(snap)
             return read
@@ -421,25 +425,49 @@ final class SectionGrouper {
     /// every icon out: as good as a full reveal's reading, and just as
     /// unreadable at rest. Battery stood between Fizz and Vorssaint, a blank
     /// under its patch through a hockey game's Live Activity, and the keeper
-    /// read "no drift" each time live mode let go (2026-11-26). Every reading
-    /// comes here, an empty one too: one that finds the icon back in place
-    /// takes its carry back.
+    /// read "no drift" each time live mode let go (2026-11-26). Every walk's
+    /// reading comes here once, an empty one too: two in a row that find the
+    /// icon back in place take its carry back (`liveModeReading`).
     func liveModeStrays(_ ids: [ItemID], on display: CGDirectDisplayID) {
         guard Self.isOn else { return }
         let now = Set(ids.map(\.sectionKey))
-        let before = seenInLiveMode[display] ?? []
-        guard now != before else { return }
         let carried = liveModeCarried
-        seenInLiveMode[display] = now.isEmpty ? nil : now
+        let wasInPlace = liveModeInPlace[display] ?? [:]
+        let reading = Self.liveModeReading(now, carried: seenInLiveMode[display] ?? [], inPlace: wasInPlace, at: Date())
+        let once = Set(reading.inPlace.keys).subtracting(wasInPlace.keys)
+        if !once.isEmpty {
+            PelmetLog.log("order: live mode reads [\(Self.names(once.sorted { $0.rawValue < $1.rawValue }))] in place once — still carried, a reading \(Int(Self.liveModeApart)) s on that agrees takes it back")
+        }
+        seenInLiveMode[display] = reading.carried.isEmpty ? nil : reading.carried
+        liveModeInPlace[display] = reading.inPlace.isEmpty ? nil : reading.inPlace
         let new = now.subtracting(carried)
-        let gone = before.subtracting(liveModeCarried)
+        let gone = reading.dropped.subtracting(liveModeCarried)
         if !gone.isEmpty {
-            PelmetLog.log("order: live mode reads [\(Self.names(gone.sorted { $0.rawValue < $1.rawValue }))] back in place — no longer carried")
+            PelmetLog.log("order: live mode reads [\(Self.names(gone.sorted { $0.rawValue < $1.rawValue }))] back in place, every reading for \(Int(Self.liveModeApart)) s — no longer carried")
         }
         guard !new.isEmpty else { return }
         PelmetLog.log("order: live mode saw [\(Self.names(new.sorted { $0.rawValue < $1.rawValue }))] among the Hidden icons — carried")
         noteChange()
     }
+
+    /// One walk's reading on a display against what that display carries and
+    /// what the walk before found back in place. One reading alone can't take
+    /// a carry back: on the LG, walks taken as the « moved read Sconce in
+    /// place (the Hidden icon left of it missing from the walk), and the
+    /// carry flipped every 30 s (2026-11-26 09:31). Had live mode ended on
+    /// one, the keeper would never have moved it. A later reading does, one
+    /// at least `liveModeApart` after the first with none between seeing it
+    /// again: one « move can give two walks in a row (the tick's and the
+    /// cover's), and both are taken mid-move.
+    nonisolated static func liveModeReading(_ now: Set<ItemID>, carried: Set<ItemID>, inPlace: [ItemID: Date], at time: Date)
+        -> (carried: Set<ItemID>, inPlace: [ItemID: Date], dropped: Set<ItemID>) {
+        let missing = carried.subtracting(now)
+        let dropped = missing.filter { inPlace[$0].map { time.timeIntervalSince($0) >= liveModeApart } ?? false }
+        var still: [ItemID: Date] = [:]
+        for id in missing.subtracting(dropped) { still[id] = inPlace[id] ?? time }
+        return (carried.subtracting(dropped).union(now), still, dropped)
+    }
+    nonisolated static let liveModeApart: TimeInterval = 2
 
     private var liveModeCarried: Set<ItemID> {
         seenInLiveMode.values.reduce(into: []) { $0.formUnion($1) }
@@ -450,6 +478,10 @@ final class SectionGrouper {
         seenAtFullReveal.subtract(ids)
         seenInLiveMode = seenInLiveMode.compactMapValues { set in
             let left = set.subtracting(ids)
+            return left.isEmpty ? nil : left
+        }
+        liveModeInPlace = liveModeInPlace.compactMapValues { since in
+            let left = since.filter { !ids.contains($0.key) }
             return left.isEmpty ? nil : left
         }
     }
