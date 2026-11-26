@@ -78,6 +78,10 @@ final class SectionGrouper {
     /// (#171, 2026-11-23). Carried until a full reveal reads again, a pass
     /// moves it, or its tries run out.
     private var seenAtFullReveal: Set<ItemID> = []
+    /// Always Hidden icons live mode read among the Hidden ones, per display
+    /// (`liveModeStrays`): carried like `seenAtFullReveal`, and each
+    /// display's next reading replaces its own.
+    private var seenInLiveMode: [CGDirectDisplayID: Set<ItemID>] = [:]
     private var lastCarried = ""
     private var lastLiftWaiting: String?
     private var observers: [NSObjectProtocol] = []
@@ -398,17 +402,56 @@ final class SectionGrouper {
     private func carryFullRevealDrift(_ appState: AppState, _ snap: EngineSnapshot, read: [ItemID]) -> [ItemID] {
         if appState.currentRevealedSections.isSuperset(of: [.hidden, .alwaysHidden]) {
             seenAtFullReveal = Set(read)
+            seenInLiveMode = [:]
             lastCarried = ""
             appState.noteHiddenBehindOverflow(snap)
             return read
         }
-        let carried = seenAtFullReveal.subtracting(read).sorted { $0.rawValue < $1.rawValue }
-        let line = carried.isEmpty ? "" : "order: carrying [\(Self.names(carried))] — out of order at the last full reveal"
+        let carried = seenAtFullReveal.union(liveModeCarried).subtracting(read).sorted { $0.rawValue < $1.rawValue }
+        let line = carried.isEmpty ? "" : "order: carrying [\(Self.names(carried))] — out of order at the last full reveal or in live mode"
         if line != lastCarried {
             lastCarried = line
             if !line.isEmpty { PelmetLog.log(line) }
         }
         return read + carried
+    }
+
+    /// Always Hidden icons live mode read among the Hidden ones, in the same
+    /// walk as them (`LiveMirror.coverStrays`), with the assertion down and
+    /// every icon out: as good as a full reveal's reading, and just as
+    /// unreadable at rest. Battery stood between Fizz and Vorssaint, a blank
+    /// under its patch through a hockey game's Live Activity, and the keeper
+    /// read "no drift" each time live mode let go (2026-11-26). Every reading
+    /// comes here, an empty one too: one that finds the icon back in place
+    /// takes its carry back.
+    func liveModeStrays(_ ids: [ItemID], on display: CGDirectDisplayID) {
+        guard Self.isOn else { return }
+        let now = Set(ids.map(\.sectionKey))
+        let before = seenInLiveMode[display] ?? []
+        guard now != before else { return }
+        let carried = liveModeCarried
+        seenInLiveMode[display] = now.isEmpty ? nil : now
+        let new = now.subtracting(carried)
+        let gone = before.subtracting(liveModeCarried)
+        if !gone.isEmpty {
+            PelmetLog.log("order: live mode reads [\(Self.names(gone.sorted { $0.rawValue < $1.rawValue }))] back in place — no longer carried")
+        }
+        guard !new.isEmpty else { return }
+        PelmetLog.log("order: live mode saw [\(Self.names(new.sorted { $0.rawValue < $1.rawValue }))] among the Hidden icons — carried")
+        noteChange()
+    }
+
+    private var liveModeCarried: Set<ItemID> {
+        seenInLiveMode.values.reduce(into: []) { $0.formUnion($1) }
+    }
+
+    /// The carried ids a pass or the budget settled, out of every carry.
+    private func dropCarried(_ ids: Set<ItemID>) {
+        seenAtFullReveal.subtract(ids)
+        seenInLiveMode = seenInLiveMode.compactMapValues { set in
+            let left = set.subtracting(ids)
+            return left.isEmpty ? nil : left
+        }
     }
 
     /// M3, the keeper: drift from the stored order goes back to its stored
@@ -446,7 +489,7 @@ final class SectionGrouper {
         let verdict = driftBudget.check(candidates, roster: model.roster)
         if !verdict.newlyExhausted.isEmpty {
             PelmetLog.log("order: giving up on [\(Self.names(verdict.newlyExhausted))] after \(driftBudget.limit) attempts — left to Apply")
-            seenAtFullReveal.subtract(verdict.newlyExhausted)
+            dropCarried(Set(verdict.newlyExhausted))
         }
         let ready = verdict.ready
         guard !ready.isEmpty else {
@@ -510,7 +553,7 @@ final class SectionGrouper {
         lastDriftPass = .now
         driftSeen = nil
         driftBudget.spend(ready, roster: model.roster)
-        seenAtFullReveal.subtract(report.applied)
+        dropCarried(Set(report.applied))
         PelmetLog.log("order: pass applied=\(report.applied.count) failed=\(report.failed.count) skipped=\(report.skipped.count)")
         schedule(after: AppTiming.groupingDebounce)
     }

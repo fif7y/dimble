@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import PelmetCore
 import Testing
 @testable import Pelmet
 
@@ -82,6 +83,18 @@ struct LiveStrayTests {
     @Test func batteryBetweenTwoHiddenIconsIsOne() {
         // The LG, 2026-11-25 16:01:46: Hidden from 4814, Always Hidden to 4886.
         #expect(LiveMirror.strays([icon(4634, 34), icon(4852, 34)], past: 4813) == [4852...4886])
+    }
+
+    /// Which icons those are, for the keeper to put back (`SectionGrouper.liveModeStrays`).
+    @Test func theStrayIsNamedForTheKeeper() {
+        // The MacBook, 2026-11-26 00:12: Battery patched at 1420..1446, right
+        // of Fizz, through a hockey game's Live Activity.
+        let velja = ItemID(rawValue: "status:com.moises.Velja::Item-0")
+        let battery = ItemID.status(bundle: "com.apple.controlcenter", title: "Battery")
+        #expect(LiveMirror.strayIDs([velja, battery], [icon(1180, 26), icon(1420, 26)], past: 1400) == [battery])
+        #expect(LiveMirror.strayIDs([velja, battery], [icon(1180, 26), icon(1300, 26)], past: 1400).isEmpty)
+        // Same rule as the patch: the icon at the edge is not one.
+        #expect(LiveMirror.strayIDs([battery], [icon(4781, 34)], past: 4813).isEmpty)
     }
 
     @Test func theIconAtTheEdgeItselfIsNot() {

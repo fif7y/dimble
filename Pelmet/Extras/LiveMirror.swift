@@ -585,7 +585,15 @@ final class LiveMirror {
         /// The Always Hidden icons macOS draws on this bar, and the patches
         /// over those right of the cover's end (`coverStrays`).
         var alwaysDrawn: [CGRect] = []
-        var patch: (set: ConcealGhostOverlay.GhostSet, spans: [ClosedRange<CGFloat>], pictureAt: Date)?
+        /// Whose frame each of `alwaysDrawn` is: those among the Hidden icons
+        /// are told to the keeper (`SectionGrouper.liveModeStrays`).
+        var alwaysDrawnIDs: [ItemID] = []
+        /// The leftmost Hidden icon in the same walk as `alwaysDrawn`: what
+        /// the keeper is told is judged against it, never against the
+        /// cover's end, which an always-show bar doesn't re-measure each
+        /// tick (a Hidden app quitting slides the icons, not the end).
+        var drawnHiddenEdge: CGFloat?
+        var patch:(set: ConcealGhostOverlay.GhostSet, spans: [ClosedRange<CGFloat>], pictureAt: Date)?
         var strayNote = ""
         var picture: ConcealGhostOverlay.BarSnapshot?
         /// The icons standing under the cover, cut out of the bar: what a
@@ -1579,6 +1587,7 @@ final class LiveMirror {
         var hidden: CGFloat?, visible: CGFloat?
         var always: ClosedRange<CGFloat>?
         var drawn: [CGRect] = []
+        var drawnIDs: [ItemID] = []
         var read = false
         // A hiding bar's icon left of its cover is not in the run the cover
         // hides. With macOS's own « open the Hidden icons stand left of the
@@ -1605,7 +1614,9 @@ final class LiveMirror {
                 always = min(always?.lowerBound ?? r.minX, r.minX)...max(always?.upperBound ?? r.maxX, r.maxX)
                 // One a show rule or a press brought out is meant to show,
                 // one behind macOS's « is not drawn where it stands.
-                if held == nil, !alone.contains(id) { drawn.append(r) }
+                // A press keys what it holds out by section key, the walk by
+                // the bar's own id: either one.
+                if held == nil, !alone.contains(id), !alone.contains(id.sectionKey) { drawn.append(r); drawnIDs.append(id) }
             }
         }
         // An unreadable bar tells nothing: what was read stands. (On a bar
@@ -1615,7 +1626,11 @@ final class LiveMirror {
             side.runEdge = hidden ?? visible
             side.alwaysRun = always
         }
-        if read || !copies.isEmpty && !side.showsAll, !Task.isCancelled { side.alwaysDrawn = drawn }
+        if read || !copies.isEmpty && !side.showsAll, !Task.isCancelled {
+            side.alwaysDrawn = drawn
+            side.alwaysDrawnIDs = drawnIDs
+            side.drawnHiddenEdge = hidden
+        }
     }
 
     /// The spans of the Always Hidden icons that reach past `end`, where the
@@ -1636,6 +1651,12 @@ final class LiveMirror {
         }
     }
 
+    /// Which of `ids` (`frames` in the same order) reach past `end`: the
+    /// icons `strays` makes the spans of.
+    nonisolated static func strayIDs(_ ids: [ItemID], _ frames: [CGRect], past end: CGFloat) -> [ItemID] {
+        zip(ids, frames).filter { $0.1.maxX > end + 4 }.map(\.0)
+    }
+
     /// The cover on a bar whose Hidden icons are out ends at the leftmost of
     /// them, and macOS draws every icon right of there: an Always Hidden one
     /// that ended up among them showed (Battery between two Hidden icons, on
@@ -1649,6 +1670,15 @@ final class LiveMirror {
         guard leaving || !exiting && !handingOver, sides.contains(where: { $0 === side }) else { return }
         let open = side.cover != nil && assertionDropped && (side.showsAll || isOut(side))
         var spans = open ? Self.strays(side.alwaysDrawn, past: side.coverMaxX) : []
+        // The patch only hides it, a blank where it stands: the keeper puts
+        // it back once live mode lets go of the bar, which at rest it can't
+        // tell is out of place (2026-11-26).
+        // Judged against the Hidden icons of the same walk, and told every
+        // reading, an empty one too: one that finds it back in place takes
+        // the carry back (review, 2026-11-26).
+        if open, let edge = side.drawnHiddenEdge {
+            appState?.grouper.liveModeStrays(Self.strayIDs(side.alwaysDrawnIDs, side.alwaysDrawn, past: edge), on: side.id)
+        }
         let shift = side.screen.frame.maxX - primaryMaxX
         var pieces: [ConcealGhostOverlay.BarSnapshot] = []
         if let picture = side.picture {
@@ -1700,6 +1730,8 @@ final class LiveMirror {
     private func patchesLeave() {
         for side in sides {
             side.alwaysDrawn = []
+            side.alwaysDrawnIDs = []
+            side.drawnHiddenEdge = nil
             for patch in side.patch?.set.members ?? [] { patch.fadeOut(duration: Self.patchLeave, controlPoints: (1, 0, 1, 0)) }
             side.patch = nil
         }
