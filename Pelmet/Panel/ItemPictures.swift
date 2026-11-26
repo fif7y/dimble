@@ -345,6 +345,17 @@ final class ItemPictures {
         return BarReference.inkShare(bitmap.pixels, width: w, height: h)
     }
 
+    /// How much of an empty-bar column the filmed one (`raw`, same size)
+    /// can't explain as bar (`BarReference.unexplainedShare`).
+    static func referenceUnexplained(_ background: CGImage, raw: CGImage) -> Double? {
+        let w = background.width, h = background.height
+        guard raw.width == w, raw.height == h,
+              let empty = rgba(background, width: w, height: h), let filmed = rgba(raw, width: w, height: h)
+        else { return nil }
+        defer { withExtendedLifetime(empty.context) {}; withExtendedLifetime(filmed.context) {} }
+        return BarReference.unexplainedShare(empty: empty.pixels, raw: filmed.pixels, width: w, height: h)
+    }
+
     private static func inkBounds(of image: CGImage) -> CGRect? {
         let w = image.width, h = image.height
         guard w > 0, h > 0, let bitmap = rgba(image, width: w, height: h) else { return nil }
@@ -376,6 +387,9 @@ final class ItemPictures {
         else { return nil }
         defer { withExtendedLifetime((rawBitmap.context, barBitmap.context)) {} }
         let s = rawBitmap.pixels, b = barBitmap.pixels
+        // A sharp wallpaper's edges come out of a bar that sits a fraction
+        // of a pixel off the strip as faint streaks (#156, 1x).
+        BarReference.nearestBar(b, raw: s, width: w, height: h)
         // Measured from a capsule first. One that leaves no glyph is read
         // from the bar as before: a text widget whose strokes touch both
         // sides reads as a capsule too.

@@ -93,4 +93,110 @@ public enum BarReference {
     public static func isClean(_ pixels: UnsafePointer<UInt8>, width w: Int, height h: Int) -> Bool {
         inkShare(pixels, width: w, height: h) < inkShareLimit
     }
+
+    /// The share of the column's middle that `unexplainedShare` may find
+    /// before a column `inkShare` refused stays refused.
+    ///
+    /// Not every bar blurs its wallpaper: #156's built-in draws it sharp, and
+    /// a bright planet rim read 24.7% and 39.2% (Time Machine, Proton Pass)
+    /// where no icon sat, which kept both tiles on their app icons. Measured
+    /// 2026-11-26 on his dump (a 2x built-in, a 1x external): every column
+    /// that held no intruder read 0.00%, the rim's two 0.12% at most (22
+    /// columns). Intruders built from his own eleven icons, each one's glyph
+    /// laid over the true empty bar under every other, centred and a quarter
+    /// and a half of a column off (1,057 that put 2% of a column or more in
+    /// it), read 0.59% at least at 1x and 2.0% at 2x. The worst are two round
+    /// glyphs centred on each other at 1x. 0.3% sits between.
+    public static let unexplainedLimit = 0.003
+
+    /// How much of an empty-bar column differs from the filmed column in a way
+    /// the bar can't explain, 0 to 1: the share of the middle that held an
+    /// intruder (#128) rather than wallpaper.
+    ///
+    /// Where the two columns agree, both show the bar: the wallpaper the icon
+    /// leaves uncovered, sharp or not. Where they differ, the filmed column
+    /// has the icon's glyph and the empty one should have bar, which is what
+    /// the agreeing pixels either side in the same row say it is, a straight
+    /// line between them. An empty pixel off that line by `inkStep` is
+    /// something the strip doesn't draw: an icon that stood there, or one the
+    /// glyph covers in the same colour (its agreeing pixels then predict the
+    /// rest of the glyph wrong). A row with no agreeing pixel counts whole.
+    ///
+    /// No margin line here: a sharp wallpaper pulls it off (#156).
+    /// `empty` and `raw` are the same column, RGBA8, top row first.
+    public static func unexplainedShare(empty: UnsafePointer<UInt8>, raw: UnsafePointer<UInt8>, width w: Int, height h: Int) -> Double {
+        let margin = h / 10
+        guard w > 0, margin >= 1, h - 2 * margin >= 2 else { return 0 }
+        var agree = [Bool](repeating: false, count: w)
+        var off = 0
+        for y in margin..<(h - margin) {
+            for x in 0..<w {
+                let i = (y * w + x) * 4
+                agree[x] = (0..<3).allSatisfy { abs(Int(empty[i + $0]) - Int(raw[i + $0])) < inkStep }
+            }
+            for x in 0..<w where !agree[x] {
+                let left = stride(from: x - 1, through: 0, by: -1).first { agree[$0] }
+                let right = (x + 1..<w).first { agree[$0] }
+                guard left != nil || right != nil else { off += 1; continue }
+                let i = (y * w + x) * 4
+                var apart = 0
+                for c in 0..<3 {
+                    let line: Double
+                    if let left, let right {
+                        let t = Double(x - left) / Double(right - left)
+                        line = Double(empty[(y * w + left) * 4 + c]) * (1 - t) + Double(empty[(y * w + right) * 4 + c]) * t
+                    } else {
+                        line = Double(empty[(y * w + (left ?? right!)) * 4 + c])
+                    }
+                    apart = max(apart, abs(Int(line.rounded()) - Int(empty[i + c])))
+                }
+                if apart >= inkStep { off += 1 }
+            }
+        }
+        return Double(off) / Double(w * (h - 2 * margin))
+    }
+
+    /// How far past its neighbours' range `nearestBar` lets a filmed pixel
+    /// stay bar: a glyph next to an edge in the bar loses that much at most.
+    public static let nearestBarGive = 8
+
+    /// Moves each empty-bar pixel, channel by channel, to the value nearest
+    /// the filmed one in the range the bar's pixels within one of it span,
+    /// widened by that range again, `nearestBarGive` at most. In place.
+    ///
+    /// The empty bar can sit a fraction of a pixel off the strip it is
+    /// subtracted from: #156's 1x external drew a planet rim's soft edge 8 to
+    /// 25 levels apart in the two, and its last row up to 26 apart in every
+    /// column. Too faint to count as ink, but a picture's mask takes its
+    /// alpha from that distance over the glyph's core, so faint streaks
+    /// followed the rim, and the tile's box widened to the whole column. A
+    /// filmed pixel the bar draws within a pixel of where it stands is bar.
+    /// A thin line half a pixel over changes its own peak too: one on the
+    /// same rim stood 14 levels over its row in the strip and 6 in the empty
+    /// bar, caught on one pixel in one and split over two in the other, so
+    /// the range is widened by itself. Over a blurred bar the neighbours
+    /// agree to a level or two and nothing moves, and a glyph is far from
+    /// all of them.
+    ///
+    /// `empty` and `raw` are the same column, RGBA8, top row first.
+    public static func nearestBar(_ empty: UnsafeMutablePointer<UInt8>, raw: UnsafePointer<UInt8>, width w: Int, height h: Int) {
+        guard w > 0, h > 0 else { return }
+        let bar = Array(UnsafeBufferPointer(start: empty, count: w * h * 4))
+        for y in 0..<h {
+            for x in 0..<w {
+                let i = (y * w + x) * 4
+                for c in 0..<3 {
+                    var lo = 255, hi = 0
+                    for yy in max(y - 1, 0)...min(y + 1, h - 1) {
+                        for xx in max(x - 1, 0)...min(x + 1, w - 1) {
+                            let v = Int(bar[(yy * w + xx) * 4 + c])
+                            lo = min(lo, v); hi = max(hi, v)
+                        }
+                    }
+                    let give = min(hi - lo, nearestBarGive)
+                    empty[i + c] = UInt8(clamping: min(max(Int(raw[i + c]), lo - give), hi + give))
+                }
+            }
+        }
+    }
 }

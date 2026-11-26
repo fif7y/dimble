@@ -3271,10 +3271,19 @@ extension TransitionCoordinator {
         // just the refused ones: the limit is only worth what a real
         // bar's spread says it is.
         if dump, let ink { PelmetLog.log("pass: \(key.rawValue) empty-bar ink \(String(format: "%.1f%%", ink * 100))") }
-        if let ink, ink >= BarReference.inkShareLimit { return .contaminated(ink) }
+        let raw = copy.raw.image.cropping(to: rect)
+        if let ink, ink >= BarReference.inkShareLimit {
+            // A wallpaper the bar draws sharp reads as ink too (#156's
+            // planet rim). It's the bar's own when the strip draws it the
+            // same, all but what the icon's glyph covers.
+            guard let background, let raw, let left = ItemPictures.referenceUnexplained(background, raw: raw),
+                  left < BarReference.unexplainedLimit
+            else { return .contaminated(ink) }
+            PelmetLog.log("pass: \(key.rawValue) empty-bar ink \(String(format: "%.1f%%", ink * 100)) is the bar's own, the strip draws it too (\(String(format: "%.2f%%", left * 100)) unexplained)")
+        }
         guard let picture = ItemPictures.picture(
             from: column,
-            raw: copy.raw.image.cropping(to: rect),
+            raw: raw,
             background: background)
         else { return .none("at \(at), nothing drawn in its column") }
         return .picture(picture, column: column)
