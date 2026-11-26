@@ -5,7 +5,7 @@
       <stop offset="1" stop-color="#1a1e27"/>
     </linearGradient>
     <filter id="soft" x="-20%" y="-40%" width="140%" height="200%">
-      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#2a1770" flood-opacity="0.55"/>
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#04001e" flood-opacity="0.6"/>
     </filter>
   </defs>
   <style>
@@ -24,9 +24,12 @@
     @media (prefers-reduced-motion: reduce){.h0,.h1,.h2,.d1,.d2{animation:none}}
 </style>
 
-  <rect width="1280" height="400" rx="24" fill="#6841ED"/>
+  <clipPath id="card"><rect width="1280" height="400" rx="24"/></clipPath>
+  <g clip-path="url(#card)">
+  <defs><linearGradient id="ab" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0330"/><stop offset="1" stop-color="#08021f"/></linearGradient><radialGradient id="ag" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="translate(640 255) scale(614.4 224.0)"><stop offset="0" stop-color="#6841ed" stop-opacity=".42"/><stop offset=".5625" stop-color="#2a0e78" stop-opacity=".18"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient></defs><rect width="1280" height="400" fill="url(#ab)"/><rect width="1280" height="400" fill="url(#ag)"/>
+  <g transform="translate(0 -14)">
 
-  <!-- mark + wordmark lockup (mark from Pelmet/AppIcon.icon; ghost dots tuck in sync with the bar) -->
+  <!-- direction A (readme-indigo): ground, lockup without its tagline, bar at 2.4x. mark + wordmark lockup (mark from Pelmet/AppIcon.icon; ghost dots tuck in sync with the bar) -->
   <g transform="translate(361.8 -22.991) scale(0.2794)">
     <path d="M270 303.5L535.712 303.5C684.181 303.5 758 399.859 758 512C758 624.141 684.181 720.5 535.712 720.5L270 720.5L270 600L535.712 600C597.09 600 628.609 558.49 628.609 512C628.609 465.51 597.09 424 535.712 424L270 424Z" fill="white"/>
     <g class="d2" opacity="0.3"><path d="M362.933 469.906A56 56 0 1 0 362.933 554.094A82 82 0 0 1 362.933 469.906Z" fill="white"/></g>
@@ -36,19 +39,18 @@
   <text x="599.568" y="147" font-family="-apple-system, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', system-ui, sans-serif"
         font-size="78" font-weight="700" letter-spacing="-1" fill="white">Dimble</text>
 
-  <text x="640" y="235.2" text-anchor="middle"
-        font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif"
-        font-size="23" font-weight="600" letter-spacing="0.4" fill="white">A calm menu bar for macOS</text>
-
-  <!-- menu bar strip -->
+  </g>
+  <!-- menu bar strip, 2.4x about its centre, on A's glass -->
+  <g transform="translate(640 300) scale(2.4) translate(-640 -288)">
   <g filter="url(#soft)">
-    <rect x="415" y="266" width="450" height="44" rx="12" fill="url(#bar)"/>
-    <rect x="415.5" y="266.5" width="449" height="43" rx="11.5" stroke="#ffffff" stroke-opacity="0.06"/>
+    <rect x="415" y="266" width="450" height="44" rx="12" fill="#1e0e5c" fill-opacity=".5"/>
+    <rect x="415.25" y="266.25" width="449.5" height="43.5" rx="11.75" stroke="#fff" stroke-opacity="0.16" stroke-width=".5"/>
+    <path d="M427 266.4H853" stroke="#fff" stroke-opacity=".24" stroke-width=".5"/>
   </g>
 
   <g transform="translate(-163 14)">
     <!-- hideable section: tucks into the chevron (onboarding loop) -->
-    <g stroke="#dfe3e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
       <g class="h0">
         <path d="M608 267a7.5 7.5 0 1 0 7.1 10.2 6.3 6.3 0 0 1-7.1-10.2z"/>
       </g>
@@ -62,33 +64,35 @@
     </g>
 
     <!-- chevron divider -->
-    <g stroke="#9aa2b0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.85">
+    <g stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.6">
       <path d="M736 268l-6 6 6 6"/>
     </g>
 
     <!-- visible section: never moves -->
-    <g stroke="#dfe3e9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="772" cy="272" r="6.2" fill="none"/>
       <path d="M776.6 276.6l4.4 4.4"/>
       <g transform="translate(810,264)">
         <rect x="0" y="0" width="17" height="7" rx="3.5" fill="none"/>
-        <circle cx="13" cy="3.5" r="1.6" fill="#dfe3e9" stroke="none"/>
+        <circle cx="13" cy="3.5" r="1.6" fill="#fff" stroke="none"/>
         <rect x="0" y="10" width="17" height="7" rx="3.5" fill="none"/>
-        <circle cx="4" cy="13.5" r="1.6" fill="#dfe3e9" stroke="none"/>
+        <circle cx="4" cy="13.5" r="1.6" fill="#fff" stroke="none"/>
       </g>
       <g transform="translate(856,266)">
         <path d="M0 5.2a13 13 0 0 1 17 0" fill="none"/>
         <path d="M3.2 9a8.6 8.6 0 0 1 10.6 0" fill="none"/>
-        <circle cx="8.5" cy="13" r="1.7" fill="#dfe3e9" stroke="none"/>
+        <circle cx="8.5" cy="13" r="1.7" fill="#fff" stroke="none"/>
       </g>
       <g transform="translate(896,266.5)">
         <rect x="0" y="0" width="22" height="11" rx="3" fill="none"/>
         <path d="M24 3.6v3.8" stroke-width="2"/>
-        <rect x="2" y="2" width="13" height="7" rx="1.6" fill="#dfe3e9" stroke="none"/>
+        <rect x="2" y="2" width="13" height="7" rx="1.6" fill="#fff" stroke="none"/>
       </g>
     </g>
     <text x="938" y="279.5"
           font-family="-apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif"
-          font-size="14.5" font-weight="500" letter-spacing="0.2" fill="#dfe3e9">Wed 9:41</text>
+          font-size="14.5" font-weight="500" letter-spacing="0.2" fill="#fff">Wed 9:41</text>
+  </g>
+  </g>
   </g>
 </svg>
