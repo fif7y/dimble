@@ -41,8 +41,15 @@ final class TimeMachineBackup {
 
     private var timer: Timer?
     private var refreshing = false
+    /// For the log (#168): when the running backup was first seen, and the
+    /// latest backup's date, so one that came and went between two checks
+    /// still leaves a line.
+    private var runningSince: Date?
+    private var lastSeenRunning: Date?
+    private var latestBackup: Date?
 
     func start() {
+        PelmetLog.log("timemachine: watching backups, every 30 s while idle")
         refresh()
         schedule()
     }
@@ -67,16 +74,46 @@ final class TimeMachineBackup {
         refreshing = true
         Task.detached(priority: .utility) { [weak self] in
             var parsed = Self.parseStatus(Self.run("/usr/bin/tmutil", ["status"]))
-            parsed?.failed = Self.destination()?.failed ?? false
+            let destination = Self.destination()
+            parsed?.failed = destination?.failed ?? false
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.refreshing = false
+                self.noteLatest(destination?.latestBackup, running: parsed?.running ?? false)
                 guard let parsed, parsed != self.status else { return }
                 let wasRunning = self.status.running
                 self.status = parsed
-                if wasRunning != parsed.running { self.schedule() }
+                if wasRunning != parsed.running {
+                    self.logEdge(parsed)
+                    self.schedule()
+                }
                 self.onChange?()
             }
+        }
+    }
+
+    private func logEdge(_ parsed: Status) {
+        if parsed.running {
+            runningSince = Date()
+            PelmetLog.log("timemachine: backup running (\(parsed.phase ?? "preparing"))")
+        } else {
+            let seconds = runningSince.map { Int(-$0.timeIntervalSinceNow) }
+            runningSince = nil
+            PelmetLog.log("timemachine: backup ended\(seconds.map { " after about \($0) s" } ?? "")")
+        }
+    }
+
+    /// A backup shorter than the idle poll is never seen running: its only
+    /// trace is a newer latest backup. One seen running in the last two
+    /// minutes is the one that wrote it; a failed or stopped one long before isn't.
+    /// The date only counts going forward: with two disks it can step back.
+    private func noteLatest(_ latest: Date?, running: Bool) {
+        if running { lastSeenRunning = Date() }
+        guard let latest else { return }
+        defer { latestBackup = max(latest, latestBackup ?? latest) }
+        guard let before = latestBackup, latest > before else { return }
+        if lastSeenRunning.map({ -$0.timeIntervalSinceNow > 120 }) ?? true {
+            PelmetLog.log("timemachine: a backup finished between two checks, never seen running")
         }
     }
 
