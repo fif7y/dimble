@@ -11,11 +11,11 @@
   <a href="https://github.com/sponsors/fif7y"><img src="https://img.shields.io/badge/sponsor-%E2%9D%A4-ea4aaa" alt="Sponsor Dimble"></a>
 </p>
 
-Dimble hides the icons you don't need until you do. Hover, click or press a
-shortcut and they slide back in, or open in a panel. Small on purpose (three
-sections, an editor, ⌘-drag in the bar) and native all the way down. macOS does
-the hiding. Built for the menu bar Apple rebuilt in macOS 27. Free, open source,
-no account, no analytics.
+Dimble is a menu bar manager for macOS 27 with just the right features and a
+lot of attention to detail. It keeps your Live Activities on the bar while
+everything else is hidden, a click opens the card. The icons you don't need
+tuck away and come back the instant you ask, in the menu bar, a panel or a row
+under it. macOS does the hiding. Free, open source, no account, no analytics.
 
 > [!TIP]
 > **Beta channel.** Fixes and new features land there first, a stable release
