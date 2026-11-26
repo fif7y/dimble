@@ -275,3 +275,36 @@ struct LiveStrayTests {
         #expect([9, 10, 19, 20].map { grey($0, 1) } == [200, 0, 0, 200])
     }
 }
+
+/// Live mode leaves out a display with no bar drawn (a full-screen app) and
+/// mirrors the pills on the others (#156: Brave full screen on one display
+/// kept Now Playing off on both).
+struct LiveStandAsideTests {
+    let screens: [(id: CGDirectDisplayID, conceals: Bool)] = [(1, true), (2, true), (5, false)]
+
+    @Test func everyBarDrawnLeavesNothingOut() {
+        #expect(LiveMirror.leftOut(barless: [], screens: screens, separateSpaces: true) == [])
+    }
+
+    @Test func aFullScreenDisplayIsLeftOutAlone() {
+        #expect(LiveMirror.leftOut(barless: [2], screens: screens, separateSpaces: true) == [2])
+    }
+
+    @Test func noConcealingBarLeftMeansNoStart() {
+        // Display 5 shows every icon: nothing to film once 1 and 2 have no bar.
+        #expect(LiveMirror.leftOut(barless: [1, 2], screens: screens, separateSpaces: true) == nil)
+    }
+
+    @Test func withoutSeparateSpacesAnyMissingBarMeansNoStart() {
+        #expect(LiveMirror.leftOut(barless: [1], screens: screens, separateSpaces: false) == nil)
+    }
+
+    @Test func thePointerAtTheTopIsSeenOnItsOwnDisplayOnly() {
+        let frames: [(id: CGDirectDisplayID, frame: NSRect)] = [(2, NSRect(x: -2560, y: -113, width: 2560, height: 1440))]
+        #expect(LiveMirror.pointerAtTop(NSPoint(x: -1280, y: 1327), of: frames, within: 3) == 2)
+        #expect(LiveMirror.pointerAtTop(NSPoint(x: -1280, y: 1325), of: frames, within: 3) == 2)
+        #expect(LiveMirror.pointerAtTop(NSPoint(x: -1280, y: 1320), of: frames, within: 3) == nil)
+        #expect(LiveMirror.pointerAtTop(NSPoint(x: -1280, y: 1300), of: frames, within: 50) == 2)
+        #expect(LiveMirror.pointerAtTop(NSPoint(x: 100, y: 1327), of: frames, within: 3) == nil)
+    }
+}

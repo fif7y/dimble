@@ -845,16 +845,31 @@ final class LiveMirror {
     /// video kept a block at the top for 13 s, until no pill read as every
     /// pill turned off (Gab, 2026-11-23) — and with the assertion down the
     /// bar coming down on a hover there shows every hidden icon. Live mode
-    /// steps aside while any display has one (`readBarless`).
+    /// steps aside on those displays alone (`stoodAside`): stepping aside
+    /// everywhere kept a reporter's Now Playing pill off all afternoon, Brave
+    /// full screen on one display of two (#156, 2026-11-26).
     private var barlessDisplays: Set<CGDirectDisplayID> = []
     private var barlessReadAt = Date.distantPast
-    /// Set once live mode stepped aside for a missing bar: it comes back when
-    /// every bar has been drawn again (`barsBackSince`) for `barBackSettle`
-    /// if a Space change brought them (leaving full screen), else for
-    /// `barBackQuietSettle`: a hover brings a full-screen app's bar down
-    /// too, and live mode starting under the pointer moves the icons there.
-    private var waitingForBars = false
+    /// Displays whose bar was drawn again since the last read without it
+    /// (`barsBackSince`): a start waits for it to stay `barBackSettle` if a
+    /// Space change brought it (leaving full screen), else
+    /// `barBackQuietSettle` (a hover brings a full-screen app's bar down too,
+    /// and live mode starting under the pointer moves the icons there), or
+    /// for it to go again.
+    private var barsBack: Set<CGDirectDisplayID> = []
     private var barsBackSince: Date?
+    /// Displays this run left out for having no bar at the start: no side,
+    /// no cover, no mirrors. Their bar coming back would show every hidden
+    /// icon there, so live mode leaves when it does (`barGoneWhy`), or as the
+    /// pointer reaches their top (`watchStoodAside`).
+    private var stoodAside: Set<CGDirectDisplayID> = []
+    private var asideWatch: Task<Void, Never>?
+    /// The left-out display whose top the pointer reached this run.
+    private var asideHit: CGDirectDisplayID?
+    /// The pointer this close to the top of a display brings a full-screen
+    /// app's bar down; within `barRevealBand` the bar may still be down.
+    static let barRevealEdge: CGFloat = 3
+    static let barRevealBand: CGFloat = 50
     private var lastSpaceChange = Date.distantPast
     /// The frontmost window went full screen with the Space change (AX):
     /// the band only shows ~0.5 s after the covers are back on the new Space
@@ -1410,6 +1425,10 @@ final class LiveMirror {
         assertionDropped = false
         standDown = false
         noPillSince = nil
+        stoodAside = []
+        asideHit = nil
+        asideWatch?.cancel()
+        asideWatch = nil
     }
 
     // MARK: The card
@@ -1621,17 +1640,53 @@ final class LiveMirror {
         if appState.transitions.passInFlight { return "a picture pass has the bar" }
         if appState.chevronWindowFrame == nil { return "no chevron window" }
         if !(await appState.engine.holdsAssertion) { return "no assertion held — the pill shows on its own" }
-        if let gone = barGoneWhy(maxAge: 0.5) { return gone }
-        if waitingForBars {
-            guard let since = barsBackSince else { return "waiting for every bar to be drawn again" }
+        let gone = readBarless(maxAge: 0.5)
+        if !gone.isEmpty {
+            let screens = NSScreen.screens.compactMap { screen in
+                screen.directDisplayID.map { (id: $0, conceals: appState.settings.behavior(forDisplayUUID: screen.displayUUIDString) != .alwaysShowAll) }
+            }
+            guard Self.leftOut(barless: gone, screens: screens, separateSpaces: NSScreen.screensHaveSeparateSpaces) != nil else {
+                return "no bar drawn on display \(Self.list(gone)) (a full-screen app)"
+            }
+            // Its bar may be down under the pointer: a start would cover the
+            // others and leave it showing every hidden icon.
+            if let id = Self.pointerAtTop(NSEvent.mouseLocation, of: Self.frames(gone), within: Self.barRevealBand) {
+                return "the pointer is at the top of display \(id), which has no bar drawn — its bar may be down"
+            }
+        }
+        if !barsBack.isEmpty {
+            let since = barsBackSince ?? .distantPast
             let withSpace = abs(since.timeIntervalSince(lastSpaceChange)) < 3
             let settle = withSpace ? Self.barBackSettle : Self.barBackQuietSettle
             guard Date().timeIntervalSince(since) >= settle else {
-                return "every bar is back\(withSpace ? " with the Space" : ", no Space change (a hover?)") — waiting \(Int(settle))s for it to stay"
+                return "display \(Self.list(barsBack))'s bar is back\(withSpace ? " with the Space" : ", no Space change (a hover?)") — waiting \(Int(settle))s for it to stay"
             }
-            waitingForBars = false
+            barsBack = []
         }
         return nil
+    }
+
+    /// The displays a start leaves out (those with no bar drawn), or nil
+    /// when live mode can't run anywhere: no display that conceals has a
+    /// bar, or without separate Spaces (only the main display has a bar).
+    nonisolated static func leftOut(barless: Set<CGDirectDisplayID>, screens: [(id: CGDirectDisplayID, conceals: Bool)], separateSpaces: Bool) -> Set<CGDirectDisplayID>? {
+        guard !barless.isEmpty else { return [] }
+        guard separateSpaces, screens.contains(where: { $0.conceals && !barless.contains($0.id) }) else { return nil }
+        return barless.intersection(screens.map(\.id))
+    }
+
+    /// The display among `screens` whose top `band` points hold `point`
+    /// (global Cocoa coordinates), or nil.
+    nonisolated static func pointerAtTop(_ point: NSPoint, of screens: [(id: CGDirectDisplayID, frame: NSRect)], within band: CGFloat) -> CGDirectDisplayID? {
+        screens.first { point.x >= $0.frame.minX && point.x < $0.frame.maxX && point.y <= $0.frame.maxY && $0.frame.maxY - point.y <= band }?.id
+    }
+
+    private static func frames(_ ids: Set<CGDirectDisplayID>) -> [(id: CGDirectDisplayID, frame: NSRect)] {
+        NSScreen.screens.compactMap { screen in screen.directDisplayID.flatMap { ids.contains($0) ? (id: $0, frame: screen.frame) : nil } }
+    }
+
+    private static func list(_ ids: Set<CGDirectDisplayID>) -> String {
+        ids.sorted().map(String.init).joined(separator: ", ")
     }
 
     // MARK: Geometry
@@ -2642,7 +2697,10 @@ final class LiveMirror {
         if barIsOut { return "the bar came out" }
         if appState.isTransitioning { return "a transition started" }
         if appState.panelShowsReveal { return "the panel came up" }
-        if let gone = barGoneWhy(maxAge: 0) { return gone }
+        // Before the drop a start won't go under a left-out bar that may be
+        // down; a retake (the assertion already down) leaves that to the
+        // pointer watch.
+        if let gone = barGoneWhy(maxAge: 0, pointerBand: retaking ? nil : Self.barRevealBand) { return gone }
         return nil
     }
 
@@ -2683,14 +2741,15 @@ final class LiveMirror {
         if missing != barlessDisplays {
             PelmetLog.log(missing.isEmpty
                 ? "livemirror: every bar is drawn again"
-                : "livemirror: no bar drawn on display \(missing.sorted().map(String.init).joined(separator: ", ")) — a full-screen app has it, or it hides itself")
+                : "livemirror: no bar drawn on display \(Self.list(missing)) — a full-screen app has it, or it hides itself")
         }
-        if !missing.isEmpty {
-            waitingForBars = true
-            barsBackSince = nil
-        } else if waitingForBars, barsBackSince == nil {
+        let back = barlessDisplays.subtracting(missing)
+        if !back.isEmpty {
+            barsBack.formUnion(back)
             barsBackSince = now
         }
+        // One whose bar went again (a hover over): nothing to wait for there.
+        barsBack.subtract(missing)
         let newlyBarless = !missing.subtracting(barlessDisplays).isEmpty
         barlessDisplays = missing
         // Whoever reads it first takes the cover down: the covers rejoin a
@@ -2700,12 +2759,53 @@ final class LiveMirror {
         return missing
     }
 
-    /// Why live mode can't hold the bar for a display macOS isn't drawing
-    /// one on, or nil.
-    private func barGoneWhy(maxAge: TimeInterval) -> String? {
+    /// Why a start or a run can't go on, or nil: a display it covers lost
+    /// its bar, or one it left out (`stoodAside`) has its bar drawn again,
+    /// every hidden icon in it and no cover there.
+    /// `pointerBand`: a start not yet past the drop also calls itself off
+    /// while the pointer is that close to a left-out display's top (its bar
+    /// may be down).
+    private func barGoneWhy(maxAge: TimeInterval, pointerBand: CGFloat? = nil) -> String? {
         let gone = readBarless(maxAge: maxAge)
-        guard !gone.isEmpty else { return nil }
-        return "no bar drawn on display \(gone.sorted().map(String.init).joined(separator: ", ")) (a full-screen app)"
+        let lost = gone.filter { id in sides.contains { $0.id == id } }
+        if !lost.isEmpty { return "no bar drawn on display \(Self.list(lost)) (a full-screen app)" }
+        let back = stoodAside.subtracting(gone)
+        if !back.isEmpty { return "display \(Self.list(back))'s bar is drawn again, with no cover there" }
+        if let id = asideHit { return "the pointer reached the top of display \(id), its bar comes down with no cover there" }
+        if let band = pointerBand, let id = Self.pointerAtTop(NSEvent.mouseLocation, of: Self.frames(stoodAside), within: band) {
+            return "the pointer is at the top of display \(id), which has no cover — its bar may be down"
+        }
+        return nil
+    }
+
+    /// While displays are left out: the pointer at the top of one brings
+    /// its bar down, every hidden icon in it with the assertion down. The
+    /// window list can't say it (a full-screen app's window still covers
+    /// the bar's rows), so the pointer is read, every 50 ms, from the drop
+    /// on. A start or a retake in flight is told (`asideHit`) and calls
+    /// itself off at its next check; a run leaves at once. The next start
+    /// waits `barBackQuietSettle`: reaching for a full-screen browser's
+    /// tabs hits the top again and again.
+    private func watchStoodAside() {
+        guard asideWatch == nil, !stoodAside.isEmpty else { return }
+        asideWatch = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self, self.isActive, !self.stoodAside.isEmpty else { return }
+                guard !self.exiting, !self.handingOver else { continue }
+                if let id = Self.pointerAtTop(NSEvent.mouseLocation, of: Self.frames(self.stoodAside), within: Self.barRevealEdge) {
+                    if self.asideHit == nil {
+                        self.retryNotBefore = Date().addingTimeInterval(Self.barBackQuietSettle)
+                        self.holdOffWhy = "the pointer was at the top of display \(id), which has no cover — holding off \(Int(Self.barBackQuietSettle))s"
+                    }
+                    self.asideHit = id
+                }
+                guard let id = self.asideHit, !self.entering else { continue }
+                self.asideWatch = nil
+                await self.exit("the pointer is at the top of display \(id), its bar comes down with no cover there")
+                return
+            }
+        }
     }
 
     /// For 3 s after a Space change: the frontmost window's full screen (AX,
@@ -2719,8 +2819,9 @@ final class LiveMirror {
             let until = Date().addingTimeInterval(3)
             while !Task.isCancelled, Date() < until {
                 guard let self, self.isActive || self.entering else { return }
-                // The window list first: it's quick, AX can take 160 ms.
-                if !self.readBarless(maxAge: 0).isEmpty {
+                // The window list first: it's quick, AX can take 160 ms. (A
+                // display left out has no cover to drop: it says nothing.)
+                if !self.readBarless(maxAge: 0).subtracting(self.stoodAside).isEmpty {
                     self.dropCoversWhereNoBar("the Space changed")
                     return
                 }
@@ -2730,7 +2831,7 @@ final class LiveMirror {
                     if self.fullScreenHint == nil { PelmetLog.log("livemirror: the frontmost window is full screen on display \(display) (AX)") }
                     self.fullScreenHint = (display, Date())
                 }
-                if !self.readBarless(maxAge: 0).isEmpty {
+                if !self.readBarless(maxAge: 0).subtracting(self.stoodAside).isEmpty {
                     self.dropCoversWhereNoBar("the Space changed")
                     return
                 }
@@ -2822,8 +2923,16 @@ final class LiveMirror {
         assertionDropped = false
         mirrorsLeaving = false
         appState.transitions.liveModeActive = true
+        // A display with no bar drawn (a full-screen app) is left out: the
+        // others still mirror their pills (`stoodAside`).
+        stoodAside = NSScreen.screensHaveSeparateSpaces ? readBarless(maxAge: 0) : []
+        asideHit = nil
         sides = NSScreen.screens.compactMap { screen in
             guard let id = screen.directDisplayID, let display = content.displays.first(where: { $0.displayID == id }) else { return nil }
+            if stoodAside.contains(id) {
+                PelmetLog.log("livemirror: display \(id) left out — no bar drawn there (a full-screen app)")
+                return nil
+            }
             // A display set to show every icon keeps its Hidden icons out; the
             // assertion dropping brings back what it hides there (the Always
             // Hidden icons, the pills): a cover over that alone, from the
@@ -2838,8 +2947,13 @@ final class LiveMirror {
             }
             return side
         }
-        // Nothing to film when every display shows all its icons.
-        guard sides.contains(where: { !$0.showsAll }) else { await abort("no display to film", holdOff: true); return }
+        // Nothing to film when every display shows all its icons. (Or the
+        // ones that conceal lost their bar since `cannotEnter` read: no
+        // hold-off, the loop waits for a bar as it did then.)
+        guard sides.contains(where: { !$0.showsAll }) else {
+            if !stoodAside.isEmpty { await abort("no bar drawn on display \(Self.list(stoodAside)) (a full-screen app)"); return }
+            await abort("no display to film", holdOff: true); return
+        }
         for side in sides {
             await measureMenus(side)
             if side.showsAll { await measureRunEdge(side) }
@@ -3020,6 +3134,9 @@ final class LiveMirror {
         // reveal waits for the start to settle (the assertion is dropped as
         // far as the engine is concerned, and `abort` puts it back).
         assertionDropped = true
+        // From the drop on, a left-out display's bar coming down shows every
+        // hidden icon: the pointer is watched before the settle, not after.
+        watchStoodAside()
         // The covers are up: the held windows (the anchor's) make way.
         appState.transitions.releaseHeldForLive()
         await appState.engine.holdLift(true)
@@ -3093,7 +3210,8 @@ final class LiveMirror {
             }
         }
         for side in sides { await refreshSide(side, why: "enter") }
-        PelmetLog.log("livemirror: live at \(ms())ms (assertion down \(dropped)ms)")
+        PelmetLog.log("livemirror: live at \(ms())ms (assertion down \(dropped)ms)\(stoodAside.isEmpty ? "" : ", display \(Self.list(stoodAside)) left out")")
+        watchStoodAside()
         abortStrikes = 0
         lastSummaryAt = Date()
         noPillSince = Date()
