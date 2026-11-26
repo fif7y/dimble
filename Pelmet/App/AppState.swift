@@ -1972,15 +1972,33 @@ final class AppState {
         clockClicked(at: target, pointer: pointer == target ? CGPoint(x: -1, y: -1) : pointer, viaShortcut: true)
     }
 
-    /// fn C (#179): Control Center hears its shortcut and opens nothing while
-    /// a hide assertion is held, yet a press on its icon goes through. With
-    /// none held (live mode) macOS opens it, and a press would close it again.
+    /// fn C (#179), on its key-up: Control Center hears its shortcut and opens
+    /// nothing while a hide assertion is held, yet a press on its icon goes
+    /// through. It still closes on that key-up, so an open panel is left to
+    /// it, and a press would only open it again. With no assertion held
+    /// (live mode) macOS does both itself.
     private func openControlCenter() {
         Task {
             guard await engine.holdsAssertion else { return }
+            if Self.controlCenterIsOpen() {
+                PelmetLog.log("hotkey: fn C → Control Center is open, macOS closes it")
+                return
+            }
             let display = CGEvent(source: nil).flatMap { ClockClickRelay.display(under: $0.location) }
             PelmetLog.log("hotkey: fn C → Control Center, refused while icons are hidden")
             openItemMenu(ItemID(rawValue: "status:\(PelmetBundle.agentID)::com.apple.menuextra.controlcenter"), display: display)
+        }
+    }
+
+    /// Control Center's panel is up: a window of its own taller than the
+    /// bar (its icon's windows are bar-height).
+    private static func controlCenterIsOpen() -> Bool {
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return windows.contains { window in
+            guard let pid = window[kCGWindowOwnerPID as String] as? pid_t,
+                  NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "com.apple.controlcenter",
+                  let bounds = window[kCGWindowBounds as String] as? [String: Any] else { return false }
+            return (bounds["Height"] as? Double ?? 0) > 100
         }
     }
 

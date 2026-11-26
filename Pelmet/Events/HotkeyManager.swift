@@ -78,12 +78,18 @@ final class HotkeyManager {
         }
     }
 
+    /// Fire when the key comes up, not down. Control Center closes on its
+    /// shortcut's key-up even while it refuses to open: pressed on key-down,
+    /// its panel opened ~230ms in and shut again as a finger held past that
+    /// let go, 8 of 8 holds from 250ms (#179, 2026-11-25).
+    private static let onRelease: Set<Slot> = [.controlCenter]
+
     private func installHandlerIfNeeded() {
         guard handlerRef == nil else { return }
-        var eventType = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
+        var eventTypes = [
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)),
+        ]
         let selfPointer = Unmanaged.passUnretained(self).toOpaque()
         InstallEventHandler(
             GetApplicationEventTarget(),
@@ -96,15 +102,17 @@ final class HotkeyManager {
                 )
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
                 let id = hotKeyID.id
+                let released = GetEventKind(event) == UInt32(kEventHotKeyReleased)
                 if let slot = Slot(rawValue: id) {
+                    guard released == HotkeyManager.onRelease.contains(slot) else { return noErr }
                     DispatchQueue.main.async { manager.onTrigger(slot) }
-                } else if id >= HotkeyManager.itemSlotBase {
+                } else if id >= HotkeyManager.itemSlotBase, !released {
                     DispatchQueue.main.async { manager.onItemTrigger?(id) }
                 }
                 return noErr
             },
-            1,
-            &eventType,
+            eventTypes.count,
+            &eventTypes,
             selfPointer,
             &handlerRef
         )
