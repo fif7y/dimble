@@ -10847,6 +10847,64 @@
         }
       }
     },
+    "File": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Datei"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fichier"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファイル"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arquivo"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Файл"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件"
+          }
+        }
+      }
+    },
     "Filter actions": {
       "localizations": {
         "de": {
@@ -26855,60 +26913,60 @@
         }
       }
     },
-    "That isn't a menu bar layout. Use the text Get Menu Bar Layout gives back.": {
+    "That isn't a menu bar layout. Use what Get Menu Bar Layout gives back, as text or a file.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Das ist kein Menüleisten-Layout. Nimm den Text, den „Menüleisten-Layout abrufen“ zurückgibt."
+            "value": "Das ist kein Menüleisten-Layout. Nimm, was „Menüleisten-Layout abrufen“ zurückgibt, als Text oder als Datei."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Eso no es una disposición de la barra de menús. Usa el texto que devuelve «Obtener la disposición de la barra de menús»."
+            "value": "Eso no es una disposición de la barra de menús. Usa lo que devuelve «Obtener la disposición de la barra de menús», como texto o como archivo."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce n’est pas une disposition de barre des menus. Utilisez le texte que renvoie « Obtenir la disposition de la barre des menus »."
+            "value": "Ce n’est pas une disposition de barre des menus. Utilisez ce que renvoie « Obtenir la disposition de la barre des menus », en texte ou en fichier."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Questa non è una disposizione della barra dei menu. Usa il testo che restituisce «Ottieni la disposizione della barra dei menu»."
+            "value": "Questa non è una disposizione della barra dei menu. Usa ciò che restituisce «Ottieni la disposizione della barra dei menu», come testo o come file."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "メニューバーのレイアウトではありません。「メニューバーのレイアウトを取得」が返すテキストを使ってください。"
+            "value": "メニューバーのレイアウトではありません。「メニューバーのレイアウトを取得」が返す内容を、テキストまたはファイルで使ってください。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "메뉴 막대 레이아웃이 아닙니다. ‘메뉴 막대 레이아웃 가져오기’가 돌려주는 텍스트를 사용하세요."
+            "value": "메뉴 막대 레이아웃이 아닙니다. ‘메뉴 막대 레이아웃 가져오기’가 돌려주는 내용을 텍스트나 파일로 사용하세요."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Isso não é uma disposição da barra de menus. Use o texto que “Obter a disposição da barra de menus” devolve."
+            "value": "Isso não é uma disposição da barra de menus. Use o que “Obter a disposição da barra de menus” devolve, como texto ou arquivo."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Это не раскладка строки меню. Используйте текст, который возвращает «Получить раскладку строки меню»."
+            "value": "Это не раскладка строки меню. Используйте то, что возвращает «Получить раскладку строки меню», в виде текста или файла."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这不是菜单栏布局。请使用“获取菜单栏布局”返回的文本。"
+            "value": "这不是菜单栏布局。请使用“获取菜单栏布局”返回的内容，以文本或文件形式提供。"
           }
         }
       }

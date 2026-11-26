@@ -338,7 +338,7 @@ enum AutomationError: Error, CustomLocalizedStringResourceConvertible, CustomStr
         case .notInSection: "The icon to put it next to is in another section."
         case .nextToItself: "An icon can't go next to itself."
         case .noSeparator: "There's no separator there."
-        case .notALayout: "That isn't a menu bar layout. Use the text Get Menu Bar Layout gives back."
+        case .notALayout: "That isn't a menu bar layout. Use what Get Menu Bar Layout gives back, as text or a file."
         case .newerLayout: "That layout is from a newer Dimble. Update Dimble to use it."
         case .editsWaiting: "Settings › Menu Bar has changes waiting. Press Apply there first."
         case .busy: "Dimble is moving icons. Try again in a moment."

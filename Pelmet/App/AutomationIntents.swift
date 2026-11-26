@@ -6,6 +6,7 @@
 import AppIntents
 import PelmetCore
 import PelmetEngine
+import UniformTypeIdentifiers
 
 nonisolated enum MenuBarSectionAppEnum: String, AppEnum {
     case visible, hidden, alwaysHidden
@@ -260,20 +261,27 @@ struct SearchMenuBarIntent: AppIntent {
 struct SetMenuBarLayoutIntent: AppIntent {
     static var title: LocalizedStringResource { "Set Menu Bar Layout" }
     static var description: IntentDescription {
-        IntentDescription("Puts the icons where a layout from Get Menu Bar Layout has them. Icons it leaves out stay in their section. Gives back the icons it names that aren't in the menu bar.")
+        IntentDescription("Puts the icons where a layout from Get Menu Bar Layout has them, given as text or as a file. Icons it leaves out stay in their section. Gives back the icons it names that aren't in the menu bar.")
     }
 
-    @Parameter(title: "Layout", inputOptions: String.IntentInputOptions(multiline: true)) var layout: String
+    // Optional since the file came along (#169): a saved layout goes in as
+    // it is, no Get Text step. Shortcuts made with the text one keep it.
+    @Parameter(title: "Layout", inputOptions: String.IntentInputOptions(multiline: true)) var layout: String?
+    @Parameter(title: "File", supportedContentTypes: [.json, .plainText]) var file: IntentFile?
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Set the menu bar layout to \(\.$layout)")
+        Summary("Set the menu bar layout to \(\.$layout)") { \.$file }
     }
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<[String]> {
         let appState = try await Automation.ready()
-        PelmetLog.log("action: set layout")
-        return .result(value: try await Automation.setLayout(layout, appState: appState))
+        let typed = layout.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        PelmetLog.log("action: set layout\(typed == nil && file != nil ? " from a file" : "")")
+        guard let text = typed ?? file.flatMap({ String(data: $0.data, encoding: .utf8) }) else {
+            throw AutomationError.notALayout
+        }
+        return .result(value: try await Automation.setLayout(text, appState: appState))
     }
 }
 
