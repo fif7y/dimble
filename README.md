@@ -140,7 +140,7 @@ Activities brings it back if you want it.
 Dimble has twelve Shortcuts actions. Get Menu Bar Layout gives back your whole
 layout as text (JSON). Set Menu Bar Layout puts every icon where that text says,
 in one go. Keep the text in a file to bring the layout back later, or on another
-Mac. You get a list of the icons it couldn't find. New in 1.0.0.
+Mac. You get a list of the icons it couldn't find. New in 0.4.1.
 
 - **Move things.** Move an icon to a section or right after another one, and add
   or remove a separator. Dimble drags the real icons, so leave the mouse alone
